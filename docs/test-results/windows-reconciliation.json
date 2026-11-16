@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "client": "Installed Windows Electron 45.3.2",
+  "timestamp": "2026-11-16T05:57:04.816Z",
+  "separateDevices": [
+    "device-8a241a40-e65f-4bc8-87e5-3fc17e2b1624",
+    "device-c2ca7765-b815-4e0d-8fd8-00164f4bd526"
+  ],
+  "conflictId": "conflict-2412fbe9-0f89-4b75-8348-6c0a0745fc53",
+  "invoiceIds": [
+    "invoice-74155ec3-a742-4601-b261-5f3d5374d33d",
+    "invoice-eefafd30-0598-4dfc-ab39-65450952a382"
+  ],
+  "checks": [
+    "Two enrolled counters concurrently submitted last unit: one accepted, one pending conflict",
+    "Installed manager UI accepted conflict with recorded reason",
+    "Accepted row no longer offered Resolve",
+    "Manager audit row visible and recorded once",
+    "Exactly two invoices and stock -1 after explicit manager oversell acceptance",
+    "Sync replay and resolution retry created no new invoice, stock deduction, ledger entry or audit event"
+  ]
+}

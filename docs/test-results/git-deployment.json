@@ -1,0 +1,26 @@
+{
+  "passed": true,
+  "testedOn": "2026-11-16",
+  "input": "Clean normalized staged publication tree: 211 files, extracted without apps/web/out or node_modules and initialized as an isolated local Git fixture",
+  "environment": "Ubuntu24.04 under WSL2, Docker29.1.3, Node22 inside disposable Docker containers",
+  "checks": [
+    "Bash syntax and ShellCheck passed for frontend builder, Git wrapper and staging scripts",
+    "Dirty source clone rejected before build",
+    "Unexpected origin rejected before build or pull",
+    "Detached branch rejected before build",
+    "Frontend npm ci installed37 packages from the committed lockfile inside Docker",
+    "Next.js production compilation and static export completed;40 output files including offline service worker created",
+    "Builder mounted source read-only and only its temporary output directory writable; memory2GiB and CPU1.5 limits applied",
+    "No host root/web node_modules directories were created",
+    "Git status remained clean after generated export",
+    "API Docker npm ci and TypeScript production compilation passed from the same clean source",
+    "Immutable release ID included version, UTC time and12-character source SHA; full source commit recorded in release",
+    "Staging did not activate a release or change running services",
+    "Every pre-existing container retained its identity; API4000, API4002 and production rehearsal18400 remained healthy"
+  ],
+  "limits": [
+    "The fixture used the expected public origin string and a local origin/main reference before repository publication; this did not claim to fetch unpublished GitHub content",
+    "Actual public clone/pull verification follows repository publication",
+    "No commands were executed on the public VPS"
+  ]
+}

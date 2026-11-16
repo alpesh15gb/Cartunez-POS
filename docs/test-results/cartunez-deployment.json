@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "testedOn": "2026-11-16",
+  "scope": "Local shared-host rehearsal; actual VPS deployment remains user-run",
+  "environment": {
+    "os": "Ubuntu 24.04 under WSL2",
+    "docker": "29.1.3",
+    "compose": "2.40.3",
+    "nginx": "1.24.0",
+    "postgres": "17.12",
+    "node": "22",
+    "release": "1.1.0",
+    "project": "cartunezverify",
+    "apiPort": 18400,
+    "existingProjectPreserved": "motorline on API4000"
+  },
+  "checks": [
+    "Bash syntax, Python AST and ShellCheck passed for all deployment scripts",
+    "Configuration generated private 0600 files without printing secrets and refused overwrite",
+    "Root-private configuration permission enforcement rejected a 0644 copy",
+    "Production bootstrap authenticated generated owner and contained zero demo products",
+    "Owner password rotation and fresh login passed; finish-bootstrap removed its original credential file/config value and recreated only the API with an empty bootstrap password while preserving authentication",
+    "Dedicated Compose project used a private PostgreSQL volume and no published database port",
+    "API bound only to 127.0.0.1:18400 with oneCPU, readonly root filesystem and bounded logs; final memory cap increased to768MiB after the bounded capacity check",
+    "PostgreSQL used 768MiB memory, oneCPU and bounded logs",
+    "Immutable release staged with exact API/PostgreSQL image IDs and public installation defaults",
+    "Version1.1.0 API acceptance.test.ts and production.test.ts passed against an empty real PostgreSQL database",
+    "Consistent custom-format backup checksum and metadata were created with restricted permissions",
+    "Isolated restore drill restored the backup and started its matching API successfully, then removed only disposable drill resources",
+    "Corrupt dump rejected before restore; checksum verification also passed after moving/renaming the backup set",
+    "Upgrade preserved exact business-record content hash",
+    "Matching database rollback restored the exact original content hash and removed a deliberate post-backup fixture",
+    "Wrong-release rollback and immutable release reuse were rejected before destructive actions",
+    "Dedicated systemd backup unit ran successfully with ExecMainStatus0; nightly timer scheduled",
+    "Dedicated HTTP ACME challenge path served successfully",
+    "Dedicated HTTPS page, API and installation.json served with an explicitly trusted local test certificate",
+    "All pre-existing Nginx files retained identical SHA256 hashes",
+    "Existing application API4000 remained healthy after deploy, restore drill, upgrade, rollback and Nginx changes",
+    "Final API container memory limit verified as805306368 bytes (768MiB); dedicated Nginx response returned Content-Encoding:gzip; all other Nginx files remained hash-identical"
+  ],
+  "limits": [
+    "No SSH deployment or public TLS certificate issuance was performed by these local tests",
+    "Domain DNS was saved and independently verified by the parent workflow; actual public HTTP challenge and certificate must be verified on the VPS",
+    "Offsite backup destination, operator alerts, live payment provider settlement and physical printer/camera acceptance require retailer infrastructure"
+  ]
+}

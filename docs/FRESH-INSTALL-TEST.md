@@ -1,0 +1,13 @@
+# Isolated fresh-production acceptance
+
+`tests/fresh-install-acceptance.cjs` verifies a new installation against real PostgreSQL and the actual exported web interface. It does not use the seeded demo database. The test creates a unique database, starts the compiled API in production mode with `SEED_DEMO=false`, serves the web export separately, drives Edge, then stops its processes and drops only its own database.
+
+Prerequisites: dependencies installed, current API compiled, current Next.js export in `apps/web/out`, Node.js 22+, and a Chromium browser. `BROWSER_PATH` overrides the Windows Edge default. Ports 4011 and 3011 must be free. Use a dedicated local PostgreSQL instance on `127.0.0.1:5441` with an administrative database named `freshqa_admin` and permission to create/drop test databases. The test deliberately rejects other host/port/database combinations.
+
+Supply that isolated connection URL through the local `TEST_POSTGRES_URL` environment variable, without logging it or committing credentials. From the source root run `node tests/fresh-install-acceptance.cjs`. `TEST_OUTPUT` can override the default `docs/test-results` evidence directory. The helper creates random temporary owner/JWT credentials in process memory and never writes them to the result files.
+
+The scenario checks empty first-owner bootstrap, absent demo login, configured business and branch details, an initial non-default currency, branch/bin/supplier/part creation, purchase receipt, open shift, tax-exclusive and tax-inclusive invoices, manual UPI pending/reference confirmation, old receipt identity preservation, owner session revocation after password change, and persistence after API restart. All catalog, addresses, tax identifiers, and payment references in the scenario are fictional fixtures. The test does not certify a jurisdiction's tax compliance or a payment gateway integration.
+
+Successful evidence is `fresh-production.json` and `fresh-production-receipt.png`. Failure screenshots, when present, are diagnostic and should not be presented as a passing result. The browser profile, credentials, and test database are not deliverables.
+
+`node tests/fresh-gst-ui.cjs` uses the same isolated environment guard for a separate INR installation. It configures a fictional GST profile and scheme in Settings, checks required place of supply, verifies CGST 9 plus SGST 9 for state 27 and IGST 18 for state 29 on a 100.00 item, and checks unchanged receipt/reprint snapshots after later settings edits. Results are `fresh-gst-ui.json` and the two `fresh-gst-*.png` receipt screenshots. These are synthetic transaction tests, not verification of a real GST registration.

@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "testedOn": "2026-11-16",
+  "source": "Disposable copy of Git publication candidates without dependencies or generated native assets",
+  "commands": [
+    "npm ci --workspace @motorline/android --include-workspace-root --ignore-scripts --no-audit --no-fund",
+    "npm run sync --workspace @motorline/android",
+    "gradlew.bat --no-daemon :app:compileDebugAndroidTestJavaWithJavac"
+  ],
+  "packagesInstalled": 101,
+  "requiredSourceInputsPresent": [
+    "Gradle wrapper JAR and both launchers",
+    "Capacitor configuration and native plugin sources",
+    "Root workspace lockfile",
+    "Desktop build/icon.ico"
+  ],
+  "regenerated": [
+    "Capacitor Cordova support project",
+    "Native app Capacitor configuration",
+    "Native public asset directory"
+  ],
+  "nativeCompile": {
+    "passed": true,
+    "gradleTasksExecuted": 54,
+    "scope": "App and Android instrumentation-test Java sources",
+    "templatePackageAssertionCorrected": true,
+    "apkInstalled": false
+  },
+  "limitation": "A minimal disposable web HTML fixture was used to test native sync. This check does not claim new complete APK packaging or UI acceptance."
+}

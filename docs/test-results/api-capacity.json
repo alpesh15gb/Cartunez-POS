@@ -1,0 +1,97 @@
+{
+  "release": "1.1.0",
+  "passed": true,
+  "createdAt": "2026-11-16T05:53:37.651Z",
+  "environment": {
+    "node": "v22.23.5",
+    "platform": "win32",
+    "architecture": "x64",
+    "cpu": "12th Gen Intel(R) Core(TM) i5-12400",
+    "totalHostMemoryGiB": 24,
+    "database": "Dedicated local PostgreSQL 17 container, localhost TCP, isolated disposable database",
+    "transport": "Fastify inject in same Node process; no TLS, browser rendering or public-network latency"
+  },
+  "fixture": {
+    "products": 10000,
+    "stockRows": 10000,
+    "openingLedgerRows": 10000,
+    "invoiceFixtureRows": 1000,
+    "saleLedgerRows": 1000,
+    "auditFixtureRows": 1000,
+    "finalizedApiSales": 40,
+    "finalInvoices": 1040,
+    "finalStock": 998960
+  },
+  "coldBootstrap": {
+    "milliseconds": 365,
+    "uncompressedBytes": 9698845
+  },
+  "measurements": [
+    {
+      "name": "bootstrap existing snapshot",
+      "samples": 20,
+      "concurrency": 1,
+      "p50Ms": 293,
+      "p95Ms": 344,
+      "maxMs": 352,
+      "wallMs": 6033
+    },
+    {
+      "name": "bootstrap existing snapshot",
+      "samples": 20,
+      "concurrency": 4,
+      "p50Ms": 793,
+      "p95Ms": 1042,
+      "maxMs": 1131,
+      "wallMs": 4363
+    },
+    {
+      "name": "finalize sale",
+      "samples": 20,
+      "concurrency": 1,
+      "p50Ms": 24,
+      "p95Ms": 29,
+      "maxMs": 38,
+      "wallMs": 494
+    },
+    {
+      "name": "finalize sale",
+      "samples": 20,
+      "concurrency": 4,
+      "p50Ms": 88,
+      "p95Ms": 397,
+      "maxMs": 398,
+      "wallMs": 753
+    },
+    {
+      "name": "sales report",
+      "samples": 20,
+      "concurrency": 4,
+      "p50Ms": 324,
+      "p95Ms": 363,
+      "maxMs": 366,
+      "wallMs": 1661
+    },
+    {
+      "name": "stock valuation report",
+      "samples": 12,
+      "concurrency": 4,
+      "p50Ms": 2600,
+      "p95Ms": 2974,
+      "maxMs": 2974,
+      "wallMs": 7757
+    }
+  ],
+  "peakSampledProcessRssMiB": 516,
+  "processMemoryAfterGC": {
+    "rssMiB": 439,
+    "heapUsedMiB": 74
+  },
+  "limits": [
+    "Fixture invoices were bulk inserted as equivalent immutable records, not timed API requests. Forty additional sales exercised real transaction and stock logic.",
+    "Small bounded sample, one local host; not a throughput guarantee or arbitrary-scale certification.",
+    "Bootstrap includes all authorized catalog and historical invoices/audit, with unbounded response size; pagination and incremental synchronization are not implemented.",
+    "Fastify injection excludes network and client rendering costs. Process RSS is sampled, not a guaranteed allocator peak."
+  ],
+  "cleanup": "Isolated capacity database dropped in finally; existing QA/demo/production databases untouched"
+}

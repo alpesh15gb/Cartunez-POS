@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "environment": "Installed Android API 36 app; shared PostgreSQL API",
+  "apkSha256": "E8D0AF0B2DCCE0102A34DDD40B1D07FE0115A8459B04482CF19C591399C401B4",
+  "fixtureSubmission": "API submits two concurrent offline transactions from separately enrolled devices using one cached catalog revision",
+  "managerResolution": "Actual installed Android Reconciliation screen, decision and reason form, accepted status and audit row",
+  "productId": "part-5ad82fbd-5cac-4546-9666-68ba88f8970f",
+  "conflictId": "conflict-d6b28369-0ecb-4d50-b5af-02c0d4f285dd",
+  "transactions": [
+    {
+      "transactionId": "33aea316-0204-435e-984d-9d29f3f4f74b",
+      "invoiceId": "invoice-59828714-8eb4-4cb0-940c-28e30bc68c71",
+      "invoiceNumber": 112060
+    },
+    {
+      "transactionId": "4e30337c-293f-4910-b8a7-41e59e2dc274",
+      "invoiceId": "invoice-cad5bf0a-c399-41bf-b1d8-c13bca6106e3",
+      "invoiceNumber": 112070
+    }
+  ],
+  "concurrentOutcomes": [
+    "accepted",
+    "conflict"
+  ],
+  "stockBefore": 1,
+  "stockBeforeResolution": 0,
+  "stockAfterResolutionAndReplay": -1,
+  "invoiceCountPerTransaction": [
+    1,
+    1
+  ],
+  "resolutionAuditCount": 1,
+  "replayIdempotency": true
+}

@@ -1,0 +1,300 @@
+{
+  "base": "http://127.0.0.1:4000/api/v1",
+  "seed": {
+    "organizationId": "demo",
+    "branchIds": ["pune", "mumbai"],
+    "password": "MotorlineDemo123!",
+    "emails": [
+      "owner@motorline.local",
+      "manager@motorline.local",
+      "cashier@motorline.local",
+      "inventory@motorline.local"
+    ]
+  },
+  "money": "all amounts integer minor units in a configured two-decimal currency; taxRate basis points 1800=18%; allocated discount then exclusive tax=round(net*rate/10000), inclusive tax=net-round(net*10000/(10000+rate)); core charges separate; invoice rounding applied last",
+  "bootstrap": "organization,branch,branches,user,users(owner-only sanitized),products,vehicles,locations,stock,customers,suppliers,purchaseOrders,invoices,returns,shifts,holds,transfers,warrantyClaims,coreReturns,conflicts,devices,audit,settings,lastSync,catalogRevision",
+  "POST /settings": {
+    "business": {
+      "legalName": "Configured legal name",
+      "tradingName": "Configured shop name",
+      "address": "Street\nCity",
+      "taxRegistrationId": "",
+      "stateCode": "",
+      "phone": "",
+      "email": ""
+    },
+    "branchName": "Configured branch name",
+    "branchAddress": "Street\nCity",
+    "branchStateCode": "",
+    "currency": "INR",
+    "invoicePrefix": "INV",
+    "creditNotePrefix": "CR",
+    "nextInvoice": 1,
+    "taxDisplayName": "Tax",
+    "taxMode": "exclusive",
+    "taxScheme": "general",
+    "localTaxName": "SGST",
+    "receiptFooter": "Configured receipt footer",
+    "tenderTypes": ["Cash", "Card", "UPI"],
+    "taxRates": [0, 1800],
+    "roundingIncrement": 1,
+    "sessionHours": 8,
+    "offlineHours": 24,
+    "offlineTenders": ["Cash"],
+    "cashierDiscountLimit": 0
+  },
+  "POST /branches": {
+    "id": "main",
+    "name": "Configured branch",
+    "address": "Street\nCity",
+    "stateCode": ""
+  },
+  "POST /users": {
+    "id": "optional existing user id",
+    "name": "Staff member",
+    "email": "person@example.test",
+    "password": "Required when creating; minimum 12 characters",
+    "role": "cashier",
+    "branchIds": ["main"],
+    "active": true
+  },
+  "invoice receipt profile": "business,branch{id,name,address,stateCode},currency,taxMode,taxScheme,taxDisplayName,localTaxName,receiptFooter,customer,placeOfSupply,taxComponents[{name,amount}]; each line freezes hsnSac,unit,taxComponents[{name,rate,amount}]; credits preserve original invoice profile, invoiceNumber and invoiceDate",
+  "product": {
+    "id": "oil",
+    "sku": "ML-OIL-01",
+    "name": "Synthetic Engine Oil",
+    "brand": "Motorline Demo",
+    "partNumber": "ML 500-01",
+    "oemReferences": ["OEM-001"],
+    "barcodes": ["890000000001"],
+    "description": "Fictional demo",
+    "category": "Fluids",
+    "unit": "Each",
+    "packSize": 1,
+    "supplierId": "supplier-1",
+    "supplierReferences": [],
+    "cost": 15000,
+    "retailPrice": 25000,
+    "wholesalePrice": 22000,
+    "taxRate": 1800,
+    "taxCategory": "Standard",
+    "reorderLevel": 5,
+    "serialTracked": false,
+    "coreCharge": 0,
+    "universal": true,
+    "alternatives": [],
+    "supersedes": [],
+    "interchanges": [],
+    "icon": "oil",
+    "fitments": []
+  },
+  "fitment": {
+    "id": "fit-1",
+    "productId": "filter",
+    "make": "Maruti Suzuki",
+    "model": "Swift",
+    "yearFrom": 2018,
+    "yearTo": 2024,
+    "engine": "1.2L",
+    "fuel": "Petrol",
+    "trim": "",
+    "drivetrain": "",
+    "market": "",
+    "exclusions": [],
+    "source": "Fictional demo",
+    "effectiveFrom": "2020-01-01",
+    "effectiveTo": null
+  },
+  "vehicle": {
+    "id": "swift",
+    "make": "Maruti Suzuki",
+    "model": "Swift",
+    "year": 2022,
+    "engine": "1.2L",
+    "fuel": "Petrol"
+  },
+  "location": {
+    "id": "bin-a1",
+    "branchId": "pune",
+    "area": "Main store",
+    "rack": "A",
+    "shelf": "1",
+    "bin": "01",
+    "kind": "sellable"
+  },
+  "stock": {
+    "productId": "filter",
+    "binId": "bin-a1",
+    "quantity": 10,
+    "reserved": 0,
+    "available": 10
+  },
+  "POST /products": "product shape; omit id to create; include id to edit",
+  "POST /locations": "location shape; omit id to create",
+  "POST /customers": {
+    "name": "Customer",
+    "phone": "9000000000",
+    "email": "",
+    "address": "",
+    "stateCode": "",
+    "taxRegistrationId": "",
+    "vehicle": null
+  },
+  "POST /suppliers": {
+    "name": "Supplier",
+    "phone": "9000000000",
+    "email": "",
+    "address": "",
+    "stateCode": "",
+    "taxRegistrationId": ""
+  },
+  "POST /inventory/move": {
+    "productId": "filter",
+    "fromBinId": "bin-a1",
+    "toBinId": "bin-a2",
+    "quantity": 2,
+    "reason": "Shelf move"
+  },
+  "POST /inventory/adjust": {
+    "productId": "filter",
+    "binId": "bin-a1",
+    "quantity": 2,
+    "reason": "Opening balance",
+    "approvalId": "optional for inventory role"
+  },
+  "POST /inventory/count": {
+    "productId": "filter",
+    "binId": "bin-a1",
+    "counted": 10,
+    "reason": "Stock count"
+  },
+  "POST /purchase-orders": {
+    "supplierId": "supplier-1",
+    "lines": [{ "productId": "filter", "quantity": 10, "cost": 15000 }]
+  },
+  "POST /purchase-orders/:id/receive": {
+    "transactionId": "uuid",
+    "landedCost": 1000,
+    "lines": [
+      { "productId": "filter", "quantity": 3, "binId": "bin-a1", "serials": [] }
+    ]
+  },
+  "POST /shifts/open": { "openingCash": 100000 },
+  "POST /shifts/:id/close": { "countedCash": 100000, "reason": "End of shift" },
+  "POST /approvals": {
+    "action": "fitment|discount|return|adjustment",
+    "reason": "Manager approval",
+    "transactionId": "uuid"
+  },
+  "POST /invoices": {
+    "transactionId": "uuid",
+    "deviceId": "enrolled device id for offline",
+    "catalogRevision": "bootstrap hash for offline",
+    "invoiceNumber": 10000,
+    "offline": false,
+    "occurredAt": "iso datetime for offline",
+    "customerId": "optional",
+    "placeOfSupply": "two-digit domestic state code in india-gst mode; optional text in general mode",
+    "shiftId": "shift-id",
+    "vehicle": {
+      "make": "Maruti Suzuki",
+      "model": "Swift",
+      "year": 2022,
+      "engine": "1.2L",
+      "fuel": "Petrol"
+    },
+    "priceLevel": "retail",
+    "discount": 0,
+    "discountReason": "optional",
+    "lines": [
+      {
+        "productId": "filter",
+        "qty": 1,
+        "binId": "bin-a1",
+        "serials": [],
+        "overrideReason": "optional"
+      }
+    ],
+    "tenders": [
+      { "type": "Cash", "amount": 29500, "confirmed": true, "reference": "" }
+    ],
+    "approvalId": "optional",
+    "discountApprovalId": "optional"
+  },
+  "POST /holds": {
+    "id": "optional existing hold id",
+    "cart": "same fields as invoice; transactionId included"
+  },
+  "DELETE /holds/:id": "releases stock reservation",
+  "POST /invoices/:id/returns": {
+    "transactionId": "uuid",
+    "reason": "Wrong part",
+    "condition": "sellable|damaged|warranty",
+    "lines": [
+      {
+        "lineId": "original-line-id",
+        "quantity": 1,
+        "binId": "bin-a1",
+        "serials": []
+      }
+    ],
+    "refundType": "Cash",
+    "approvalId": "optional"
+  },
+  "POST /invoices/:id/void": {
+    "transactionId": "uuid",
+    "reason": "Error",
+    "refundType": "Cash"
+  },
+  "POST /devices/enroll": {
+    "name": "Counter 1",
+    "offlineAllowed": true,
+    "offlineHours": 24,
+    "tenders": ["Cash"],
+    "rangeSize": 1000
+  },
+  "POST /sync": {
+    "deviceId": "device-id",
+    "transactions": ["same invoice body with offline=true"]
+  },
+  "POST /conflicts/:id/resolve": {
+    "action": "accept|reject",
+    "reason": "Physical stock confirmed; accept allows negative stock with audit"
+  },
+  "POST /transfers": {
+    "destinationBranchId": "mumbai",
+    "lines": [{ "productId": "filter", "quantity": 2, "binId": "bin-a1" }],
+    "reason": "Rebalance"
+  },
+  "POST /transfers/:id/receive": {
+    "lines": [{ "productId": "filter", "quantity": 2, "binId": "mumbai-a1" }]
+  },
+  "POST /warranty-claims": {
+    "returnId": "return-id",
+    "supplierId": "supplier-1",
+    "reason": "Defect",
+    "status": "open"
+  },
+  "POST /core-returns": {
+    "transactionId": "uuid",
+    "invoiceId": "invoice-id",
+    "productId": "battery",
+    "quantity": 1,
+    "reason": "Old core returned",
+    "refundType": "Cash"
+  },
+  "GET /reports/:name": "sales,returns,discounts,margin,shifts,tenders,valuation,stock-by-bin,stock-movement,low-stock,fast-moving,slow-moving,aging,purchase-receipts,tax,warranty,cores,fitment; filters dateFrom/dateTo/branchId/cashier/category/supplierId/sku/paymentType; format=csv",
+  "GET /reports/:name response": {
+    "name": "report name",
+    "rows": [],
+    "totals": {},
+    "generatedAt": "iso"
+  },
+  "POST /fitments/import/preview": {
+    "csv": "productId,make,model,yearFrom,yearTo,engine,fuel,source\nfilter,Maruti Suzuki,Swift,2018,2024,1.2L,Petrol,Manual"
+  },
+  "POST /fitments/import": {
+    "csv": "same csv",
+    "duplicateHandling": "skip|replace"
+  }
+}

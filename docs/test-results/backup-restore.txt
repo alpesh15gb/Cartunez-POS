@@ -1,0 +1,5 @@
+PASS records exact rows and content checksum 69|69c7d05770d44e96477a6a630c76320f
+PASS stock exact rows and content checksum 26|09b8bf5ac45a466ab02fe5fb9f9061d1
+PASS stock_ledger exact rows and content checksum 33|de03edb6390f876625971a3fdf510936
+PASS transactions exact rows and content checksum 8|2e90bca5940619a86bed2299f70b0dcc
+PASS schema_migrations exact rows and content checksum 1|60ee7755d29910035531f950c249959f

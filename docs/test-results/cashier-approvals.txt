@@ -1,0 +1,1 @@
+PASS configurable cashier discount allowance and manager-approved invoice return through actual browser UI.

@@ -1,0 +1,19 @@
+{
+  "version": "1.1.0",
+  "packagedFilesMatch": true,
+  "webFiles": 40,
+  "installerSha256": "08bbaf6f06a40e0fac6df94461a4943979c7313320c076ef3407705885c4bba8",
+  "runtime": "Electron 45.3.2",
+  "verificationMode": "Extracted exact NSIS application payload into a new directory and ran isolated profiles",
+  "installerExecuted": false,
+  "installerExecutionDeferredReason": "Same-appId upgrade may close or uninstall the user current1.0 application; its process/profile/registry were not modified",
+  "priorInstallerMechanism": "Version1.0 NSIS installation previously passed",
+  "smokeExit": 0,
+  "sqliteRestartVerified": true,
+  "productionDefaultApi": "https://pos.cartunez.in/api/v1",
+  "organizationAndBranchEditableBlank": true,
+  "coreOfflineRestartReplayPassed": true,
+  "managerReconciliationPassed": true,
+  "retailOperationsPassed": true,
+  "api": "Dedicated demo4002 running final1.1.0 against PostgreSQL"
+}

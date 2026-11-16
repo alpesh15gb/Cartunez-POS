@@ -1,0 +1,1 @@
+PASS installed Windows real PostgreSQL API: sign-in, shift, create part, purchase order/partial two-bin receipt, bin stock and move, scan, pick, checkout/receipt, invoice return to damaged bin, enrollment, offline checkout/reload, sync, incompatible/unverified fitment, report.

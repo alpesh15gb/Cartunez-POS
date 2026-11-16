@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "environment": "Fresh isolated production PostgreSQL, real Edge UI, fictional INR GST fixtures",
+  "businessAndTaxConfiguredInUi": true,
+  "requiredPlaceOfSupply": true,
+  "hsn": "8708",
+  "retailPrice": 10000,
+  "taxRateBasisPoints": 1800,
+  "sameState": {
+    "state": "27",
+    "total": 11800,
+    "components": [
+      {
+        "name": "CGST",
+        "amount": 900
+      },
+      {
+        "name": "SGST",
+        "amount": 900
+      }
+    ]
+  },
+  "interstate": {
+    "state": "29",
+    "total": 11800,
+    "components": [
+      {
+        "name": "IGST",
+        "amount": 1800
+      }
+    ]
+  },
+  "historicalReceiptSnapshotsAfterSettingsChange": true,
+  "finalStock": 1,
+  "pageErrors": []
+}

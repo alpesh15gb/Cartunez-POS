@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "artifact": "release/android/Motorline-1.1.0-release.apk",
+  "sha256": "E1D53D2FE74A9B215453D62929F9A91EB87BD11DCAFB826F0BD54A363FAC6D88",
+  "test": "tests/android-bridge.cjs",
+  "environment": "Actual installed release-signed APK on Android API 36 userdebug emulator; OS-provided WebView inspection used without changing APK settings",
+  "checks": [
+    "Native SQLite read, write and removal",
+    "Separate scoped keys",
+    "3 MiB plus Unicode round trip beyond CursorWindow size",
+    "Pending transaction fixture survives force-stop and restart"
+  ],
+  "fixtureCleanedUp": true,
+  "authenticatedUserDataCreated": false
+}

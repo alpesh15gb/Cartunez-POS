@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "concurrentDevices": 2,
+  "initialQuantity": 1,
+  "initialOutcomes": [
+    "accepted",
+    "conflict"
+  ],
+  "managerDecisionThroughBrowser": "accepted",
+  "resolvedActionHidden": true,
+  "finalQuantity": -1,
+  "invoicesPerTransaction": 1,
+  "resolutionAuditEntries": 1
+}

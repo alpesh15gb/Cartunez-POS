@@ -1,0 +1,70 @@
+name: ${CARTUNEZ_PROJECT:-cartunezpos}
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cartunezpos}
+      POSTGRES_USER: ${POSTGRES_USER:-cartunezpos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Load private host configuration}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [database]
+    shm_size: 128m
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 150
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: [no-new-privileges:true]
+  api:
+    image: ${API_IMAGE:?Stage an immutable release first}
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cartunezpos}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cartunezpos}
+      JWT_SECRET: ${JWT_SECRET:?Load private host configuration}
+      CORS_ORIGINS: https://${DOMAIN:-pos.cartunez.in},motorline://app,https://localhost
+      TRUST_PROXY_HOPS: 1
+      SEED_DEMO: "false"
+      BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:?Configure owner email}
+      BOOTSTRAP_OWNER_PASSWORD: ${BOOTSTRAP_OWNER_PASSWORD:-}
+      BOOTSTRAP_OWNER_NAME: ${BOOTSTRAP_OWNER_NAME:?Configure owner name}
+      BOOTSTRAP_ORG_ID: ${BOOTSTRAP_ORG_ID:?Configure organization code}
+      BOOTSTRAP_ORG_NAME: ${BOOTSTRAP_ORG_NAME:?Configure business name}
+      BOOTSTRAP_BRANCH_ID: ${BOOTSTRAP_BRANCH_ID:?Configure branch code}
+      BOOTSTRAP_BRANCH_NAME: ${BOOTSTRAP_BRANCH_NAME:?Configure branch name}
+      BOOTSTRAP_CURRENCY: ${BOOTSTRAP_CURRENCY:?Configure ISO currency}
+    ports: ["127.0.0.1:${API_PORT:-18400}:4000"]
+    networks: [database, application]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 100
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+networks:
+  database: {internal: true}
+  application: {}
+volumes:
+  postgres_data: {}

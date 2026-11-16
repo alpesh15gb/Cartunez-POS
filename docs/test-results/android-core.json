@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "environment": "Android API 36 x86_64 emulator, Capacitor 8.6.2, native SQLite",
+  "transactionId": "028c6a9f-c780-4419-bd5e-c24e386826c7",
+  "finalizedInvoices": 2,
+  "checks": [
+    "Native login to shared PostgreSQL API",
+    "Vehicle compatibility",
+    "Actual bin pick",
+    "Cash checkout",
+    "Offline cash checkout",
+    "Force-stop with pending sale",
+    "Offline local workspace reopen",
+    "Reconnect and exactly-once synchronization"
+  ]
+}

@@ -1,0 +1,56 @@
+name: motorline
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-motorline}
+      POSTGRES_USER: ${POSTGRES_USER:-motorline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-motorline}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-motorline}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://pos.shop.local,motorline://app,https://localhost}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      SEED_DEMO: ${SEED_DEMO:-false}
+      BOOTSTRAP_OWNER_EMAIL: ${BOOTSTRAP_OWNER_EMAIL:-owner@shop.local}
+      BOOTSTRAP_OWNER_NAME: ${BOOTSTRAP_OWNER_NAME:-Owner}
+      BOOTSTRAP_OWNER_PASSWORD: ${BOOTSTRAP_OWNER_PASSWORD:-}
+      BOOTSTRAP_ORG_ID: ${BOOTSTRAP_ORG_ID:-shop}
+      BOOTSTRAP_ORG_NAME: ${BOOTSTRAP_ORG_NAME:-Motorline Shop}
+      BOOTSTRAP_BRANCH_ID: ${BOOTSTRAP_BRANCH_ID:-main}
+      BOOTSTRAP_BRANCH_NAME: ${BOOTSTRAP_BRANCH_NAME:-Main branch}
+      BOOTSTRAP_CURRENCY: ${BOOTSTRAP_CURRENCY:-INR}
+    ports: ["127.0.0.1:4000:4000"]
+    networks: [database, application]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+networks:
+  database: {internal: true}
+  application: {}
+volumes:
+  postgres_data: {}

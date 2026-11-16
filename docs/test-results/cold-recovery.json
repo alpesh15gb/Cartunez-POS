@@ -1,0 +1,31 @@
+{
+  "passed": true,
+  "scope": "Disposable local Docker projects only; no live VPS changes",
+  "excludedParallelBuildContainer": "ephemeral web-builder exited during independent Git-deploy test",
+  "imageArchiveBytes": 222612992,
+  "filesChecksummed": 71,
+  "checks": [
+    "Real source invoices, stock ledger and idempotency records",
+    "Exact API and PostgreSQL image bytes, immutable release, private config and dump trio exported",
+    "Checksum tampering, occupied port, existing project and existing target rejected before replacement",
+    "Archived images loaded and exact IDs verified before starting a new Docker project",
+    "PostgreSQL restored before API startup",
+    "Optional newer same-release dump preserved a sale created after the image bundle",
+    "Owner login and exact invoice JSON, stock, financial/stock/idempotency counts preserved",
+    "Public static and ACME directories accessible by www-data",
+    "First activation rejected labelled and unlabelled orphan volumes/networks without modifying them",
+    "Unrelated containers and every Nginx file unchanged",
+    "Maintenance marker retained; bootstrap owner password disabled"
+  ],
+  "databaseCountsExcludingRegeneratedCatalogCache": [
+    "15|3|3|2",
+    "15|3|3|2"
+  ],
+  "verifiedInvoices": 2,
+  "verifiedGross": 23600,
+  "verifiedStock": 2,
+  "nginxUntouched": true,
+  "existingAppsUntouched": true,
+  "limitation": "Image IDs also existed on the verification host; docker load from exported image bytes and exact ID checks executed. This was a clean Docker project, not a newly installed operating system.",
+  "disposableDockerResourcesRemoved": true
+}

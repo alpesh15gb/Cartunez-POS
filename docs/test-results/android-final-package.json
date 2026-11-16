@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "artifact": "release/android/Motorline-1.0.0-test.apk",
+  "sha256": "E8D0AF0B2DCCE0102A34DDD40B1D07FE0115A8459B04482CF19C591399C401B4",
+  "webExportFilesCompared": 40,
+  "matchedFiles": 40,
+  "missingFiles": [],
+  "differentFiles": [],
+  "extraCapacitorFilesIgnored": true,
+  "signing": "Android Debug test certificate; APK Signature Scheme v2 verified",
+  "environment": "Android API 36 x86_64 emulator; Capacitor 8.6.2; native SQLite",
+  "nativeBridgeChecks": {
+    "readWriteRemove": "passed",
+    "scopedKeySeparation": "passed",
+    "threeMiBUnicodeRoundTrip": "passed",
+    "forceStopAndRestartPersistence": "passed",
+    "cameraPermissionAndScannerPreview": "passed",
+    "nativePrintAndReceiptPdf": "passed"
+  },
+  "buildChecks": {
+    "debugBuildAndInstall": "passed",
+    "unsignedReleaseBuild": "passed",
+    "partialSigningConfigurationRejected": "passed"
+  },
+  "remainingDeploymentChecks": [
+    "Retailer production release signing key",
+    "Physical camera barcode decoding",
+    "Physical printer validation"
+  ]
+}

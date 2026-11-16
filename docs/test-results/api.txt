@@ -1,0 +1,17 @@
+Motorline API 1.1.0 — local production-readiness verification
+Command: npm run build -w @motorline/api
+Result: PASS, TypeScript compiler exit 0.
+Command: npm run test:api
+Environment: Windows Node.js 22.23.5, isolated in-memory PGlite.
+Result: PASS, 2 tests, 2 passed, 0 failed, 0 skipped.
+Test 1: retail acceptance, permissions, idempotency, conflict reconciliation and immutable ledgers
+Test 2: production configuration, fresh setup, session revocation, proxy limits, tax snapshots and append-only ledger
+Includes final source migrations 001–003, owner-only sanitized user lists, production first-owner bootstrap, authentication revocation, multiline settings, tax-inclusive/exclusive invoices, GST component and partial-credit reconciliation, offline settings/customer snapshots, hold release/finalization, and immutable financial/stock/idempotency records.
+Fresh production browser/PostgreSQL acceptance: PASS; see docs/test-results/fresh-production.json.
+Final PostgreSQL suite verification is recorded separately by deployment verification in docs/test-results/postgresql.txt.
+Final API-only follow-up verification:
+TypeScript build PASS; 2/2 API suites PASS after snapshot existence optimization and 60-second enrollment clock-skew tolerance.
+Clock checks: enrollment minus601ms accepted; minus60001ms rejected; future6minutes rejected; expiry plus1ms rejected. Device expiry is unchanged.
+Bounded isolated PostgreSQL HTTP capacity: 10000 products,10000 stock rows,1000 historical invoices,40 real additional API sales; totals reconciled. At concurrency4, p95 bootstrap915ms,sale113ms,salesreport296ms,valuation2558ms. Sampled API-only RSS327MiB. See docs/CAPACITY.md for measurement limitations.
+Final rebuilt API1.1.0 Docker image: both API suites PASS on a new empty PostgreSQL17 database, 2 passed,0 failed. Includes final SELECT1 optimization and enrollment clock-skew regressions. Raw TAP: docs/test-results/postgresql.txt.
+Final immediate-offline Windows runtime against rebuiltAPI also passed restart and exactly-one-invoice retry (release verification).

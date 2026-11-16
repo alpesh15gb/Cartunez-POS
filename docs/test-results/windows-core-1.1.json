@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "results": [
+    "Installed app signed into real PostgreSQL API",
+    "Cash sale finalized ML-PUNE-1005 and PDF rendered",
+    "Offline counter enrolled with server-assigned invoice range",
+    "Offline cash sale durably queued in SQLite",
+    "Installed app restarted with stored workspace and automatically synchronized pending sale",
+    "Repeated synchronization produced exactly one invoice and no repeated stock deduction"
+  ]
+}

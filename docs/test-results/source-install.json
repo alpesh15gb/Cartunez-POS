@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "command": "npm ci --ignore-scripts --no-audit --no-fund",
+  "packagesInstalled": 460,
+  "source": "Motorline-Source.zip clean extraction",
+  "verifiedInputs": [
+    "Root npm workspace manifests and lockfile",
+    "Electron main.cjs and preload.cjs",
+    "Desktop NSIS build/icon.ico",
+    "Android Gradle wrapper JAR and launchers",
+    "Capacitor settings and public native bridge",
+    "API Dockerfile and migration files"
+  ],
+  "machinePaths": "No absolute machine-specific paths in application/build/deployment inputs",
+  "scope": "Dependency resolution and required-input audit; lifecycle hooks skipped. Application and native package builds were exercised separately in the main checkout."
+}

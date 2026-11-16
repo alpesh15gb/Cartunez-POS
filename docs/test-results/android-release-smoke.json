@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "environment": "Fresh Android API 36 emulator install; release-signed APK",
+  "applicationId": "com.motorline.pos",
+  "defaultApi": "https://pos.cartunez.in/api/v1",
+  "apiAddressEditable": true,
+  "webViewDebuggingExposed": true,
+  "deviceBuildType": "userdebug",
+  "systemDebuggable": true,
+  "emulatorDebuggingLimitation": "Chromium forces WebView debugging on userdebug OS images despite the application disabling it; repeat no-CDP runtime check on a production user build.",
+  "packageDebuggable": false,
+  "emulatorHttpProbeReachable": true,
+  "cleartextLoginRequestBlocked": true,
+  "cleartextPolicyLogged": false,
+  "authenticatedUserDataCreated": false,
+  "remaining": [
+    "Live public HTTPS login and enrollment after VPS deployment",
+    "No-CDP runtime check on an Android user build",
+    "Physical scanner and printer validation"
+  ]
+}

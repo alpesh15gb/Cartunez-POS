@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "environment": "Isolated PostgreSQL 17, NODE_ENV=production, SEED_DEMO=false; real Edge UI",
+  "isolatedDatabase": true,
+  "demoDatabaseUntouched": true,
+  "checks": [
+    "Real isolated PostgreSQL production bootstrap, first owner and empty data; demo login absent",
+    "Real browser login, empty setup guidance, configured initial currency/tax/tenders and added branch",
+    "Created first bins, supplier, part, purchase receipt and shift through UI; invoicing blocked until business profile complete",
+    "Configured business identity and tax registration in Settings; exclusive USD100 plus tax18 invoice; manual UPI requires a reference",
+    "Inclusive USD100 invoice includes tax15.25; manual UPI remains pending without invoice/stock effect until operator reference confirmation",
+    "Historical receipt retains original business, branch, currency and tax snapshot after Settings changes",
+    "Owner password edit revokes old sessions; restart preserves new credentials, business settings, invoices and stock without reseeding"
+  ],
+  "verifiedMoney": {
+    "currency": "USD",
+    "exclusiveTotal": 11800,
+    "exclusiveTax": 1800,
+    "inclusiveTotal": 10000,
+    "inclusiveTax": 1525
+  },
+  "finalInvoices": 2,
+  "finalStock": 2,
+  "pageErrors": []
+}

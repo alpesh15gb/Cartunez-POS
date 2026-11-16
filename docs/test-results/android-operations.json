@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "sku": "ANDROID-1794781838542",
+  "invoiceNumber": "ML-PUNE-1014",
+  "returnId": "return-05704615-205e-4fd8-856e-8f4003ec450e",
+  "checks": [
+    "Create part",
+    "Manual fictional fitment",
+    "Purchase order",
+    "Two partial receipts into separate bins",
+    "Shelf move",
+    "Incompatible approved override",
+    "Distinct unverified fitment",
+    "Keyboard barcode search",
+    "Compatible bin pick and checkout",
+    "Damaged return bin and exact refund",
+    "Reporting drilldown"
+  ]
+}
