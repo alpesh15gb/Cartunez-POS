@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./prototype.css";
 import "./production.css";
 export const metadata: Metadata = {
-  title: "Motorline POS",
+  title: "Cartunez POS",
   description: "Automotive parts, inventory, and counter billing",
   manifest: "/manifest.webmanifest",
 };

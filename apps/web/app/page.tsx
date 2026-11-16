@@ -4017,7 +4017,7 @@ export default function Register() {
             <i />
           </div>
           <h1>
-            Motorline<span>.</span>
+            Cartunez<span>.</span>
           </h1>
           <p>Parts. People. Every transaction.</p>
         </div>
@@ -4117,7 +4117,7 @@ export default function Register() {
             </span>
             <div>
               <div className="brand-name">
-                Motorline<span>.</span>
+                Cartunez<span>.</span>
               </div>
               <div className="brand-label">
                 {snapshot.settings?.business?.tradingName ||
