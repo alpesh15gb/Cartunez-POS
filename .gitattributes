@@ -17,3 +17,9 @@ gradlew text eol=lf
 *.ico binary
 *.jar binary
 *.pdf binary
+*.wasm binary
+*.ttf binary
+*.otf binary
+*.jks binary
+# Generated Flutter web build: committed as-is, never diffed or line-converted.
+apps/flutter/release/web/** -diff -text linguist-generated

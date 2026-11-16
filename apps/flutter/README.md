@@ -1,7 +1,7 @@
-# Cartunez POS — native app (Windows and Android)
+# Cartunez POS app (web, Windows and Android)
 
-A native Flutter app for the shop counter. It talks to the same server API as the web app
-(`apps/api`), so no server change is needed to use it.
+The Flutter app for the shop counter. The same code runs in the browser at pos.cartunez.in, as a
+Windows program and as an Android app, all talking to the server API in `apps/api`.
 
 ## What it does
 
@@ -16,8 +16,8 @@ A native Flutter app for the shop counter. It talks to the same server API as th
 - Every sale is saved on the device before it is sent. If the connection drops it is kept and sent
   later with the same transaction ID, so it can never be billed twice.
 
-Not yet in the native app: enrolled offline counters with their own invoice ranges, and fitment CSV
-import. Use the web app for those.
+Not in the app yet: enrolled offline counters with their own invoice ranges, and fitment CSV import
+(both were in the retired Next.js app).
 
 ## Build
 
@@ -28,11 +28,27 @@ Requirements: Flutter 3.50+, Visual Studio 2022 C++ build tools (Windows), Andro
 flutter pub get
 flutter test                      # billing maths and barcode rules
 flutter build apk --release --split-per-abi   # buildpp\outputslutter-apkpp-arm64-v8a-release.apk
-flutter build appbundle --release             # buildpp\outputsundleeleasepp-release.aab (Play Store)
+flutter build appbundle --release             # buildpp\outputsundle
+eleasepp-release.aab (Play Store)
 ```
 
 `flutter test visual --update-goldens` renders every screen to `visual/out/` against a demo API on
 `http://127.0.0.1:4100/api/v1` (start it with `SEED_DEMO=true PORT=4100 npm run dev:api`).
+
+## Web app
+
+```
+powershell -ExecutionPolicy Bypass -File tooluild_web.ps1
+```
+
+This builds the web app with every resource bundled locally (no Google CDN) and refreshes
+`release/web`. **Commit `release/web` with the change**: the VPS release copies it as the site and
+does not build Flutter itself. `tool/serve_web.py` serves the build with `/api` forwarded to a local
+API, the same way the VPS does. On the web the app reads `/installation.json` to fill in the shop's
+organization and branch, and stores the register in the browser's local storage.
+
+`web/sw.js` retires the service worker left by the old Next.js app: on a counter's next visit it
+clears the old offline cache, unregisters itself and reloads the tab onto this app.
 
 ## Windows installer
 

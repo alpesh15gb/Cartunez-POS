@@ -1,35 +1,21 @@
 #!/usr/bin/env bash
+# Checks the Flutter web build committed at apps/flutter/release/web.
+# It is built on a developer PC (apps/flutter/tool/build_web.ps1), so the VPS
+# needs no Flutter SDK and no build container for the web app.
 set -euo pipefail
-umask 022
 die() { printf '%s\n' "$*" >&2; exit 1; }
-[[ $EUID -eq 0 ]] || die 'Run the shared-host build as root.'
 [[ $# -eq 1 ]] || die 'Usage: build-web.sh /absolute/source/root'
 source_root="$(realpath "$1")"
-[[ "$source_root" != / && -f "$source_root/package-lock.json" && -f "$source_root/deploy/cartunez/web-builder.Dockerfile" ]] || die 'Expected a Cartunez source checkout.'
-web="$source_root/apps/web"
-[[ "$(realpath "$web")" = "$web" && ! -L "$web/out" ]] || die 'Web/output paths must not traverse symlinks.'
+[[ "$source_root" != / && -f "$source_root/package-lock.json" ]] || die 'Expected a Cartunez source checkout.'
 python3 - "$source_root/package.json" <<'PY'
 import json,sys
 if json.load(open(sys.argv[1])).get('name')!='motorline-production':sys.exit('Unexpected source package.')
 PY
-temporary="$(mktemp -d "$web/.cartunez-out.XXXXXX")"
-cleanup() {
-  # This is the fresh directory created above, never an arbitrary caller path.
-  if [[ -n "${temporary:-}" && "$temporary" = "$web"/.cartunez-out.* && ! -L "$temporary" ]]; then rm -rf -- "$temporary"; fi
-}
-trap cleanup EXIT
-docker build --tag cartunezpos-web-builder:node22 --file "$source_root/deploy/cartunez/web-builder.Dockerfile" "$source_root"
-docker run --rm --memory=2g --cpus=1.5 --pids-limit=256 \
-  --cap-drop=ALL --security-opt=no-new-privileges:true --tmpfs /tmp:size=128m \
-  --mount "type=bind,src=$source_root,dst=/src,readonly" \
-  --mount "type=bind,src=$temporary,dst=/out" \
-  cartunezpos-web-builder:node22
-[[ -s "$temporary/index.html" && -s "$temporary/sw.js" ]] || die 'Frontend build produced incomplete output.'
-# Replace only the ignored generated export, after the new build passed.
-if [[ -e "$web/out" ]]; then
-  [[ -d "$web/out" && "$(realpath "$web/out")" = "$web/out" ]] || die 'Unsafe existing export path.'
-  rm -rf -- "$web/out"
-fi
-mv "$temporary" "$web/out"
-temporary=''
-printf 'Frontend export built in Docker at %s/out; no host Node installation or source dependency directory was used.\n' "$web"
+web="$source_root/apps/flutter/release/web"
+[[ -d "$web" && ! -L "$web" && "$(realpath "$web")" = "$web" ]] || die 'Missing apps/flutter/release/web. Build it with apps/flutter/tool/build_web.ps1 and commit it.'
+for file in index.html flutter_bootstrap.js main.dart.js sw.js version.json canvaskit/canvaskit.wasm; do
+  [[ -s "$web/$file" ]] || die "Flutter web build is incomplete: $file is missing."
+done
+if find "$web" -type l | grep -q .; then die 'Flutter web build must not contain symlinks.'; fi
+printf 'Flutter web build %s is ready at %s.\n' \
+  "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("version","?")+"+"+d.get("build_number","?"))' "$web/version.json")" "$web"

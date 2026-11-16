@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -87,8 +86,6 @@ Future<dynamic> request(String api, String token, String path,
         await _client.send(req).timeout(const Duration(seconds: 15)));
   } on TimeoutException {
     throw OfflineError('The server took too long to respond. Check the connection.');
-  } on SocketException {
-    throw OfflineError('Cannot reach the server. Check the network connection.');
   } on http.ClientException {
     throw OfflineError('Cannot reach the server. Check the network connection.');
   }
@@ -103,4 +100,11 @@ Future<dynamic> request(String api, String token, String path,
     throw ApiError('${map['error'] ?? map['message'] ?? 'The request failed.'}', response.statusCode);
   }
   return result;
+}
+
+/// Reads a small public JSON file, such as the web installation defaults.
+Future<dynamic> fetchJson(Uri uri) async {
+  final response = await _client.get(uri).timeout(const Duration(seconds: 3));
+  if (response.statusCode != 200) return null;
+  return jsonDecode(response.body);
 }

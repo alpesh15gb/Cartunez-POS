@@ -39,10 +39,33 @@ class AppState extends ChangeNotifier {
   void toast(String text) => messages.add(text);
 
   // ---------- lifecycle ----------
+  /// On the web the app is served by the shop server itself, so it signs in to
+  /// that same server. installation.json (written by the VPS release) adds the
+  /// organization and branch codes.
+  Future<Json> _installationDefaults() async {
+    final defaults = {...connection, 'api': '${Uri.base.origin}/api/v1'};
+    try {
+      final data = await fetchJson(Uri.base.resolve('/installation.json'));
+      if (data is Map) {
+        return {
+          ...defaults,
+          if (data['apiUrl'] is String) 'api': data['apiUrl'],
+          if (data['organizationId'] is String) 'organizationId': data['organizationId'],
+          if (data['branchId'] is String) 'branchId': data['branchId'],
+        };
+      }
+    } catch (_) {}
+    return defaults;
+  }
+
   Future<void> init() async {
     _store = await LocalStore.open();
     final saved = await _store.read('connection');
-    if (saved is Map) connection = {...connection, ...Map<String, dynamic>.from(saved)};
+    if (saved is Map) {
+      connection = {...connection, ...Map<String, dynamic>.from(saved)};
+    } else if (kIsWeb) {
+      connection = await _installationDefaults();
+    }
     session = Session.fromJson(await _store.read('session'));
     if (session != null) {
       final workspace = await _store.read(session!.scope);
@@ -322,7 +345,9 @@ class AppState extends ChangeNotifier {
 
   String money(num? minor, {String? currency}) {
     final format = NumberFormat.simpleCurrency(locale: 'en_IN', name: currency ?? '${settings['currency'] ?? 'INR'}');
-    return format.format((minor ?? 0) / 100);
+    final value = (minor ?? 0) / 100;
+    // Avoid showing "-₹0.00" when a calculation lands on negative zero.
+    return format.format(value == 0 ? 0 : value);
   }
 
   String binName(Json? bin) => bin == null

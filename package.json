@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.1.0",
   "workspaces": [
-    "apps/*",
+    "apps/api",
     "packages/*"
   ],
   "scripts": {
@@ -12,8 +12,5 @@
     "test:api": "npm run test -w @motorline/api",
     "db:migrate": "npm run migrate -w @motorline/api",
     "db:seed": "npm run seed -w @motorline/api"
-  },
-  "devDependencies": {
-    "playwright-core": "^1.65.1"
   }
 }

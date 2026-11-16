@@ -1,7 +1,7 @@
-import 'dart:io';
 
 import 'package:barcode/barcode.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -129,21 +129,14 @@ Widget _row(String label, String value, {bool big = false}) => Padding(
       ]),
     );
 
-/// Uses the system font (it has the rupee sign and works offline), falling
-/// back to a downloaded font only when neither system font is present.
+/// Receipts and labels use the bundled font (it has the rupee sign), so they
+/// look the same on Windows, Android and the web and never need a download.
+pw.ThemeData? _pdfTheme;
 Future<pw.ThemeData> pdfTheme() async {
-  for (final (regular, bold) in [
-    (r'C:\Windows\Fonts\segoeui.ttf', r'C:\Windows\Fonts\segoeuib.ttf'),
-    ('/system/fonts/Roboto-Regular.ttf', '/system/fonts/Roboto-Bold.ttf'),
-  ]) {
-    final a = File(regular), b = File(bold);
-    if (await a.exists()) {
-      final base = pw.Font.ttf((await a.readAsBytes()).buffer.asByteData());
-      final strong = await b.exists() ? pw.Font.ttf((await b.readAsBytes()).buffer.asByteData()) : base;
-      return pw.ThemeData.withFont(base: base, bold: strong);
-    }
-  }
-  return pw.ThemeData.withFont(base: await PdfGoogleFonts.notoSansRegular(), bold: await PdfGoogleFonts.notoSansBold());
+  return _pdfTheme ??= pw.ThemeData.withFont(
+    base: pw.Font.ttf(await rootBundle.load('assets/fonts/Roboto-Regular.ttf')),
+    bold: pw.Font.ttf(await rootBundle.load('assets/fonts/Roboto-Bold.ttf')),
+  );
 }
 
 /// 80 mm roll receipt; the print dialog lets the shop pick A4 instead.

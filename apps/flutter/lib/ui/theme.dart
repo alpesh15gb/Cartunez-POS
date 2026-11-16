@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 class Brand {
@@ -25,6 +26,8 @@ ThemeData buildTheme() {
   const radius = BorderRadius.all(Radius.circular(10));
   return ThemeData(
     useMaterial3: true,
+    // The web uses the bundled font so pages never wait on a font download.
+    fontFamily: kIsWeb ? 'CartunezSans' : null,
     colorScheme: scheme,
     scaffoldBackgroundColor: Brand.canvas,
     visualDensity: VisualDensity.standard,

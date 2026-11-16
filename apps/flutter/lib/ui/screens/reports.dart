@@ -1,9 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:printing/printing.dart';
+
+import '../../core/files.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
@@ -78,13 +77,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
 
     final csv = [keys.map(esc).join(','), for (final r in rows) keys.map((k) => esc(r[k])).join(',')].join('\r\n');
-    final dir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}${Platform.pathSeparator}${report!['name']}-${DateTime.now().millisecondsSinceEpoch}.csv');
-    await file.writeAsString('﻿$csv');
-    if (Platform.isAndroid) {
-      await Printing.sharePdf(bytes: await file.readAsBytes(), filename: file.uri.pathSegments.last);
-    }
-    if (mounted) context.appRead.toast('Saved ${file.path}');
+    final message = await saveTextFile('${report!['name']}-${DateTime.now().millisecondsSinceEpoch}.csv', '﻿$csv');
+    if (mounted) context.appRead.toast(message);
   }
 
   @override

@@ -17,6 +17,8 @@ demo-data/
 work-data/
 test-results/
 release/
+# The committed Flutter web build that VPS releases copy as the site.
+!apps/flutter/release/
 apps/desktop/resources/
 apps/android/android/app/src/main/assets/public/
 **/__pycache__/

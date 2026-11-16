@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -460,7 +460,7 @@ class _TopBar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        if (Platform.isAndroid && app.canSell)
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android && app.canSell)
           IconButton.filledTonal(
             tooltip: 'Scan with camera',
             onPressed: () => scanWithCamera(context, controller),

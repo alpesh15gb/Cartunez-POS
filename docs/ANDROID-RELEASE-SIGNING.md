@@ -1,5 +1,10 @@
 # Android signing key custody
 
+> **Retired client.** This page covers the earlier Capacitor app (`com.motorline.pos`). The current
+> Android app is the Flutter app (`in.cartunez.cartunez_pos`), signed with its own release key; see
+> [apps/flutter/README.md](../apps/flutter/README.md). Because the application IDs differ, the two
+> install side by side: uninstall the old Motorline app from counters after moving them over.
+
 A new, stable Android application release key has been generated locally for application ID `com.motorline.pos`. It is an RSA 3072-bit private key in a PKCS#12 keystore, separate from the earlier Android Debug test certificate. `Motorline-1.1.0-release.apk` has been built and its APK v2 signature verified with this key. The public certificate SHA-256 fingerprint is `360BD350F970D3EFBB84584407BF4177D73350293CFC1CBA9127FD6F7C8D1DDF`.
 
 Private signing material is stored only in the task workspace's `work/production-secrets/android/` directory. The directory has inheritance disabled and permits access only to the current Windows account and SYSTEM. `motorline-release.p12` contains the private key; `signing.json` contains its alias and randomly generated passwords. These files must never enter source control, an output archive, an APK, application assets, logs, or a chat message. They are intentionally excluded from deliverables.

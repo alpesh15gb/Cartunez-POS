@@ -18,7 +18,7 @@ The new Compose project is `cartunezpos`. Its API is published only at `127.0.0.
 | `/var/www/cartunez-pos-acme` | Public ACME challenge files only |
 | `/etc/nginx/sites-enabled/cartunezpos.conf` | The only application vhost this workflow manages |
 
-Commands below run as root and work independently of the shell's current directory, including when the current directory is `/opt/safar-crm`. The VPS needs Git, Bash, Docker/Compose, host Nginx, Python 3, OpenSSL, curl, util-linux and coreutils. Certbot is needed only for certificate issuance. No host Node.js installation is required: both API and frontend build in Docker from the committed lockfile. The frontend builder has a 2 GiB memory/1.5 CPU limit, reads source through a read-only mount, and writes only the generated frontend export inside the dedicated source clone. Runtime data and private configuration remain outside Git.
+Commands below run as root and work independently of the shell's current directory, including when the current directory is `/opt/safar-crm`. The VPS needs Git, Bash, Docker/Compose, host Nginx, Python 3, OpenSSL, curl, util-linux and coreutils. Certbot is needed only for certificate issuance. No host Node.js or Flutter installation is required: the API builds in Docker from the committed lockfile, and the web app is the Flutter build committed at `apps/flutter/release/web`, which is copied into each release unchanged. Runtime data and private configuration remain outside Git.
 
 ## 1. DNS and read-only checks
 
@@ -62,7 +62,7 @@ bash "$BIN/git-release.sh" prepare "$SOURCE" && \
   bash /opt/cartunez-pos/current/bin/status.sh
 ```
 
-The Git wrapper checks that the clone is root-owned, clean, on `main`, uses exactly the expected GitHub origin, and matches `origin/main`. It refuses local edits, untracked files, unexpected remotes, detached checkouts, or local-only commits; it never resets, stashes or cleans them. It builds the frontend in Docker, stages a uniquely tagged API image, records full source commit plus exact API/PostgreSQL image IDs, writes public connection defaults, and makes the release files read-only. Release identifiers contain the package version, UTC build time and short commit SHA. Staging does not change a running service.
+The Git wrapper checks that the clone is root-owned, clean, on `main`, uses exactly the expected GitHub origin, and matches `origin/main`. It refuses local edits, untracked files, unexpected remotes, detached checkouts, or local-only commits; it never resets, stashes or cleans them. It checks the committed Flutter web build, stages a uniquely tagged API image, records full source commit plus exact API/PostgreSQL image IDs, writes public connection defaults, and makes the release files read-only. Release identifiers contain the package version, UTC build time and short commit SHA. Staging does not change a running service.
 
 Activation uses only the `cartunezpos` Compose project and waits for database/API health. The first activation starts an empty business and creates the configured owner. Demo seeding is disabled and rejected by the production API. Keep business settings in the application and secrets in `/etc/cartunez-pos/config.json` so Git updates remain clean.
 
@@ -134,7 +134,7 @@ Create a complete private recovery bundle using [COLD-RECOVERY.md](COLD-RECOVERY
 
 ## Upgrades and rollback
 
-Build the next release while the current one continues serving. Run the updater from the immutable current release; it validates the dedicated clone, executes `git pull --ff-only origin main`, builds the frontend and API, and stages the resulting commit. It does not run `git pull` in the shell's current directory and does not change other checkouts.
+Build the next release while the current one continues serving. Run the updater from the immutable current release; it validates the dedicated clone, executes `git pull --ff-only origin main`, checks the web build, builds the API, and stages the resulting commit. It does not run `git pull` in the shell's current directory and does not change other checkouts.
 
 ```bash
 bash /opt/cartunez-pos/current/bin/git-release.sh update /opt/cartunez-pos-source
@@ -164,11 +164,10 @@ Keep at least the previous release and its Docker images. Do not use `docker com
 
 ## Appendix: deployment archive instead of Git
 
-The archive workflow remains available. Upload the delivered deployment archive and checksum file to a new directory such as `/root/cartunez-upload`, verify its checksum and extract it there. Set `SOURCE` to the extracted application root. Configure private settings as above on a first installation. An archive containing the tested `apps/web/out` needs no frontend rebuild. A source-only archive can build its frontend with the same Docker helper:
+The archive workflow remains available. Upload the delivered deployment archive and checksum file to a new directory such as `/root/cartunez-upload`, verify its checksum and extract it there. Set `SOURCE` to the extracted application root. Configure private settings as above on a first installation. The web app is the committed Flutter build in `apps/flutter/release/web`; it needs no build on the server. `build-web.sh` only checks that it is complete:
 
 ```bash
 SOURCE=/root/cartunez-upload/motorline
-# Run this only when using a source-only archive without apps/web/out:
 bash "$SOURCE/deploy/cartunez/bin/build-web.sh" "$SOURCE"
 
 RELEASE=1.1.0-archive-1

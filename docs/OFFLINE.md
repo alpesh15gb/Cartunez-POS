@@ -1,5 +1,11 @@
 # Offline operation
 
+> **Note.** Enrolled offline counters with their own invoice ranges were a feature of the retired
+> Next.js/Electron/Capacitor clients and are not in the Flutter app yet. The Flutter app saves every
+> sale on the device before sending it and resends it with the same transaction ID when the server is
+> reachable again, so a sale is never lost or billed twice, but it does not issue invoice numbers
+> while the server is unreachable. Keep the Offline counters module switched off.
+
 ## Shop LAN
 
 The shop server can host Docker PostgreSQL and the API on its LAN, with Nginx on the host. Internet loss does not interrupt counters that can still reach that server. A server outage activates the local checkout policy below.

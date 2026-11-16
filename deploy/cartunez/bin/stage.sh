@@ -3,7 +3,7 @@ source "$(dirname "$0")/common.sh"
 [[ $# -eq 2 ]] || die 'Usage: stage.sh /absolute/source/root release-id'
 source_root="$(realpath "$1")"; release_id="$2"
 [[ "$release_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ && "$release_id" != *..* ]] || die 'Invalid release ID.'
-[[ -f "$source_root/apps/web/out/index.html" && -f "$source_root/deploy/api.Dockerfile" ]] || die 'Build/export the web app in the source root first.'
+[[ -f "$source_root/apps/flutter/release/web/index.html" && -f "$source_root/deploy/api.Dockerfile" ]] || die 'Missing the Flutter web build (apps/flutter/release/web).'
 lock
 mkdir -p "$CARTUNEZ_ROOT/releases"
 chmod 755 "$CARTUNEZ_ROOT/releases"
@@ -13,7 +13,8 @@ image_tag="$CARTUNEZ_PROJECT-api:$release_id"
 docker build --tag "$image_tag" --file "$source_root/deploy/api.Dockerfile" "$source_root"
 docker image inspect postgres:17-alpine >/dev/null 2>&1 || docker pull postgres:17-alpine
 mkdir -m 755 "$destination"
-cp -a "$source_root/apps/web/out" "$destination/web"
+cp -a "$source_root/apps/flutter/release/web" "$destination/web"
+chmod -R a+rX "$destination/web"
 python3 - "$destination/web/installation.json" <<'PY'
 import json, os, sys
 with open(sys.argv[1], 'w') as f:
