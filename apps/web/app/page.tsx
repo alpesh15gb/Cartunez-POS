@@ -14,29 +14,145 @@ import {
   request,
   scopeKey,
   writeLocal,
+  gs1Valid,
+  barcodeFormat,
+  inStoreBarcode,
   type Json,
   type Session,
   type Workspace,
 } from "./storage";
 import JsBarcode from "jsbarcode";
 
-const sections = [
-  "Billing",
-  "Inventory",
-  "Locations",
-  "Purchasing",
-  "Customers",
-  "Suppliers",
-  "Sales history",
-  "Dashboard",
-  "Transfers",
-  "Fitment",
-  "Shifts",
-  "Reconciliation",
-  "Warranty & cores",
-  "Reports",
-  "Settings",
+type Role = "owner" | "manager" | "cashier" | "inventory";
+const everyone: Role[] = ["owner", "manager", "cashier", "inventory"];
+const sellers: Role[] = ["owner", "manager", "cashier"];
+const stockRoles: Role[] = ["owner", "manager", "inventory"];
+type Feature = "transfers" | "fitment" | "offline" | "warranty";
+type Tab = { name: string; label: string; roles: Role[]; feature?: Feature };
+/** Eight menu areas; related screens are tabs inside them. */
+const navItems: { label: string; icon: string; tabs: Tab[] }[] = [
+  { label: "Billing", icon: "icon-register", tabs: [{ name: "Billing", label: "Billing", roles: sellers }] },
+  {
+    label: "Sales",
+    icon: "icon-receipt",
+    tabs: [
+      { name: "Sales history", label: "Invoices", roles: sellers },
+      { name: "Shifts", label: "Shifts", roles: sellers },
+    ],
+  },
+  { label: "Customers", icon: "icon-person", tabs: [{ name: "Customers", label: "Customers", roles: sellers }] },
+  {
+    label: "Inventory",
+    icon: "icon-box",
+    tabs: [
+      { name: "Inventory", label: "Parts", roles: everyone },
+      { name: "Locations", label: "Bins", roles: stockRoles },
+      { name: "Fitment", label: "Fitment", roles: stockRoles, feature: "fitment" },
+      { name: "Transfers", label: "Transfers", roles: stockRoles, feature: "transfers" },
+      { name: "Warranty & cores", label: "Warranty & cores", roles: stockRoles, feature: "warranty" },
+    ],
+  },
+  {
+    label: "Purchasing",
+    icon: "icon-car",
+    tabs: [
+      { name: "Purchasing", label: "Orders", roles: stockRoles },
+      { name: "Suppliers", label: "Suppliers", roles: stockRoles },
+    ],
+  },
+  { label: "Dashboard", icon: "icon-chart", tabs: [{ name: "Dashboard", label: "Dashboard", roles: everyone }] },
+  { label: "Reports", icon: "icon-chart", tabs: [{ name: "Reports", label: "Reports", roles: stockRoles }] },
+  {
+    label: "Settings",
+    icon: "icon-person",
+    tabs: [
+      { name: "Settings", label: "Settings", roles: everyone },
+      { name: "Reconciliation", label: "Sync & audit", roles: sellers },
+    ],
+  },
 ];
+const tabsFor = (tabs: Tab[], role?: string, features?: Record<Feature, boolean>) =>
+  tabs.filter(
+    (tab) => tab.roles.includes(role as Role) && (!tab.feature || features?.[tab.feature] !== false),
+  );
+const sectionsFor = (role?: string, features?: Record<Feature, boolean>) =>
+  navItems.flatMap((item) => tabsFor(item.tabs, role, features).map((tab) => tab.name));
+const sectionHelp: Record<string, string> = {
+  Billing: "Scan or pick parts, then take payment.",
+  "Sales history": "Reprint receipts, take returns and void invoices.",
+  Shifts: "Open and close the cash drawer for each cashier.",
+  Customers: "Saved customers for receipts and GST invoices.",
+  Inventory: "Parts, prices, stock and labels.",
+  Locations: "Racks and bins where stock is kept.",
+  Fitment: "Which vehicles each part fits.",
+  Transfers: "Stock sent between branches.",
+  "Warranty & cores": "Supplier warranty claims and core deposit refunds.",
+  Purchasing: "Order from suppliers and receive goods into bins.",
+  Suppliers: "Companies you buy parts from.",
+  Dashboard: "Today at a glance.",
+  Reports: "Sales, stock and tax reports with CSV export.",
+  Settings: "Business details, staff and this counter.",
+  Reconciliation: "Sales waiting to sync and the audit trail.",
+};
+const inventoryReports = [
+  "valuation",
+  "stock-by-bin",
+  "stock-movement",
+  "low-stock",
+  "fast-moving",
+  "slow-moving",
+  "aging",
+  "purchase-receipts",
+  "warranty",
+];
+const moneyKeys = new Set([
+  "gross",
+  "returns",
+  "coreReturns",
+  "net",
+  "discount",
+  "tax",
+  "cost",
+  "margin",
+  "value",
+  "landedCost",
+  "total",
+  "openingCash",
+  "expectedCash",
+  "countedCash",
+  "variance",
+  "collected",
+  "refunded",
+  "charged",
+  "outstanding",
+  "revenue",
+  "amount",
+  "taxable",
+  "unitPrice",
+  "subtotal",
+  "coreCharge",
+  "rounding",
+  "price",
+  "retailPrice",
+  "wholesalePrice",
+]);
+const hiddenReportKeys = new Set([
+  "id",
+  "invoiceId",
+  "productId",
+  "returnId",
+  "purchaseOrderId",
+  "supplierId",
+  "lineId",
+  "binId",
+]);
+const humanize = (key: string) =>
+  key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+const titleCase = (value: string) =>
+  value ? value[0].toUpperCase() + value.slice(1) : value;
 const reportNames = [
   "sales",
   "returns",
@@ -67,6 +183,10 @@ type Field = {
   min?: number;
   step?: string;
   help?: string;
+  /** Rarely used fields are tucked under "More options". */
+  advanced?: boolean;
+  /** Offer earlier values while still allowing a new one. */
+  suggestions?: string[];
 };
 type Modal = {
   title: string;
@@ -75,6 +195,8 @@ type Modal = {
   submit?: string;
   action?: (data: Json) => Promise<void>;
   wide?: boolean;
+  /** Open "More options" initially, for example when editing an existing record. */
+  expanded?: boolean;
 };
 const options = (
   records: Json[],
@@ -92,6 +214,26 @@ const binName = (bin: Json) =>
 const deviceKey = (session: Session) =>
   `server:${installationKey(session)}:device:${session.organizationId}:${session.branchId}`;
 function FieldInput({ field }: { field: Field }) {
+  if (field.type === "checks")
+    return (
+      <fieldset className="field check-group">
+        <legend>{field.label}</legend>
+        <div>
+          {(field.options || []).map((option) => (
+            <label className="check-field" key={option.value}>
+              <input
+                type="checkbox"
+                name={field.name}
+                value={option.value}
+                defaultChecked={(field.value || []).includes(option.value)}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        {field.help && <small>{field.help}</small>}
+      </fieldset>
+    );
   return (
     <label className="field">
       <span>{field.label}</span>
@@ -116,14 +258,24 @@ function FieldInput({ field }: { field: Field }) {
           ))}
         </select>
       ) : (
-        <input
-          name={field.name}
-          type={field.type || "text"}
-          defaultValue={field.value ?? ""}
-          required={field.required}
-          min={field.min}
-          step={field.step || (field.type === "number" ? "1" : undefined)}
-        />
+        <>
+          <input
+            name={field.name}
+            type={field.type || "text"}
+            defaultValue={field.value ?? ""}
+            required={field.required}
+            min={field.min}
+            step={field.step || (field.type === "number" ? "1" : undefined)}
+            list={field.suggestions?.length ? `${field.name}-suggestions` : undefined}
+          />
+          {!!field.suggestions?.length && (
+            <datalist id={`${field.name}-suggestions`}>
+              {field.suggestions.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          )}
+        </>
       )}
       {field.help && <small>{field.help}</small>}
     </label>
@@ -173,19 +325,329 @@ function DataTable({
   );
 }
 
-function Barcode({ value }: { value: string }) {
+function CheckoutFields({
+  total,
+  tenders,
+  money,
+  gst,
+  placeOfSupply,
+}: {
+  total: number;
+  tenders: string[];
+  money: (amount: number) => string;
+  gst: boolean;
+  placeOfSupply: string;
+}) {
+  const first = tenders.includes("Cash") ? "Cash" : tenders[0];
+  const [tender, setTender] = useState(first);
+  const [amount, setAmount] = useState((total / 100).toFixed(2));
+  const [split, setSplit] = useState(false);
+  const [secondTender, setSecondTender] = useState(
+    tenders.find((type) => type !== first) || first,
+  );
+  const [secondAmount, setSecondAmount] = useState("0.00");
+  const minor = (value: string) => Math.round((Number(value) || 0) * 100);
+  const paid = minor(amount) + (split ? minor(secondAmount) : 0);
+  const cash =
+    (tender === "Cash" ? minor(amount) : 0) +
+    (split && secondTender === "Cash" ? minor(secondAmount) : 0);
+  const due = total - paid;
+  const change = Math.max(0, paid - total);
+  const nonCash = tender !== "Cash" || (split && secondTender !== "Cash");
+  const quick = [
+    total,
+    ...[10000, 20000, 50000, 200000]
+      .map((step) => Math.ceil(total / step) * step)
+      .filter((value) => value > total),
+  ].filter((value, index, all) => all.indexOf(value) === index).slice(0, 4);
+  return (
+    <div className="checkout-fields">
+      <div className="tender-choice" role="radiogroup" aria-label="Payment type">
+        {tenders.map((type) => (
+          <button
+            type="button"
+            key={type}
+            role="radio"
+            aria-checked={tender === type}
+            className={`tender-option ${tender === type ? "is-active" : ""}`}
+            onClick={() => setTender(type)}
+          >
+            {type}
+          </button>
+        ))}
+      </div>
+      <input type="hidden" name="tender" value={tender} />
+      <label className="field">
+        <span>{split ? `${tender} amount` : "Amount received"}</span>
+        <input
+          name="amount"
+          type="number"
+          min={0}
+          step="0.01"
+          required
+          value={amount}
+          onChange={(event) => setAmount(event.target.value)}
+          autoFocus
+        />
+      </label>
+      {tender === "Cash" && !split && (
+        <div className="quick-cash">
+          {quick.map((value) => (
+            <button
+              type="button"
+              className="button"
+              key={value}
+              onClick={() => setAmount((value / 100).toFixed(2))}
+            >
+              {value === total ? "Exact" : money(value)}
+            </button>
+          ))}
+        </div>
+      )}
+      {tenders.length > 1 && (
+        <button
+          type="button"
+          className="text-button split-toggle"
+          onClick={() => {
+            if (split) setSecondAmount("0.00");
+            else {
+              setSecondAmount((Math.max(0, total - minor(amount)) / 100).toFixed(2));
+            }
+            setSplit(!split);
+          }}
+        >
+          {split ? "Remove split payment" : "Split payment"}
+        </button>
+      )}
+      {split && (
+        <div className="editor-grid">
+          <label className="field">
+            <span>Second payment type</span>
+            <select
+              name="secondTender"
+              value={secondTender}
+              onChange={(event) => setSecondTender(event.target.value)}
+            >
+              {tenders.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Second amount</span>
+            <input
+              name="secondAmount"
+              type="number"
+              min={0}
+              step="0.01"
+              value={secondAmount}
+              onChange={(event) => setSecondAmount(event.target.value)}
+            />
+          </label>
+        </div>
+      )}
+      {nonCash && (
+        <div className="editor-grid">
+          <label className="field">
+            <span>Card / UPI confirmation</span>
+            <select name="confirmed" defaultValue="no">
+              <option value="no">Awaiting provider confirmation</option>
+              <option value="yes">Confirmed by provider</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Provider reference</span>
+            <input name="reference" autoComplete="off" />
+          </label>
+        </div>
+      )}
+      <label className="field">
+        <span>{gst ? "Place of supply state code" : "Place of supply (optional)"}</span>
+        <input
+          name="placeOfSupply"
+          defaultValue={placeOfSupply}
+          required={gst}
+          inputMode={gst ? "numeric" : undefined}
+        />
+        {gst && <small>Confirm the two-digit state code for this supply.</small>}
+      </label>
+      <dl className="checkout-due">
+        <div>
+          <dt>Total payable</dt>
+          <dd>{money(total)}</dd>
+        </div>
+        <div>
+          <dt>Paid</dt>
+          <dd>{money(paid)}</dd>
+        </div>
+        <div className={due > 0 ? "is-due" : change > cash ? "is-due" : "is-change"}>
+          <dt>{due > 0 ? "Still due" : "Change to return"}</dt>
+          <dd>{money(due > 0 ? due : change)}</dd>
+        </div>
+      </dl>
+      {change > cash && (
+        <p className="form-hint">Change can only be returned from cash received.</p>
+      )}
+    </div>
+  );
+}
+
+function Barcode({ value, height = 55 }: { value: string; height?: number }) {
   const element = useRef<SVGSVGElement>(null);
+  const [invalid, setInvalid] = useState(false);
   useEffect(() => {
-    if (element.current)
-      JsBarcode(element.current, value, {
-        format: "CODE128",
-        height: 55,
-        width: 1.5,
-        fontSize: 13,
-        margin: 8,
-      });
-  }, [value]);
-  return <svg ref={element} aria-label={`Barcode ${value}`} />;
+    if (!element.current) return;
+    const options = { height, width: 1.5, fontSize: 13, margin: 8 };
+    try {
+      JsBarcode(element.current, value, { ...options, format: barcodeFormat(value) });
+      setInvalid(false);
+    } catch {
+      try {
+        JsBarcode(element.current, value, { ...options, format: "CODE128" });
+        setInvalid(false);
+      } catch {
+        setInvalid(true);
+      }
+    }
+  }, [value, height]);
+  return invalid ? (
+    <p className="form-error">“{value}” cannot be printed as a barcode. Use letters, numbers and basic symbols.</p>
+  ) : (
+    <svg ref={element} aria-label={`Barcode ${value}`} />
+  );
+}
+
+type LabelItem = { name: string; code: string; sku?: string; price?: number };
+function LabelSheet({
+  items,
+  money,
+  print,
+}: {
+  items: LabelItem[];
+  money: (amount: number) => string;
+  print: () => void;
+}) {
+  const [copies, setCopies] = useState(1);
+  const [showPrice, setShowPrice] = useState(items.some((item) => item.price !== undefined));
+  const count = Math.min(100, Math.max(1, Math.floor(copies) || 1));
+  return (
+    <div className="label-sheet">
+      <div className="label-options no-print">
+        <label className="field">
+          <span>Copies of each label</span>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={copies}
+            onChange={(event) => setCopies(Number(event.target.value))}
+          />
+        </label>
+        {items.some((item) => item.price !== undefined) && (
+          <label className="check-field">
+            <input
+              type="checkbox"
+              checked={showPrice}
+              onChange={(event) => setShowPrice(event.target.checked)}
+            />
+            Show retail price
+          </label>
+        )}
+        <p className="form-hint">
+          {items.length * count} label{items.length * count === 1 ? "" : "s"} sized 50 × 30 mm.
+          Choose the label printer and paper size in the print dialog.
+        </p>
+      </div>
+      <div className="label-grid">
+        {items.flatMap((item, index) =>
+          Array.from({ length: count }, (_, copy) => (
+            <div className="barcode-label-card" key={`${index}-${copy}`}>
+              <strong>{item.name}</strong>
+              <Barcode value={item.code} height={40} />
+              <div className="label-meta">
+                {item.sku && <span>{item.sku}</span>}
+                {showPrice && item.price !== undefined && <b>{money(item.price)}</b>}
+              </div>
+            </div>
+          )),
+        )}
+      </div>
+      <div className="dialog-actions no-print">
+        <button type="button" className="primary-button" onClick={print}>
+          Print labels
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CameraScanner({ onCode }: { onCode: (code: string) => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const callback = useRef(onCode);
+  callback.current = onCode;
+  const [message, setMessage] = useState("Starting camera…");
+  useEffect(() => {
+    let stream: MediaStream | undefined;
+    let stopped = false;
+    let timer: number | undefined;
+    (async () => {
+      try {
+        const Detector = (window as any).BarcodeDetector;
+        if (!Detector || !navigator.mediaDevices?.getUserMedia)
+          throw new Error("unsupported");
+        const formats: string[] = (await Detector.getSupportedFormats?.()) || [];
+        const detector = new Detector(formats.length ? { formats } : undefined);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        if (stopped || !video.current) return;
+        video.current.srcObject = stream;
+        await video.current.play();
+        setMessage("Hold the barcode inside the frame.");
+        const tick = async () => {
+          if (stopped || !video.current) return;
+          try {
+            const found = await detector.detect(video.current);
+            const code = found.find((item: Json) => item.rawValue)?.rawValue;
+            if (code) {
+              stopped = true;
+              callback.current(String(code).trim());
+              return;
+            }
+          } catch {
+            /* A frame may not be ready yet. */
+          }
+          timer = window.setTimeout(tick, 180);
+        };
+        void tick();
+      } catch (reason: any) {
+        setMessage(
+          reason?.name === "NotAllowedError"
+            ? "Camera permission was denied. Allow camera access for this site, or use a USB/Bluetooth scanner."
+            : reason?.message === "unsupported"
+              ? "This browser cannot read barcodes from the camera. Use a USB/Bluetooth scanner or type the code."
+              : "The camera could not be opened. Check that no other app is using it.",
+        );
+      }
+    })();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+  return (
+    <div className="camera-scanner">
+      <div className="camera-frame">
+        <video ref={video} muted playsInline />
+        <span className="camera-target" aria-hidden="true" />
+      </div>
+      <p role="status">{message}</p>
+    </div>
+  );
 }
 export default function Register() {
   const [session, setSession] = useState<Session | null>(null);
@@ -205,6 +667,11 @@ export default function Register() {
   const [connection, setConnection] = useState<Json>({});
   const dialogRef = useRef<HTMLDialogElement>(null);
   const syncBusy = useRef(false);
+  const resumeCheckout = useRef(false);
+  const scanBuffer = useRef({ text: "", last: 0 });
+  const [cameraScan, setCameraScan] = useState(false);
+  const handleScanRef = useRef<(code: string) => void>(() => {});
+  handleScanRef.current = handleScan;
   const snapshot = workspace?.snapshot || {};
   const products: Json[] = snapshot.products || [];
   const bins: Json[] = snapshot.locations || [];
@@ -212,7 +679,53 @@ export default function Register() {
   const role = session?.user.role;
   const manager = role === "owner" || role === "manager";
   const inventoryRole = manager || role === "inventory";
-  const money = (amount: number, currency = snapshot.settings?.currency || "INR") =>
+  const canSell = manager || role === "cashier";
+  const features = {
+    transfers: true,
+    fitment: true,
+    offline: true,
+    warranty: true,
+    ...(snapshot.settings?.features || {}),
+  } as Record<Feature, boolean>;
+  const allowedSections = sectionsFor(role, features);
+  const userName = (id?: string) => {
+    if (!id) return "—";
+    if (id === session?.user.id) return session.user.name || session.user.email;
+    const user = (snapshot.users || []).find((item: Json) => item.id === id);
+    return user?.name || user?.email || id;
+  };
+  const branchLabel = (id?: string) =>
+    (snapshot.branches || []).find((branch: Json) => branch.id === id)?.name ||
+    id ||
+    "—";
+  const invoiceReturns = (invoiceId: string): Json[] =>
+    (snapshot.returns || []).filter(
+      (item: Json) => item.invoiceId === invoiceId,
+    );
+  const invoiceStatus = (invoice: Json) => {
+    const credits = invoiceReturns(invoice.id);
+    if (credits.some((item) => item.voided)) return "Voided";
+    if (!credits.length) return invoice.status || "Finalized";
+    const returned = credits
+      .flatMap((item) => item.lines || [])
+      .reduce((sum: number, line: Json) => sum + (line.quantity || 0), 0);
+    const sold = (invoice.lines || []).reduce(
+      (sum: number, line: Json) => sum + (line.qty || 0),
+      0,
+    );
+    return returned >= sold ? "Returned" : "Partially returned";
+  };
+  const returnedQuantity = (invoice: Json, lineId: string) =>
+    invoiceReturns(invoice.id)
+      .flatMap((item) => item.lines || [])
+      .filter((line: Json) => line.lineId === lineId)
+      .reduce((sum: number, line: Json) => sum + (line.quantity || 0), 0);
+  const tenderTypes: string[] = snapshot.settings?.tenderTypes || [
+    "Cash",
+    "Card",
+    "UPI",
+  ];
+  const money =(amount: number, currency = snapshot.settings?.currency || "INR") =>
     new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency,
@@ -223,6 +736,14 @@ export default function Register() {
     bins.find((bin) => bin.id === id)
       ? binName(bins.find((bin) => bin.id === id)!)
       : id;
+  const openSection = (name: string) => {
+    setSection(name);
+    setSearch("");
+    setError("");
+    setReport(null);
+  };
+  const currentNav = navItems.find((item) => item.tabs.some((tab) => tab.name === section));
+  const currentTabs = currentNav ? tabsFor(currentNav.tabs, role, features) : [];
   const updateCart = (changes: Json) =>
     setCart((value) => ({ ...value, ...changes }));
   const toast = (message: string) => {
@@ -433,6 +954,26 @@ export default function Register() {
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
       if (dialogRef.current?.open) return;
+      // Keyboard-wedge scanners type very quickly and finish with Enter. Capture
+      // them even when no field has focus so a scan is never lost.
+      const target = event.target as HTMLElement | null;
+      const typing = target?.closest?.("input, textarea, select, [contenteditable]");
+      if (!typing && session && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        const now = performance.now();
+        const buffer = scanBuffer.current;
+        if (now - buffer.last > 100) buffer.text = "";
+        buffer.last = now;
+        if (event.key === "Enter") {
+          if (buffer.text.length >= 3) {
+            event.preventDefault();
+            const code = buffer.text;
+            buffer.text = "";
+            handleScan(code);
+            return;
+          }
+          buffer.text = "";
+        } else if (event.key.length === 1) buffer.text += event.key;
+      }
       if (event.key === "F2") {
         event.preventDefault();
         document.getElementById("global-search")?.focus();
@@ -445,6 +986,23 @@ export default function Register() {
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
   });
+  useEffect(() => {
+    const Detector = (window as any).BarcodeDetector;
+    if (window.motorlineNative || !Detector?.getSupportedFormats || !navigator.mediaDevices)
+      return;
+    Detector.getSupportedFormats()
+      .then((formats: string[]) => setCameraScan(formats.length > 0))
+      .catch(() => setCameraScan(false));
+  }, []);
+  useEffect(() => {
+    if (!resumeCheckout.current || modal) return;
+    resumeCheckout.current = false;
+    showCheckout();
+  });
+  useEffect(() => {
+    if (role && !allowedSections.includes(section))
+      setSection(allowedSections[0] || "Settings");
+  }, [role, section]);
 
   async function refresh(message?: string) {
     if (session) await synchronize(session);
@@ -470,9 +1028,10 @@ export default function Register() {
     fields: Field[],
     action: (data: Json) => Promise<void>,
     submit = "Save",
+    expanded = false,
   ) {
     setError("");
-    setModal({ title, fields, action, submit });
+    setModal({ title, fields, action, submit, expanded });
   }
   const partField = (): Field => ({
     name: "productId",
@@ -506,6 +1065,18 @@ export default function Register() {
   ) {
     const result = await api("/approvals", { action, transactionId, reason });
     return result.id;
+  }
+  function cartNeedsApprovalFor(value: Json) {
+    return value.lines.some((line: Json) => {
+      const product = products.find((item) => item.id === line.productId);
+      return (
+        product &&
+        ["incompatible", "unverified"].includes(
+          fitment(product, value.vehicle).status,
+        ) &&
+        !line.overrideReason
+      );
+    });
   }
   function available(productId: string, binId?: string) {
     const physical = stock
@@ -541,25 +1112,168 @@ export default function Register() {
       .reduce((sum: number, line: Json) => sum + line.qty, 0);
     return physical - pending + reserved;
   }
+  function setLineQuantity(index: number, qty: number, quiet = false) {
+    if (!cart) return false;
+    const line = cart.lines[index];
+    if (!line) return false;
+    if (qty < 1) {
+      updateCart({
+        lines: cart.lines.filter((_: Json, i: number) => i !== index),
+      });
+      return true;
+    }
+    if (qty > 9999) return false;
+    const product = products.find((item) => item.id === line.productId);
+    if (
+      line.binId &&
+      product?.type !== "service" &&
+      qty > available(line.productId, line.binId)
+    ) {
+      if (!quiet)
+        toast(`Only ${available(line.productId, line.binId)} available in ${locationName(line.binId)}.`);
+      return false;
+    }
+    updateCart({
+      lines: cart.lines.map((item: Json, i: number) =>
+        i === index ? { ...item, qty } : item,
+      ),
+    });
+    return true;
+  }
+  /** Barcodes win over SKUs, which win over manufacturer and cross references. */
+  function findByCode(code: string) {
+    const key = normalize(code);
+    if (!key) return [];
+    const exact = (values: unknown[]) => values.some((value) => normalize(value) === key);
+    const tiers = [
+      (product: Json) => exact(product.barcodes || []),
+      (product: Json) => exact([product.sku]),
+      (product: Json) =>
+        exact([
+          product.partNumber,
+          ...(product.oemReferences || []),
+          ...(product.supplierReferences || []),
+          ...(product.supersedes || []),
+          ...(product.interchanges || []),
+        ]),
+    ];
+    for (const tier of tiers) {
+      const found = products.filter(tier);
+      if (found.length) return found;
+    }
+    return [];
+  }
+  function handleScan(raw: string) {
+    const code = raw.trim();
+    if (!code) return;
+    const bin = bins.find((item) => normalize(item.id) === normalize(code));
+    const matches = findByCode(code);
+    if (section !== "Billing" || !canSell) {
+      // Outside the counter a scan looks the item up in the current list.
+      setSearch(bin && !matches.length ? binName(bin) : code);
+      if (!matches.length && !bin) toast(`No part or bin matches “${code}”.`);
+      return;
+    }
+    if (!matches.length) {
+      setSearch(code);
+      toast(
+        bin
+          ? `${binName(bin)} is a bin label. Scan the part barcode to add it.`
+          : `No part matches “${code}”. Check the code or add it to the part in Inventory.`,
+      );
+      return;
+    }
+    if (matches.length > 1) {
+      setSearch(code);
+      setCategory("All parts");
+      toast(`${matches.length} parts share “${code}”. Choose the correct one below.`);
+      return;
+    }
+    const product = matches[0];
+    setSearch("");
+    if (cart && !product.serialTracked) {
+      // A repeat scan adds one more from the bin already confirmed for this sale.
+      const indexes = cart.lines
+        .map((line: Json, index: number) => (line.productId === product.id ? index : -1))
+        .filter((index: number) => index >= 0);
+      for (const index of indexes)
+        if (setLineQuantity(index, cart.lines[index].qty + 1, true)) {
+          toast(`${product.name} × ${cart.lines[index].qty + 1}`);
+          return;
+        }
+      if (indexes.length && product.type !== "service") {
+        const otherBins = bins.some(
+          (item) =>
+            item.kind === "sellable" &&
+            available(product.id, item.id) > 0 &&
+            !cart.lines.some(
+              (line: Json) => line.productId === product.id && line.binId === item.id,
+            ),
+        );
+        if (!otherBins) {
+          toast(`No more ${product.name} available to sell.`);
+          return;
+        }
+      }
+    }
+    addPart(product);
+  }
+  async function scanWithDevice() {
+    try {
+      if (window.motorlineNative?.platform === "android") {
+        const code = await window.motorlineNative.scan();
+        if (code) handleScan(code);
+        return;
+      }
+      setError("");
+      setModal({
+        title: "Scan barcode",
+        content: (
+          <CameraScanner
+            onCode={(code) => {
+              setModal(null);
+              setTimeout(() => handleScanRef.current(code), 0);
+            }}
+          />
+        ),
+      });
+    } catch (reason) {
+      fail(reason);
+    }
+  }
   function addPart(product: Json) {
     if (!cart) return;
+    if (!canSell) {
+      toast("Your role cannot create sales.");
+      return;
+    }
     const result = fitment(product, cart.vehicle);
+    const service =
+      product.type === "service" || product.category === "Services";
     const choices = bins.filter(
       (bin) => bin.kind === "sellable" && available(product.id, bin.id) > 0,
     );
+    if (!service && !choices.length) {
+      toast(`${product.name} is out of stock in every sellable bin.`);
+      return;
+    }
     const fields: Field[] = [
       quantityField("qty"),
-      {
-        name: "binId",
-        label: "Confirm the bin picked",
-        options: options(
-          choices,
-          (bin) =>
-            `${binName(bin)} · ${available(product.id, bin.id)} available`,
-        ),
-        value: choices[0]?.id,
-        required: product.type !== "service" && product.category !== "Services",
-      },
+      ...(service
+        ? []
+        : [
+            {
+              name: "binId",
+              label: "Confirm the bin picked",
+              options: options(
+                choices,
+                (bin) =>
+                  `${binName(bin)} · ${available(product.id, bin.id)} available`,
+              ),
+              value: choices[0]?.id,
+              required: true,
+            },
+          ]),
     ];
     if (product.serialTracked)
       fields.push({
@@ -570,7 +1284,7 @@ export default function Register() {
     if (["incompatible", "unverified"].includes(result.status))
       fields.push({
         name: "overrideReason",
-        label: `${result.status} fitment — approval reason`,
+        label: `${titleCase(result.status)} fitment — override reason`,
         required: true,
         help: result.missing.length
           ? `Complete ${result.missing.join(", ")} in vehicle selection to verify this match.`
@@ -581,16 +1295,22 @@ export default function Register() {
         name: "approvalId",
         label: "Manager approval ID",
         required: true,
+        help: `Ask a manager to approve fitment for transaction ${cart.transactionId}.`,
       });
     form(
       `Add ${product.name}`,
       fields,
       async (data) => {
         const qty = Number(data.qty);
+        if (!Number.isInteger(qty) || qty < 1 || qty > 9999)
+          throw new Error("Enter a whole-number quantity from 1 to 9999. If a barcode was scanned into this field, close the dialog and scan again.");
         const existing = cart.lines.find(
           (line: Json) =>
-            line.productId === product.id && line.binId === data.binId,
+            line.productId === product.id &&
+            (line.binId || null) === (data.binId || null),
         );
+        if (product.serialTracked && list(data.serials).length !== qty)
+          throw new Error("Enter one serial number for each unit.");
         if (
           data.binId &&
           qty + (existing?.qty || 0) > available(product.id, data.binId)
@@ -649,9 +1369,10 @@ export default function Register() {
           label: name[0].toUpperCase() + name.slice(1),
           type: name === "year" ? "number" : "text",
           value: current[name] || "",
+          advanced: !["make", "model", "year"].includes(name),
           help:
             name === "engine"
-              ? "Complete qualifiers when a part requires them."
+              ? "Needed only when a part fits one engine or fuel."
               : undefined,
         })),
       ],
@@ -683,6 +1404,7 @@ export default function Register() {
           );
       },
       "Use vehicle",
+      ["engine", "fuel", "trim", "drivetrain", "market"].some((name) => current[name]),
     );
   }
   function approveCart() {
@@ -940,69 +1662,54 @@ export default function Register() {
     await refresh();
   }
   function showCheckout() {
-    if (!cart?.lines.length) return;
-    const bill = quote(
-      cart,
-      products,
-      snapshot.settings?.roundingIncrement || 1,
-      snapshot.settings?.taxMode || "exclusive",
-    );
+    if (!cart?.lines.length || !canSell) return;
+    if (cartNeedsApprovalFor(cart)) {
+      setError("Record the fitment approval for the flagged lines before checkout.");
+      return;
+    }
+    let bill;
+    try {
+      bill = quote(
+        cart,
+        products,
+        snapshot.settings?.roundingIncrement || 1,
+        snapshot.settings?.taxMode || "exclusive",
+      );
+    } catch (reason) {
+      fail(reason);
+      return;
+    }
     const shifts = (snapshot.shifts || []).filter(
       (shift: Json) =>
         !shift.closedAt && (!shift.userId || shift.userId === session?.user.id),
     );
     if (!shifts.length) {
-      openShift();
+      openShift(true);
       return;
     }
     if (!cart.shiftId && shifts.length) updateCart({ shiftId: shifts[0].id });
-    const tenderOptions = (snapshot.settings?.tenderTypes || ["Cash", "Card", "UPI"]).map((type: string) => ({
-      value: type,
-      label: type,
-    }));
-    form(
-      `Checkout · ${money(bill.total)}`,
-      [
-        {
-          name: "tender",
-          label: "Payment type",
-          options: tenderOptions,
-          value: "Cash",
-          required: true,
-        },
-        {
-          name: "amount",
-          label: "Amount received",
-          type: "number",
-          value: (bill.total / 100).toFixed(2),
-          step: "0.01",
-          min: 0,
-          required: true,
-        },
-        { name: "secondTender", label: "Split tender", options: tenderOptions },
-        {
-          name: "secondAmount",
-          label: "Split amount",
-          type: "number",
-          value: 0,
-          min: 0,
-          step: "0.01",
-        },
-        {
-          name: "confirmed",
-          label: "Card / UPI provider confirmation",
-          options: [
-            { value: "no", label: "Awaiting confirmation" },
-            { value: "yes", label: "Confirmed by provider" },
-          ],
-          value: "no",
-        },
-        { name: "reference", label: "Provider reference" },
-        {name:"placeOfSupply",label:snapshot.settings?.taxScheme === "india-gst" ? "Place of supply state code" : "Place of supply",value:(snapshot.customers || []).find((customer:Json)=>customer.id === cart.customerId)?.stateCode || snapshot.settings?.business?.stateCode || "",required:snapshot.settings?.taxScheme === "india-gst",help:snapshot.settings?.taxScheme === "india-gst" ? "Confirm the two-digit state code for this supply." : undefined},
-      ],
-      checkout,
-      online ? "Complete sale" : "Save offline sale",
-    );
+    const gst = snapshot.settings?.taxScheme === "india-gst";
+    setError("");
+    setModal({
+      title: `Checkout · ${money(bill.total)}`,
+      content: (
+        <CheckoutFields
+          total={bill.total}
+          tenders={tenderTypes}
+          money={money}
+          gst={gst}
+          placeOfSupply={
+            (snapshot.customers || []).find(
+              (customer: Json) => customer.id === cart.customerId,
+            )?.stateCode ||
+            snapshot.settings?.business?.stateCode ||
+            ""
+          }
+        />
+      ),
+      action: checkout,
+      submit: online ? "Complete sale" : "Save offline sale",
+    });
   }
   async function holdSale() {
     if (!cart?.lines.length) return;
@@ -1035,26 +1742,56 @@ export default function Register() {
   }
   function editRegisterSettings() {
     const settings = snapshot.settings;
+    const symbol = money(0).replace(/[\d.,\s]/g, "") || settings.currency;
+    const rounding = [
+      { value: "1", label: "No rounding" },
+      { value: "50", label: `Nearest ${symbol}0.50` },
+      { value: "100", label: `Nearest ${symbol}1` },
+      { value: "1000", label: `Nearest ${symbol}10` },
+    ];
+    if (!rounding.some((option) => Number(option.value) === settings.roundingIncrement))
+      rounding.push({ value: String(settings.roundingIncrement), label: `${money(settings.roundingIncrement)} steps` });
     form("Register settings", [
-      {name:"currency", label:"Currency code", value:settings.currency, required:true, help:"Use a currency with two decimal minor units, such as INR, USD or EUR."},
-      {name:"invoicePrefix", label:"Invoice prefix", value:settings.invoicePrefix, required:true},
-      {name:"nextInvoice", label:"Next online invoice number", type:"number", min:1, value:settings.nextInvoice, required:true, help:"Numbers can only move forward. Reserved offline ranges are skipped."},
-      {name:"taxDisplayName", label:"Tax label on receipts", value:settings.taxDisplayName || "Tax", required:true},
-      {name:"taxScheme", label:"Tax scheme", options:[{value:"general",label:"General tax"},{value:"india-gst",label:"India GST — ordinary domestic sales"}], value:settings.taxScheme || "general", required:true,help:"GST requires the registered business state, GSTIN and part HSN/SAC. Special supplies and electronic government filing need separate integrations."},
-      {name:"localTaxName", label:"Local GST component", options:[{value:"SGST",label:"SGST"},{value:"UTGST",label:"UTGST"}], value:settings.localTaxName || "SGST", required:true},
-      {name:"creditNotePrefix", label:"Credit note prefix", value:settings.creditNotePrefix || "CR", required:true},
-      {name:"taxMode", label:"Catalog pricing", options:[{value:"exclusive",label:"Prices exclude tax"},{value:"inclusive",label:"Prices include tax"}], value:settings.taxMode || "exclusive", required:true},
-      {name:"taxRates", label:"Tax rates in percent, comma separated", value:(settings.taxRates || []).map((rate:number)=>rate/100).join(", "), required:true},
-      {name:"tenderTypes", label:"Enabled payment types", value:(settings.tenderTypes || ["Cash","Card","UPI"]).join(", "), required:true, help:"Cash, Card, UPI. Card and UPI require an externally confirmed payment reference."},
-      {name:"offlineTenders", label:"Offline payment types", value:(settings.offlineTenders || []).join(", "), help:"Cash only. Leave empty to disable offline payments."},
-      ...[["sessionHours","Session hours",1],["offlineHours","Maximum offline hours",0],["roundingIncrement","Rounding increment in minor units",1],["cashierDiscountLimit","Cashier discount limit in minor units",0]].map(([name,label,min])=>({name:String(name),label:String(label),type:"number",min:Number(min),value:settings[String(name)],required:true})),
+      {name:"taxScheme", label:"Tax", options:[{value:"general",label:"General tax"},{value:"india-gst",label:"India GST (domestic sales)"}], value:settings.taxScheme || "general", required:true, help:"GST needs the business GSTIN and state, and an HSN/SAC on each part."},
+      {name:"taxMode", label:"Catalog prices", options:[{value:"exclusive",label:"Exclude tax (tax added at billing)"},{value:"inclusive",label:"Include tax (MRP style)"}], value:settings.taxMode || "exclusive", required:true},
+      {name:"taxRates", label:"Tax rates offered (%)", value:(settings.taxRates || []).map((rate:number)=>rate/100).join(", "), required:true, help:"Separate with commas, for example 0, 5, 12, 18, 28."},
+      {name:"tenderTypes", label:"Payment types accepted", type:"checks", options:["Cash","Card","UPI"].map(value=>({value,label:value})), value:settings.tenderTypes || ["Cash","Card","UPI"], help:"Card and UPI need the provider's payment reference."},
+      {name:"roundingIncrement", label:"Round bill totals to", options:rounding, value:String(settings.roundingIncrement || 1), required:true},
+      {name:"cashierDiscountLimit", label:"Cashier can discount up to", type:"number", min:0, step:"0.01", value:(settings.cashierDiscountLimit || 0)/100, required:true, help:"Larger discounts need a manager approval."},
+      {name:"invoicePrefix", label:"Invoice number prefix", value:settings.invoicePrefix, required:true},
+      {name:"creditNotePrefix", label:"Credit note prefix", value:settings.creditNotePrefix || "CR", required:true, advanced:true},
+      {name:"nextInvoice", label:"Next invoice number", type:"number", min:1, value:settings.nextInvoice, advanced:true, help:"Can only move forward."},
+      {name:"taxDisplayName", label:"Tax label on receipts", value:settings.taxDisplayName || "Tax", advanced:true},
+      {name:"localTaxName", label:"Local GST component", options:[{value:"SGST",label:"SGST (states)"},{value:"UTGST",label:"UTGST (union territories)"}], value:settings.localTaxName || "SGST", advanced:true},
+      {name:"currency", label:"Currency code", value:settings.currency, advanced:true, help:"Locked once sales exist."},
+      {name:"sessionHours", label:"Sign staff out after (hours)", type:"number", min:1, value:settings.sessionHours, advanced:true},
+      ...(features.offline ? [
+        {name:"offlineHours", label:"Maximum offline selling (hours)", type:"number", min:0, value:settings.offlineHours, advanced:true},
+        {name:"offlineTenders", label:"Allowed while offline", type:"checks", options:[{value:"Cash",label:"Cash"}], value:settings.offlineTenders || [], advanced:true},
+      ] as Field[] : []),
     ], async data => {
-      await mutate("/settings", {...data,
-        nextInvoice:Number(data.nextInvoice), sessionHours:Number(data.sessionHours), offlineHours:Number(data.offlineHours),
-        roundingIncrement:Number(data.roundingIncrement),cashierDiscountLimit:Number(data.cashierDiscountLimit),
-        taxRates:list(data.taxRates).map(rate=>Math.round(Number(rate)*100)),
-        tenderTypes:list(data.tenderTypes), offlineTenders:list(data.offlineTenders),
-      }, "Register settings updated. Review catalog prices when changing the tax mode.");
+      if (!(data.tenderTypes || []).length) throw new Error("Choose at least one payment type.");
+      const number = (key: string) => (String(data[key] ?? "").trim() === "" ? undefined : Number(data[key]));
+      const body: Json = {
+        taxScheme: data.taxScheme,
+        taxMode: data.taxMode,
+        taxRates: list(data.taxRates).map(rate=>Math.round(Number(rate)*100)),
+        tenderTypes: data.tenderTypes,
+        roundingIncrement: Number(data.roundingIncrement),
+        cashierDiscountLimit: Math.round(Number(data.cashierDiscountLimit || 0) * 100),
+        invoicePrefix: data.invoicePrefix,
+        creditNotePrefix: data.creditNotePrefix,
+        taxDisplayName: String(data.taxDisplayName || "").trim() || "Tax",
+        localTaxName: data.localTaxName || "SGST",
+        currency: data.currency || settings.currency,
+        nextInvoice: number("nextInvoice"),
+        sessionHours: number("sessionHours"),
+      };
+      if (features.offline) {
+        body.offlineHours = number("offlineHours");
+        body.offlineTenders = data.offlineTenders || [];
+      }
+      await mutate("/settings", body, "Register settings saved. Check catalog prices if you changed how tax is included.");
     });
   }
   function editUser(user: Json = {}) {
@@ -1083,117 +1820,136 @@ export default function Register() {
       await mutate("/branches", {...data, ...(branch.id ? {id:branch.id} : {})}, "Branch saved. Assign staff access before using this branch.");
     });
   }
+  function commonTaxRate() {
+    const counts = new Map<number, number>();
+    for (const item of products)
+      if (item.type !== "service") counts.set(item.taxRate, (counts.get(item.taxRate) || 0) + 1);
+    const used = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    return used ?? snapshot.settings?.taxRates?.[0] ?? 0;
+  }
   function editProduct(product: Json = {}) {
+    const gst = snapshot.settings?.taxScheme === "india-gst";
+    const text = (name: string, label: string, extra: Partial<Field> = {}): Field => ({
+      name,
+      label,
+      value: product[name] ?? "",
+      ...extra,
+    });
+    const listField = (name: string, label: string, advanced = true): Field => ({
+      name,
+      label,
+      value: (product[name] || []).join(", "),
+      help: "Separate several with commas.",
+      advanced,
+    });
+    const price = (name: string, label: string, extra: Partial<Field> = {}): Field => ({
+      name,
+      label,
+      type: "number",
+      min: 0,
+      step: "0.01",
+      value: product[name] !== undefined ? product[name] / 100 : "",
+      ...extra,
+    });
     const fields: Field[] = [
-      ...[
-        ["name", "Part name"],
-        ["sku", "SKU"],
-        ["brand", "Brand"],
-        ["partNumber", "Manufacturer part number"],
-        ["description", "Description"],
-        ["category", "Category"],
-        ["unit", "Unit"],
-      ].map(([name, label]) => ({
-        name,
-        label,
-        value: product[name] || (name === "unit" ? "Each" : ""),
-        required: ["name", "sku", "brand", "category"].includes(name),
-      })),
-      ...[
-        ["barcodes", "Barcodes"],
-        ["oemReferences", "OEM references"],
-        ["supplierReferences", "Supplier part references"],
-        ["alternatives", "Alternative SKU IDs"],
-        ["supersedes", "Superseded part numbers"],
-        ["interchanges", "Interchange references"],
-      ].map(([name, label]) => ({
-        name,
-        label,
-        value: (product[name] || []).join(", "),
-        help: "Comma separated",
-      })),
-      {
-        name: "supplierId",
-        label: "Supplier",
-        options: options(snapshot.suppliers || []),
-        value: product.supplierId,
-      },
-      ...[
-        ["cost", "Cost"],
-        ["retailPrice", "Retail price"],
-        ["wholesalePrice", "Wholesale price"],
-        ["coreCharge", "Refundable core charge"],
-      ].map(([name, label]) => ({
-        name,
-        label,
-        type: "number",
-        min: 0,
-        step: "0.01",
-        value: (product[name] || 0) / 100,
+      text("name", "Part name", { required: true }),
+      text("sku", "SKU / item code", { required: true }),
+      text("brand", "Brand", { required: true }),
+      text("category", "Category", {
         required: true,
-      })),
+        suggestions: [...new Set(products.map((item) => item.category).filter(Boolean))],
+      }),
+      text("partNumber", "Manufacturer part number"),
+      listField("barcodes", "Barcode", false),
+      {
+        name: "generateBarcode",
+        label: "If no barcode",
+        options: [
+          { value: "true", label: "Create an in-store barcode" },
+          { value: "false", label: "None (labels print the SKU)" },
+        ],
+        value: product.barcodes?.length ? "false" : "true",
+      },
+      price("retailPrice", "Retail price", { required: true }),
+      price("wholesalePrice", "Wholesale price", { help: "Leave blank to use the retail price." }),
+      price("cost", "Purchase cost", { required: true }),
       {
         name: "taxRate",
         label: "Tax rate (%)",
         type: "number",
-        value: (product.taxRate ?? snapshot.settings?.taxRates?.[0] ?? 0) / 100,
+        value: (product.taxRate ?? commonTaxRate()) / 100,
         step: "0.01",
         min: 0,
         required: true,
       },
-      {
-        name: "taxCategory",
-        label: "Tax category",
-        value: product.taxCategory || "Standard",
-        required: true,
-      },
-      {name: "hsnSac", label: "HSN / SAC", value: product.hsnSac || ""},
-      {
-        name: "packSize",
-        label: "Pack size",
-        type: "number",
-        min: 1,
-        value: product.packSize || 1,
-        required: true,
-      },
+      { name: "hsnSac", label: "HSN / SAC", value: product.hsnSac || "", advanced: !gst, required: gst },
       {
         name: "reorderLevel",
-        label: "Reorder level",
+        label: "Reorder when stock falls to",
         type: "number",
         min: 0,
         value: product.reorderLevel ?? 0,
       },
       {
         name: "universal",
-        label: "Universal fit",
+        label: "Fits",
         options: [
-          { value: "true", label: "Universal" },
-          { value: "false", label: "Vehicle dependent" },
+          { value: "true", label: "All vehicles (universal)" },
+          { value: "false", label: "Specific vehicles only" },
         ],
-        value: String(product.universal || false),
+        value: String(product.universal ?? !features.fitment),
+        advanced: !features.fitment,
+      },
+      text("description", "Description", { advanced: true }),
+      text("unit", "Unit", { value: product.unit || "Each", advanced: true }),
+      {
+        name: "supplierId",
+        label: "Usual supplier",
+        options: options(snapshot.suppliers || []),
+        value: product.supplierId,
+        advanced: true,
+      },
+      listField("oemReferences", "OEM references"),
+      listField("supplierReferences", "Supplier part references"),
+      listField("supersedes", "Replaces part numbers"),
+      listField("interchanges", "Interchange references"),
+      listField("alternatives", "Alternative SKU IDs"),
+      price("coreCharge", "Refundable core deposit", { advanced: true, value: (product.coreCharge || 0) / 100 }),
+      text("taxCategory", "Tax category", { value: product.taxCategory || "Standard", advanced: true }),
+      {
+        name: "packSize",
+        label: "Pack size",
+        type: "number",
+        min: 1,
+        value: product.packSize || 1,
+        advanced: true,
       },
       {
         name: "serialTracked",
-        label: "Serial tracking",
+        label: "Serial numbers",
         options: [
-          { value: "true", label: "Required" },
-          { value: "false", label: "Disabled" },
+          { value: "false", label: "Not tracked" },
+          { value: "true", label: "Record a serial for every unit" },
         ],
         value: String(product.serialTracked || false),
+        advanced: true,
       },
     ];
-    form(product.id ? "Edit part" : "Add part", fields, async (data) => {
+    form(product.id ? `Edit ${product.name}` : "Add part", fields, async (data) => {
       const values: Json = {
         ...product,
         ...data,
         universal: data.universal === "true",
         serialTracked: data.serialTracked === "true",
-        packSize: Number(data.packSize),
-        reorderLevel: Number(data.reorderLevel),
+        packSize: Number(data.packSize) || 1,
+        reorderLevel: Number(data.reorderLevel) || 0,
         taxRate: Math.round(Number(data.taxRate) * 100),
+        unit: String(data.unit || "").trim() || "Each",
+        taxCategory: String(data.taxCategory || "").trim() || "Standard",
       };
+      if (String(data.wholesalePrice ?? "").trim() === "") data.wholesalePrice = data.retailPrice;
       for (const key of ["cost", "retailPrice", "wholesalePrice", "coreCharge"])
-        values[key] = Math.round(Number(data[key]) * 100);
+        values[key] = Math.round((Number(data[key]) || 0) * 100);
       for (const key of [
         "barcodes",
         "oemReferences",
@@ -1203,7 +1959,34 @@ export default function Register() {
         "interchanges",
       ])
         values[key] = list(data[key]);
-      await mutate("/products", values, "Part saved.");
+      const generate = values.generateBarcode === "true";
+      delete values.generateBarcode;
+      values.barcodes = [...new Set<string>(values.barcodes)];
+      const taken = new Set<string>(
+        products
+          .filter((item) => item.id !== product.id)
+          .flatMap((item) => item.barcodes || []),
+      );
+      const duplicate = values.barcodes.find((code: string) => taken.has(code));
+      if (duplicate) {
+        const owner = products.find((item) => item.barcodes?.includes(duplicate));
+        throw new Error(`Barcode ${duplicate} already belongs to ${owner?.name || "another part"}.`);
+      }
+      const badCheck = values.barcodes.find(
+        (code: string) => /^\d{13}$/.test(code) && !gs1Valid(code),
+      );
+      if (badCheck)
+        throw new Error(`${badCheck} looks like an EAN-13 but its check digit is wrong. Re-scan it from the packaging.`);
+      let created = "";
+      if (generate && !values.barcodes.length) {
+        created = inStoreBarcode(taken);
+        values.barcodes = [created];
+      }
+      await mutate(
+        "/products",
+        values,
+        created ? `Part saved with in-store barcode ${created}.` : "Part saved.",
+      );
     });
   }
   function editLocation(bin: Json = {}) {
@@ -1245,7 +2028,7 @@ export default function Register() {
         ),
         min: kind === "adjust" ? undefined : 0,
       },
-      { name: "serials", label: "Serial numbers, comma separated" },
+      { name: "serials", label: "Serial numbers (serial-tracked parts only)", help: "Separate with commas.", advanced: true },
       reasonField,
       ...(!manager && kind !== "move"
         ? [
@@ -1324,15 +2107,23 @@ export default function Register() {
         {
           name: "productId",
           label: "Part",
-          options: (order.lines || []).map((line: Json) => ({
-            value: line.productId,
-            label: `${productName(line.productId)} · ordered ${line.quantity}`,
-          })),
+          options: (order.lines || [])
+            .filter((line: Json) => (line.received || 0) < line.quantity)
+            .map((line: Json) => ({
+              value: line.productId,
+              label: `${productName(line.productId)} · ${line.quantity - (line.received || 0)} of ${line.quantity} outstanding`,
+            })),
+          value:
+            (order.lines || []).filter((line: Json) => (line.received || 0) < line.quantity)
+              .length === 1
+              ? order.lines.find((line: Json) => (line.received || 0) < line.quantity).productId
+              : undefined,
           required: true,
         },
         quantityField(),
-        binField(),
+        binField("binId", "Put away into bin", "sellable"),
         {
+          advanced: true,
           name: "landedCost",
           label: "Additional landed cost for this receipt",
           type: "number",
@@ -1340,7 +2131,7 @@ export default function Register() {
           step: "0.01",
           value: 0,
         },
-        { name: "serials", label: "Serial numbers, comma separated" },
+        { name: "serials", label: "Serial numbers (serial-tracked parts only)", help: "Separate with commas.", advanced: true },
       ],
       async (data) => {
         await mutate(
@@ -1363,20 +2154,25 @@ export default function Register() {
       "Receive stock",
     );
   }
-  function addContact(kind: string, contact: Json = {}) {
+  function addContact(kind: string, contact: Json = {}, onSaved?: (saved: Json) => void) {
+    const gst = snapshot.settings?.taxScheme === "india-gst";
+    const extra = !gst;
     form(
       `${contact.id ? "Edit" : "Add"} ${kind === "customers" ? "customer" : "supplier"}`,
       [
         { name: "name", label: "Name", value: contact.name, required: true },
         { name: "phone", label: "Phone", type: "tel", value: contact.phone },
-        { name: "email", label: "Email", type: "email", value: contact.email },
-        { name: "address", label: "Address", type: "textarea", value: contact.address },
-        { name: "taxRegistrationId", label: "Tax registration / GSTIN", value: contact.taxRegistrationId },
-        { name: "stateCode", label: "State code", value: contact.stateCode },
+        { name: "email", label: "Email", type: "email", value: contact.email, advanced: true },
+        { name: "address", label: "Address", type: "textarea", value: contact.address, advanced: extra },
+        { name: "taxRegistrationId", label: "GSTIN / tax registration", value: contact.taxRegistrationId, advanced: extra },
+        { name: "stateCode", label: "State code", value: contact.stateCode, advanced: extra, help: gst ? "Two digits, for example 27 for Maharashtra." : undefined },
       ],
       async (data) => {
-        await mutate(`/${kind}`, {...contact, ...data}, "Contact saved.");
+        const saved = await mutate(`/${kind}`, {...contact, ...data}, `${kind === "customers" ? "Customer" : "Supplier"} saved.`);
+        onSaved?.(saved);
       },
+      "Save",
+      !!(contact.email || contact.address || contact.taxRegistrationId || contact.stateCode),
     );
   }
   function editFitment(productId?: string) {
@@ -1396,6 +2192,7 @@ export default function Register() {
           name,
           label: name[0].toUpperCase() + name.slice(1),
           required: ["make", "model"].includes(name),
+          advanced: !["make", "model"].includes(name),
         })),
         {
           name: "yearFrom",
@@ -1412,6 +2209,7 @@ export default function Register() {
           required: true,
         },
         {
+          advanced: true,
           name: "exclusions",
           label: "Excluded vehicle configuration",
           help: "Example engine=2.0L,fuel=Diesel. These qualifiers must all match to exclude a vehicle.",
@@ -1422,9 +2220,9 @@ export default function Register() {
           label: "Effective from",
           type: "date",
           value: new Date().toISOString().slice(0, 10),
-          required: true,
+          advanced: true,
         },
-        { name: "effectiveTo", label: "Effective until", type: "date" },
+        { name: "effectiveTo", label: "Effective until", type: "date", advanced: true },
       ],
       async (data) => {
         const exclusion: Json = {};
@@ -1444,6 +2242,7 @@ export default function Register() {
             yearFrom: Number(data.yearFrom),
             yearTo: Number(data.yearTo),
             exclusions: Object.keys(exclusion).length ? [exclusion] : [],
+            effectiveFrom: data.effectiveFrom || new Date().toISOString().slice(0, 10),
             effectiveTo: data.effectiveTo || null,
           },
           "Fitment rule added.",
@@ -1505,16 +2304,27 @@ export default function Register() {
   }
   function returnInvoice(invoice: Json) {
     const transactionId = crypto.randomUUID();
+    const returnable = (invoice.lines || [])
+      .map((line: Json) => ({
+        line,
+        remaining: line.qty - returnedQuantity(invoice, line.id),
+      }))
+      .filter((entry: Json) => entry.remaining > 0);
+    if (!returnable.length) {
+      toast("Every line on this invoice has already been returned.");
+      return;
+    }
     form(
       `Return from ${invoice.number}`,
       [
         {
           name: "lineId",
           label: "Original invoice line",
-          options: invoice.lines.map((line: Json) => ({
+          options: returnable.map(({ line, remaining }: Json) => ({
             value: line.id,
-            label: `${line.name || line.product?.name || productName(line.productId)} · sold ${line.qty} · ${locationName(line.binId)}`,
+            label: `${line.name || line.product?.name || productName(line.productId)} · ${remaining} of ${line.qty} returnable`,
           })),
+          value: returnable.length === 1 ? returnable[0].line.id : undefined,
           required: true,
         },
         quantityField(),
@@ -1523,22 +2333,31 @@ export default function Register() {
           label: "Returned condition",
           options: ["sellable", "damaged", "warranty"].map((value) => ({
             value,
-            label: value,
+            label: titleCase(value),
           })),
           value: "sellable",
+          required: true,
+          help: "The destination bin must have the same condition.",
         },
-        binField("binId", "Return destination"),
+        {
+          name: "binId",
+          label: "Return destination bin",
+          options: options(bins, (bin) => `${binName(bin)} · ${bin.kind}`),
+          value: bins.find((bin) => bin.kind === "sellable")?.id,
+          help: "Not needed for services.",
+        },
         reasonField,
         {
           name: "refundType",
           label: "Refund method",
-          options: ["Cash", "Card", "UPI"].map((value) => ({
+          options: tenderTypes.map((value) => ({
             value,
             label: value,
           })),
-          value: "Cash",
+          value: invoice.tenders?.[0]?.type || "Cash",
+          required: true,
         },
-        { name: "serials", label: "Returned serial numbers, comma separated" },
+        { name: "serials", label: "Returned serial numbers (serial-tracked parts only)", help: "Separate with commas.", advanced: true },
         ...(!manager
           ? [
               {
@@ -1551,6 +2370,21 @@ export default function Register() {
           : []),
       ],
       async (data) => {
+        const entry = returnable.find(
+          (item: Json) => item.line.id === data.lineId,
+        );
+        if (!entry) throw new Error("Choose the invoice line being returned.");
+        const quantity = Number(data.quantity);
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > entry.remaining)
+          throw new Error(`Return between 1 and ${entry.remaining} units of this line.`);
+        if (entry.line.type !== "service") {
+          const bin = bins.find((item) => item.id === data.binId);
+          if (!bin) throw new Error("Choose the bin receiving the returned stock.");
+          if (bin.kind !== data.condition)
+            throw new Error(`Choose a ${data.condition} bin for ${data.condition} returns.`);
+        }
+        if (entry.line.serials?.length && list(data.serials).length !== quantity)
+          throw new Error("Enter one returned serial number for each unit.");
         const approvalId = manager
           ? await approval("return", transactionId, data.reason)
           : data.approvalId;
@@ -1590,9 +2424,9 @@ export default function Register() {
           required: true,
         },
         partField(),
-        binField(),
+        binField("binId", "Source bin", "sellable"),
         quantityField(),
-        { name: "serials", label: "Serial numbers, comma separated" },
+        { name: "serials", label: "Serial numbers (serial-tracked parts only)", help: "Separate with commas.", advanced: true },
         reasonField,
       ],
       async (data) => {
@@ -1629,9 +2463,9 @@ export default function Register() {
           })),
           required: true,
         },
-        binField(),
+        binField("binId", "Receive into bin", "sellable"),
         quantityField(),
-        { name: "serials", label: "Serial numbers, comma separated" },
+        { name: "serials", label: "Serial numbers (serial-tracked parts only)", help: "Separate with commas.", advanced: true },
       ],
       async (data) => {
         await mutate(
@@ -1670,18 +2504,21 @@ export default function Register() {
           value: "true",
         },
         {
+          advanced: true,
           name: "offlineHours",
           label: "Offline authorization hours",
           type: "number",
-          min: 1,
-          value: 24,
+          min: 0,
+          value: Math.min(24, snapshot.settings?.offlineHours ?? 24),
+          help: `Organization maximum: ${snapshot.settings?.offlineHours ?? 0} hours.`,
           required: true,
         },
         {
+          advanced: true,
           name: "rangeSize",
           label: "Invoice range size",
           type: "number",
-          min: 1,
+          min: 10,
           value: 1000,
           required: true,
         },
@@ -1692,7 +2529,7 @@ export default function Register() {
           offlineAllowed: data.offlineAllowed === "true",
           offlineHours: Number(data.offlineHours),
           rangeSize: Number(data.rangeSize),
-          tenders: ["Cash"],
+          tenders: snapshot.settings?.offlineTenders ?? ["Cash"],
         });
         await locked(deviceKey(session!), async () => {
           const latest = (await readLocal<Workspace>(scopeKey(session!)))!;
@@ -1713,18 +2550,21 @@ export default function Register() {
       "Enroll device",
     );
   }
-  function openShift() {
+  function openShift(thenCheckout = false) {
     form(
       "Open shift",
       [
         {
           name: "openingCash",
-          label: "Opening cash",
+          label: "Opening cash in drawer",
           type: "number",
           step: "0.01",
           min: 0,
           value: 0,
           required: true,
+          help: thenCheckout
+            ? "A shift is required before checkout. Checkout continues after the shift opens."
+            : undefined,
         },
       ],
       async (data) => {
@@ -1734,8 +2574,27 @@ export default function Register() {
           "Shift opened.",
         );
         updateCart({ shiftId: shift.id });
+        if (thenCheckout) resumeCheckout.current = true;
       },
+      "Open shift",
     );
+  }
+  function expectedCash(shift: Json) {
+    const cashSales = (snapshot.invoices || [])
+      .filter((sale: Json) => sale.shiftId === shift.id)
+      .reduce(
+        (sum: number, sale: Json) =>
+          sum +
+          (sale.tenders || [])
+            .filter((tender: Json) => tender.type === "Cash")
+            .reduce((n: number, tender: Json) => n + tender.amount, 0) -
+          (sale.change || 0),
+        0,
+      );
+    const refunds = [...(snapshot.returns || []), ...(snapshot.coreReturns || [])]
+      .filter((item: Json) => item.shiftId === shift.id && (item.refundType || "Cash") === "Cash")
+      .reduce((sum: number, item: Json) => sum + (item.total || 0), 0);
+    return (shift.openingCash || 0) + cashSales - refunds;
   }
   function closeShift(shift: Json) {
     form(
@@ -1743,13 +2602,16 @@ export default function Register() {
       [
         {
           name: "countedCash",
-          label: "Cash counted",
+          label: "Cash counted in drawer",
           type: "number",
           min: 0,
           step: "0.01",
           required: true,
+          help: manager
+            ? `Expected about ${money(expectedCash(shift))}. The server records the final variance.`
+            : "Count the drawer before closing. The server records any variance.",
         },
-        reasonField,
+        { ...reasonField, label: "Closing note", value: "Shift close" },
       ],
       async (data) => {
         await mutate(
@@ -1870,6 +2732,17 @@ export default function Register() {
                 >
                   Stock count
                 </button>
+                <button
+                  className="button"
+                  onClick={() =>
+                    printLabels(
+                      matching(products).map(productLabel),
+                      search ? `Labels · ${matching(products).length} matching parts` : `Labels · all ${products.length} parts`,
+                    )
+                  }
+                >
+                  Print labels
+                </button>
               </>
             )}
           </div>
@@ -1919,7 +2792,9 @@ export default function Register() {
                   </>
                 ),
               ],
-              ["Cost", (product) => money(product.cost)],
+              ...(inventoryRole
+                ? ([["Cost", (product: Json) => money(product.cost)]] as [string, (item: Json) => React.ReactNode][])
+                : []),
             ]}
             action={(product) =>
               inventoryRole && (
@@ -1930,12 +2805,12 @@ export default function Register() {
                   >
                     Edit
                   </button>
-                  <button
+                  {features.fitment && <button
                     className="button"
                     onClick={() => editFitment(product.id)}
                   >
                     Fitment
-                  </button>
+                  </button>}
                   <button
                     className="button"
                     onClick={() => printLabel(product)}
@@ -1965,6 +2840,17 @@ export default function Register() {
                   onClick={() => stockOperation("move")}
                 >
                   Move stock
+                </button>
+                <button
+                  className="button"
+                  onClick={() =>
+                    printLabels(
+                      matching(bins).map((bin) => ({ name: binName(bin), code: bin.id, sku: bin.kind })),
+                      "Bin labels",
+                    )
+                  }
+                >
+                  Print bin labels
                 </button>
               </>
             )}
@@ -2017,17 +2903,32 @@ export default function Register() {
             )}
           </div>
           <DataTable
-            rows={matching(snapshot.purchaseOrders || [])}
+            rows={matching([...(snapshot.purchaseOrders || [])].reverse())}
             columns={[
-              ["Order", (order) => order.number || order.id],
+              ["Created", (order) => formatDate(order.createdAt)],
               [
                 "Supplier",
                 (order) =>
-                  snapshot.suppliers.find(
+                  (snapshot.suppliers || []).find(
                     (supplier: Json) => supplier.id === order.supplierId,
-                  )?.name,
+                  )?.name || "—",
               ],
-              ["Status", (order) => order.status],
+              [
+                "Status",
+                (order) => (
+                  <span className={`status-chip status-${order.status}`}>{titleCase(order.status)}</span>
+                ),
+              ],
+              [
+                "Value",
+                (order) =>
+                  money(
+                    (order.lines || []).reduce(
+                      (sum: number, line: Json) => sum + line.quantity * line.cost,
+                      0,
+                    ),
+                  ),
+              ],
               [
                 "Lines",
                 (order) =>
@@ -2040,7 +2941,8 @@ export default function Register() {
               ],
             ]}
             action={(order) =>
-              inventoryRole && (
+              inventoryRole &&
+              order.status !== "received" && (
                 <button
                   className="button"
                   onClick={() => receivePurchase(order)}
@@ -2076,42 +2978,95 @@ export default function Register() {
     }
     if (section === "Sales history")
       return (
-        <DataTable
-          rows={matching(snapshot.invoices || [])}
-          columns={[
-            ["Invoice", (invoice) => invoice.number],
-            ["Date", (invoice) => formatDate(invoice.createdAt)],
-            ["Status", (invoice) => invoice.status || "Finalized"],
-            ["Total", (invoice) => money(invoice.total)],
-            ["Cashier", (invoice) => invoice.cashierId],
-          ]}
-          action={(invoice) => (
-            <>
-              <button className="button" onClick={() => setReceipt(invoice)}>
-                Receipt
+        <>
+          <h2>Invoices</h2>
+          <DataTable
+            rows={matching([...(snapshot.invoices || [])].reverse())}
+            columns={[
+              ["Invoice", (invoice) => invoice.number],
+              ["Date", (invoice) => formatDate(invoice.createdAt)],
+              [
+                "Customer",
+                (invoice) => invoice.customer?.name || "Walk-in",
+              ],
+              [
+                "Status",
+                (invoice) => (
+                  <span className={`status-chip status-${normalize(invoiceStatus(invoice))}`}>
+                    {invoiceStatus(invoice)}
+                  </span>
+                ),
+              ],
+              ["Total", (invoice) => money(invoice.total)],
+              ["Cashier", (invoice) => userName(invoice.cashierId)],
+            ]}
+            action={(invoice) => {
+              const status = invoiceStatus(invoice);
+              const open = !["Voided", "Returned"].includes(status);
+              return (
+                <>
+                  <button className="button" onClick={() => setReceipt(invoice)}>
+                    Receipt
+                  </button>
+                  {open && canSell && (
+                    <button className="button" onClick={() => returnInvoice(invoice)}>
+                      Return
+                    </button>
+                  )}
+                  {manager && status === "Finalized" && (
+                    <button
+                      className="button danger-button"
+                      onClick={() =>
+                        form(
+                          `Void ${invoice.number}`,
+                          [
+                            reasonField,
+                            {
+                              name: "refundType",
+                              label: "Refund method",
+                              options: tenderTypes.map((value) => ({ value, label: value })),
+                              value: invoice.tenders?.[0]?.type || "Cash",
+                              required: true,
+                            },
+                          ],
+                          async (data) => {
+                            const result = await mutate(
+                              `/invoices/${invoice.id}/void`,
+                              data,
+                              "Invoice voided. Stock returned and credit note issued.",
+                            );
+                            if (result?.totalRefund !== undefined)
+                              toast(`Invoice voided. Refund ${money(result.totalRefund)} by ${data.refundType}.`);
+                          },
+                          "Void invoice",
+                        )
+                      }
+                    >
+                      Void
+                    </button>
+                  )}
+                </>
+              );
+            }}
+          />
+          <h2>Credit notes</h2>
+          <DataTable
+            rows={matching([...(snapshot.returns || [])].reverse())}
+            columns={[
+              ["Credit note", (item) => item.number || item.id],
+              ["Invoice", (item) => item.invoiceNumber || item.invoiceId],
+              ["Date", (item) => formatDate(item.createdAt)],
+              ["Type", (item) => (item.voided ? "Void" : "Return")],
+              ["Condition", (item) => titleCase(item.condition || "")],
+              ["Refund", (item) => `${money(item.total)} · ${item.refundType || "Cash"}`],
+            ]}
+            action={(item) => (
+              <button className="button" onClick={() => setReceipt(item)}>
+                View
               </button>
-              <button className="button" onClick={() => returnInvoice(invoice)}>
-                Return
-              </button>
-              {manager && (
-                <button
-                  className="button"
-                  onClick={() =>
-                    form("Void invoice", [reasonField], async (data) => {
-                      await mutate(
-                        `/invoices/${invoice.id}/void`,
-                        data,
-                        "Audited invoice void recorded.",
-                      );
-                    })
-                  }
-                >
-                  Void
-                </button>
-              )}
-            </>
-          )}
-        />
+            )}
+          />
+        </>
       );
     if (section === "Transfers")
       return (
@@ -2126,13 +3081,28 @@ export default function Register() {
           <DataTable
             rows={matching(snapshot.transfers || [])}
             columns={[
-              ["Transfer", (item) => item.number || item.id],
-              ["From", (item) => item.branchId || item.sourceBranchId],
-              ["To", (item) => item.destinationBranchId],
-              ["Status", (item) => item.status],
+              ["Date", (item) => formatDate(item.createdAt)],
+              ["From", (item) => branchLabel(item.branchId || item.sourceBranchId)],
+              ["To", (item) => branchLabel(item.destinationBranchId)],
+              [
+                "Parts",
+                (item) =>
+                  (item.lines || []).map((line: Json) => (
+                    <small key={line.id || line.productId}>
+                      {productName(line.productId)} · {line.received || 0}/{line.quantity} received
+                    </small>
+                  )),
+              ],
+              [
+                "Status",
+                (item) => (
+                  <span className={`status-chip status-${item.status}`}>{titleCase(item.status)}</span>
+                ),
+              ],
             ]}
             action={(item) =>
               inventoryRole &&
+              item.status !== "received" &&
               item.destinationBranchId === session?.branchId && (
                 <button
                   className="button"
@@ -2197,24 +3167,59 @@ export default function Register() {
       return (
         <>
           <div className="section-toolbar">
-            <button className="primary-button" onClick={openShift}>
-              Open shift
-            </button>
+            {(snapshot.shifts || []).some(
+              (shift: Json) => !shift.closedAt && shift.userId === session?.user.id,
+            ) ? (
+              <p>Your shift is open.</p>
+            ) : (
+              <button className="primary-button" onClick={() => openShift()}>
+                Open shift
+              </button>
+            )}
           </div>
           <DataTable
-            rows={snapshot.shifts || []}
+            rows={[...(snapshot.shifts || [])].reverse()}
             columns={[
-              ["Cashier", (shift) => shift.userId],
+              ["Cashier", (shift) => userName(shift.userId)],
               [
                 "Opened",
                 (shift) => formatDate(shift.openedAt || shift.createdAt),
               ],
+              ["Closed", (shift) => (shift.closedAt ? formatDate(shift.closedAt) : "—")],
               ["Opening cash", (shift) => money(shift.openingCash)],
-              ["Status", (shift) => (shift.closedAt ? "Closed" : "Open")],
-              ["Variance", (shift) => money(shift.variance || 0)],
+              [
+                "Expected cash",
+                (shift) =>
+                  shift.closedAt
+                    ? money(shift.expectedCash)
+                    : manager
+                      ? money(expectedCash(shift))
+                      : "—",
+              ],
+              ["Counted", (shift) => (shift.closedAt ? money(shift.countedCash) : "—")],
+              [
+                "Variance",
+                (shift) =>
+                  shift.closedAt ? (
+                    <span className={shift.variance ? "fit-incompatible" : "fit-compatible"}>
+                      {money(shift.variance || 0)}
+                    </span>
+                  ) : (
+                    "—"
+                  ),
+              ],
+              [
+                "Status",
+                (shift) => (
+                  <span className={`status-chip status-${shift.closedAt ? "closed" : "open"}`}>
+                    {shift.closedAt ? "Closed" : "Open"}
+                  </span>
+                ),
+              ],
             ]}
             action={(shift) =>
-              !shift.closedAt && (
+              !shift.closedAt &&
+              (manager || shift.userId === session?.user.id) && (
                 <button className="button" onClick={() => closeShift(shift)}>
                   Close shift
                 </button>
@@ -2227,18 +3232,14 @@ export default function Register() {
       return (
         <>
           <div className="section-toolbar">
-            {manager && (
-              <button className="primary-button" onClick={enrollDevice}>
-                Enroll this counter
-              </button>
-            )}
             <button
-              className="button"
+              className="primary-button"
               onClick={() => refresh("Synchronization checked.")}
             >
               Synchronize now
             </button>
           </div>
+          {(features.offline || (workspace?.pending || []).length > 0 || (snapshot.conflicts || []).length > 0) && <>
           <h2>Pending on this device</h2>
           <DataTable
             rows={workspace?.pending || []}
@@ -2351,13 +3352,14 @@ export default function Register() {
               )
             }
           />
-          <h2>Audit trail</h2>
+          </>}
+          {manager && <h2>Audit trail</h2>}
           <DataTable
             rows={(snapshot.audit || []).slice(-100).reverse()}
             columns={[
               ["Time", (item) => formatDate(item.createdAt)],
-              ["User", (item) => item.userId],
-              ["Action", (item) => item.action],
+              ["User", (item) => userName(item.userId || item.actorId || item.actor?.id)],
+              ["Action", (item) => humanize(item.action || "")],
               ["Reason", (item) => item.reason || item.details?.reason || "—"],
             ]}
           />
@@ -2378,10 +3380,19 @@ export default function Register() {
                       label: "Warranty return",
                       options: options(
                         (snapshot.returns || []).filter(
-                          (item: Json) => item.condition === "warranty",
+                          (item: Json) =>
+                            item.condition === "warranty" &&
+                            !(snapshot.warrantyClaims || []).some(
+                              (claim: Json) => claim.returnId === item.id,
+                            ),
                         ),
+                        (item) =>
+                          `${item.number || item.id} · ${(item.lines || [])
+                            .map((line: Json) => line.name || productName(line.productId))
+                            .join(", ")}`,
                       ),
                       required: true,
+                      help: "Record a return with the warranty condition first.",
                     },
                     {
                       name: "supplierId",
@@ -2403,20 +3414,42 @@ export default function Register() {
             >
               Create warranty claim
             </button>
-            <button
+            {manager && <button
               className="button"
-              onClick={() =>
+              onClick={() => {
+                const withCores = (snapshot.invoices || []).filter(
+                  (invoice: Json) =>
+                    invoiceStatus(invoice) !== "Voided" &&
+                    (invoice.lines || []).some((line: Json) => line.coreCharge > 0),
+                );
+                if (!withCores.length) {
+                  toast("No invoices in this branch carry a refundable core charge.");
+                  return;
+                }
                 form(
                   "Record core return",
                   [
                     {
                       name: "invoiceId",
                       label: "Original invoice",
-                      options: options(snapshot.invoices || []),
+                      options: options(withCores, (invoice) => `${invoice.number} · ${formatDate(invoice.createdAt)}`),
                       required: true,
                     },
-                    partField(),
+                    {
+                      ...partField(),
+                      options: options(
+                        products.filter((product) => product.coreCharge > 0),
+                        (product) => `${product.sku} · ${product.name} · core ${money(product.coreCharge)}`,
+                      ),
+                    },
                     quantityField(),
+                    {
+                      name: "refundType",
+                      label: "Refund method",
+                      options: tenderTypes.map((value) => ({ value, label: value })),
+                      value: "Cash",
+                      required: true,
+                    },
                     reasonField,
                   ],
                   async (data) => {
@@ -2426,25 +3459,41 @@ export default function Register() {
                         ...data,
                         transactionId: crypto.randomUUID(),
                         quantity: Number(data.quantity),
-                        refundType: "Cash",
                       },
                       "Core charge refund recorded.",
                     );
                   },
-                )
-              }
+                  "Record refund",
+                );
+              }}
             >
               Receive core
-            </button>
+            </button>}
           </div>
           <h2>Warranty claims</h2>
           <DataTable
             rows={snapshot.warrantyClaims || []}
             columns={[
-              ["Claim", (item) => item.id],
-              ["Return", (item) => item.returnId],
-              ["Status", (item) => item.status],
+              [
+                "Return",
+                (item) =>
+                  (snapshot.returns || []).find((entry: Json) => entry.id === item.returnId)
+                    ?.number || item.returnId,
+              ],
+              [
+                "Supplier",
+                (item) =>
+                  (snapshot.suppliers || []).find((entry: Json) => entry.id === item.supplierId)
+                    ?.name || "—",
+              ],
+              [
+                "Status",
+                (item) => (
+                  <span className={`status-chip status-${item.status}`}>{titleCase(item.status)}</span>
+                ),
+              ],
               ["Reason", (item) => item.reason],
+              ["Updated", (item) => formatDate(item.updatedAt || item.createdAt)],
             ]}
             action={(claim) => (
               <button
@@ -2485,10 +3534,16 @@ export default function Register() {
           <DataTable
             rows={snapshot.coreReturns || []}
             columns={[
-              ["Invoice", (item) => item.invoiceId],
+              [
+                "Invoice",
+                (item) =>
+                  (snapshot.invoices || []).find((invoice: Json) => invoice.id === item.invoiceId)
+                    ?.number || item.invoiceId,
+              ],
+              ["Date", (item) => formatDate(item.createdAt)],
               ["Part", (item) => productName(item.productId)],
               ["Quantity", (item) => item.quantity],
-              ["Refund", (item) => money(item.total || item.amount)],
+              ["Refund", (item) => `${money(item.total || item.amount)} · ${item.refundType || "Cash"}`],
             ]}
           />
         </>
@@ -2501,18 +3556,30 @@ export default function Register() {
               field={{
                 name: "name",
                 label: "Report",
-                options: reportNames.map((value) => ({
-                  value,
-                  label: value.replaceAll("-", " "),
-                })),
+                options: reportNames
+                  .filter((value) => manager || inventoryReports.includes(value))
+                  .map((value) => ({
+                    value,
+                    label: humanize(value),
+                  })),
                 value: "sales",
                 required: true,
               }}
             />
             <FieldInput
-              field={{ name: "dateFrom", label: "From", type: "date" }}
+              field={{
+                name: "dateFrom",
+                label: "From",
+                type: "date",
+              }}
             />
             <FieldInput field={{ name: "dateTo", label: "To", type: "date" }} />
+            <button className="primary-button" type="submit">
+              Run report
+            </button>
+            <details className="more-options report-filters">
+              <summary>More filters</summary>
+              <div className="report-form-extra">
             <FieldInput field={{ name: "category", label: "Category" }} />
             <FieldInput field={{ name: "sku", label: "SKU" }} />
             <FieldInput
@@ -2522,26 +3589,35 @@ export default function Register() {
                 options: options(snapshot.suppliers || []),
               }}
             />
-            <FieldInput field={{ name: "cashier", label: "Cashier ID" }} />
+            {(snapshot.users || []).length > 0 ? (
+              <FieldInput
+                field={{
+                  name: "cashier",
+                  label: "Cashier",
+                  options: options(snapshot.users || [], (user) => user.name || user.email),
+                }}
+              />
+            ) : (
+              <FieldInput field={{ name: "cashier", label: "Cashier ID" }} />
+            )}
             <FieldInput
               field={{
                 name: "paymentType",
                 label: "Payment",
-                options: ["Cash", "Card", "UPI"].map((value) => ({
+                options: tenderTypes.map((value) => ({
                   value,
                   label: value,
                 })),
               }}
             />
-            <button className="primary-button" type="submit">
-              Run report
-            </button>
+              </div>
+            </details>
           </form>
           {report && (
             <>
               <div className="section-toolbar">
-                <h2>{report.name}</h2>
-                <button className="button" onClick={exportReport}>
+                <h2>{humanize(report.name)} report</h2>
+                <button className="button" onClick={exportReport} disabled={!report.rows?.length}>
                   Export CSV
                 </button>
                 <button className="button" onClick={() => window.print()}>
@@ -2551,31 +3627,31 @@ export default function Register() {
               <div className="metrics">
                 {Object.entries(report.totals || {}).map(([name, value]) => (
                   <div className="metric" key={name}>
-                    <span>{name}</span>
-                    <strong>
-                      {typeof value === "number" &&
-                      /amount|total|revenue|margin|tax|cost|discount|refund/i.test(
-                        name,
-                      )
-                        ? money(value)
-                        : String(value)}
-                    </strong>
+                    <span>{humanize(name)}</span>
+                    <strong>{reportCell(name, value)}</strong>
                   </div>
                 ))}
               </div>
+              {report.pendingConflicts > 0 && (
+                <p className="form-hint">
+                  {report.pendingConflicts} offline sale conflict(s) await manager review and are excluded.
+                </p>
+              )}
               <DataTable
                 rows={report.rows || []}
-                columns={Object.keys(report.rows?.[0] || {})
-                  .filter((key) => typeof report.rows[0][key] !== "object")
+                columns={[
+                  ...new Set<string>(
+                    (report.rows || []).slice(0, 50).flatMap((row: Json) => Object.keys(row)),
+                  ),
+                ]
+                  .filter(
+                    (key) =>
+                      !hiddenReportKeys.has(key) &&
+                      typeof report.rows.find((row: Json) => row[key] != null)?.[key] !== "object",
+                  )
                   .map((key) => [
-                    key,
-                    (item) =>
-                      typeof item[key] === "number" &&
-                      /amount|total|revenue|margin|tax|cost|discount|refund/i.test(
-                        key,
-                      )
-                        ? money(item[key])
-                        : String(item[key] ?? ""),
+                    humanize(key.replace(/^(cashier|user)Id$/, "$1")),
+                    (item: Json) => reportCell(key, item[key]),
                   ])}
                 action={(item) =>
                   item.invoiceId && (
@@ -2598,45 +3674,208 @@ export default function Register() {
           )}
         </>
       );
-    if (section === "Settings")
-      return <div className="settings-panel">
-        <h2>{snapshot.settings?.business?.tradingName || snapshot.organization?.name || "Your business"}</h2>
-        <p>{snapshot.branch?.name} · {session?.user.email} · {role}</p>
-        <p>Last synchronized {formatDate(workspace?.lastSync || "")}</p>
-        {role === "owner" && <>
-          {(!snapshot.settings?.business?.legalName || !snapshot.settings?.business?.address) && <div className="setup-note"><strong>Complete your business details</strong><p>Enter the business name, address and tax details before issuing customer receipts.</p></div>}
-          <div className="section-toolbar">
-            <button className="primary-button" onClick={editBusiness}>Business details</button>
-            <button className="button" onClick={editRegisterSettings}>Edit settings</button>
-            <button className="button" onClick={()=>editUser()}>Create user</button>
-            <button className="button" onClick={()=>editBranch()}>Add branch</button>
+    if (section === "Settings") {
+      const business = snapshot.settings?.business || {};
+      const enabled = (["transfers", "fitment", "offline", "warranty"] as Feature[]).filter(
+        (key) => features[key],
+      );
+      return (
+        <div className="settings-panel">
+          {role === "owner" && (!business.legalName || !business.address) && (
+            <div className="setup-note">
+              <strong>Finish setting up your shop</strong>
+              <p>Add the legal business name and address. They are printed on every receipt.</p>
+              <button className="primary-button" onClick={editBusiness}>Add business details</button>
+            </div>
+          )}
+          <div className="settings-cards">
+            {role === "owner" && (
+              <section className="settings-card">
+                <h2>Shop</h2>
+                <p>
+                  <strong>{business.tradingName || business.legalName || snapshot.organization?.name || "Your business"}</strong>
+                  <br />
+                  {snapshot.branch?.name}
+                  {business.taxRegistrationId ? ` · GSTIN ${business.taxRegistrationId}` : ""}
+                </p>
+                <p>
+                  {snapshot.settings?.taxScheme === "india-gst" ? "India GST" : "General tax"} · prices{" "}
+                  {snapshot.settings?.taxMode === "inclusive" ? "include" : "exclude"} tax · {tenderTypes.join(", ")}
+                </p>
+                <div className="section-toolbar">
+                  <button className="button" onClick={editBusiness}>Business details</button>
+                  <button className="button" onClick={editRegisterSettings}>Edit settings</button>
+                  <button className="button" onClick={editModules}>Modules</button>
+                </div>
+                <small>
+                  Modules on: {enabled.length ? enabled.map(featureLabel).join(", ") : "core billing and stock only"}
+                </small>
+              </section>
+            )}
+            <section className="settings-card">
+              <h2>You</h2>
+              <p>
+                <strong>{session?.user.name || session?.user.email}</strong> · {titleCase(role || "")}
+                <br />
+                {snapshot.branch?.name} · session ends {formatDate(session?.expiresAt || "")}
+              </p>
+              <p>Last synced {formatDate(workspace?.lastSync || "")}</p>
+              <div className="section-toolbar">
+                {manager && (
+                  <button className="button" onClick={issueApproval}>Issue approval</button>
+                )}
+                {manager && features.offline && (
+                  <button className="button" onClick={enrollDevice}>Enroll counter</button>
+                )}
+                <button
+                  className="button"
+                  onClick={async () => {
+                    await locked(deviceKey(session!), async () => {
+                      await writeLocal("active-session", null);
+                      setSession(null);
+                      setWorkspace(null);
+                      setCart(null);
+                    });
+                  }}
+                >
+                  Sign out / change branch
+                </button>
+              </div>
+              {features.offline && (
+                <small>
+                  {workspace?.device
+                    ? `Counter "${workspace.device.name}" can sell offline until ${formatDate(workspace.device.offlineUntil)}.`
+                    : "This counter sells online only until it is enrolled."}
+                </small>
+              )}
+            </section>
           </div>
-          <h2>Branches</h2>
-          <DataTable rows={snapshot.branches || []} columns={[["Code",item=>item.id],["Name",item=>item.name],["Address",item=>item.address]]} action={item=><button className="button" onClick={()=>editBranch(item)}>Edit branch</button>} />
-          <h2>Users</h2>
-          <DataTable rows={snapshot.users || []} columns={[["Name",item=>item.name],["Email",item=>item.email],["Role",item=>item.role],["Branches",item=>(item.branchIds || []).join(", ")],["Status",item=>item.active ? "Active" : "Disabled"]]} action={item=><button className="button" onClick={()=>editUser(item)}>Edit user</button>} />
-        </>}
-        <h2>This counter</h2>
-        <p>{workspace?.device?.name || "Enrollment required for offline checkout"}</p>
-        <p>Offline authorization expires {formatDate(workspace?.device?.offlineUntil)}. Session expires {formatDate(session?.expiresAt || "")}.</p>
-        <p>Server: {session?.api}</p>
-        {manager && <div className="section-toolbar">
-          <button className="primary-button" onClick={enrollDevice}>Enroll counter</button>
-          <button className="button" onClick={()=>form("Issue approval",[
-            {name:"action",label:"Operation",options:["fitment","discount","return","adjustment"].map(value=>({value,label:value})),required:true},
-            {name:"transactionId",label:"Transaction ID shown on cashier screen",required:true},reasonField,
-          ],async data=>{
-            const result=await api("/approvals",data);
-            setTimeout(()=>setModal({title:"Approval issued",content:<><p>Share this ID with the cashier.</p><code>{result.id}</code></>}),0);
-          })}>Issue approval</button>
-        </div>}
-        <button className="button" onClick={async()=>{
-          await locked(deviceKey(session!),async()=>{await writeLocal("active-session",null);setSession(null);setWorkspace(null);setCart(null);});
-        }}>Sign out / change branch</button>
-      </div>;
+          {role === "owner" && (
+            <>
+              <div className="section-heading-row">
+                <h2>Staff</h2>
+                <button className="button" onClick={() => editUser()}>Add staff</button>
+              </div>
+              <DataTable
+                rows={snapshot.users || []}
+                columns={[
+                  ["Name", (item) => item.name],
+                  ["Email", (item) => item.email],
+                  ["Role", (item) => titleCase(item.role)],
+                  ["Branches", (item) => (item.branchIds || []).map(branchLabel).join(", ")],
+                  [
+                    "Status",
+                    (item) => (
+                      <span className={`status-chip status-${item.active ? "received" : "voided"}`}>
+                        {item.active ? "Active" : "Disabled"}
+                      </span>
+                    ),
+                  ],
+                ]}
+                action={(item) => <button className="button" onClick={() => editUser(item)}>Edit</button>}
+              />
+              <div className="section-heading-row">
+                <h2>Branches</h2>
+                <button className="button" onClick={() => editBranch()}>Add branch</button>
+              </div>
+              <DataTable
+                rows={snapshot.branches || []}
+                columns={[
+                  ["Code", (item) => item.id],
+                  ["Name", (item) => item.name],
+                  ["Address", (item) => item.address || "—"],
+                ]}
+                action={(item) => <button className="button" onClick={() => editBranch(item)}>Edit</button>}
+              />
+            </>
+          )}
+        </div>
+      );
+    }
     return null;
   }
 
+  function featureLabel(key: Feature) {
+    return {
+      transfers: "branch transfers",
+      fitment: "vehicle fitment",
+      offline: "offline counters",
+      warranty: "warranty & cores",
+    }[key];
+  }
+  function editModules() {
+    form(
+      "Modules",
+      [
+        {
+          name: "features",
+          label: "Switch on only what the shop uses",
+          type: "checks",
+          options: (["fitment", "transfers", "warranty", "offline"] as Feature[]).map((key) => ({
+            value: key,
+            label: titleCase(featureLabel(key)),
+          })),
+          value: (["transfers", "fitment", "offline", "warranty"] as Feature[]).filter(
+            (key) => features[key],
+          ),
+          help: "Switched-off modules are hidden on every counter. Their records are kept and come back when switched on.",
+        },
+      ],
+      async (data) => {
+        const on = new Set<string>(data.features || []);
+        await mutate(
+          "/settings",
+          {
+            features: Object.fromEntries(
+              ["transfers", "fitment", "offline", "warranty"].map((key) => [key, on.has(key)]),
+            ),
+          },
+          "Modules updated.",
+        );
+      },
+    );
+  }
+  function issueApproval() {
+    form(
+      "Issue approval",
+      [
+        {
+          name: "action",
+          label: "What the cashier needs",
+          options: [
+            { value: "discount", label: "Discount above their limit" },
+            { value: "return", label: "Return or refund" },
+            { value: "fitment", label: "Part that may not fit the vehicle" },
+            { value: "adjustment", label: "Stock adjustment" },
+          ],
+          required: true,
+        },
+        {
+          name: "transactionId",
+          label: "Transaction ID shown on the cashier's screen",
+          required: true,
+        },
+        reasonField,
+      ],
+      async (data) => {
+        const result = await api("/approvals", data);
+        setTimeout(
+          () =>
+            setModal({
+              title: "Approval issued",
+              content: (
+                <>
+                  <p>Read this ID to the cashier. It works once and expires in 15 minutes.</p>
+                  <code className="approval-code">{result.id}</code>
+                </>
+              ),
+            }),
+          0,
+        );
+      },
+      "Issue approval",
+    );
+  }
   async function loadReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
@@ -2652,6 +3891,20 @@ export default function Register() {
     } catch (reason) {
       fail(reason);
     }
+  }
+  function reportCell(key: string, value: any): React.ReactNode {
+    if (value === null || value === undefined || value === "") return "—";
+    if (typeof value === "number") {
+      if (moneyKeys.has(key)) return money(value);
+      if (key === "taxRate") return `${value / 100}%`;
+      return value.toLocaleString("en-IN");
+    }
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    if (/^(cashierId|userId|approvedBy|resolvedBy)$/.test(key)) return userName(value);
+    if (key === "location" || key === "binId") return locationName(value);
+    if (/(At|date|Date)$/.test(key) && /^\d{4}-\d{2}-\d{2}T/.test(String(value)))
+      return formatDate(String(value));
+    return String(value);
   }
   function exportReport() {
     if (!report?.rows.length) return;
@@ -2676,23 +3929,34 @@ export default function Register() {
     link.click();
     URL.revokeObjectURL(url);
   }
-  function printLabel(product: Json) {
+  function printDocument() {
+    if (window.motorlineNative) void window.motorlineNative.print().catch(fail);
+    else window.print();
+  }
+  function productLabel(product: Json): LabelItem {
+    return {
+      name: product.name,
+      code: product.barcodes?.[0] || product.sku,
+      sku: product.sku,
+      price: product.type === "service" ? undefined : product.retailPrice,
+    };
+  }
+  function printLabels(items: LabelItem[], title = "Print labels") {
+    if (!items.length) {
+      toast("Nothing to print.");
+      return;
+    }
+    setError("");
     setModal({
-      title: "Print label",
-      content: (
-        <div className="print-label">
-          <strong>{product.name}</strong>
-          <Barcode value={product.barcodes?.[0] || product.sku} />
-          <p>{product.sku}</p>
-          <button
-            className="primary-button no-print"
-            onClick={() => window.print()}
-          >
-            Print label
-          </button>
-        </div>
-      ),
+      title,
+      wide: items.length > 1,
+      content: <LabelSheet items={items} money={money} print={printDocument} />,
     });
+  }
+  function printLabel(product: Json) {
+    if (product.id && !product.barcodes?.length)
+      toast("This part has no barcode, so its SKU is printed. Edit the part to add or create a barcode.");
+    printLabels([productLabel(product)], `Label · ${product.name}`);
   }
 
   async function login(event: React.FormEvent<HTMLFormElement>) {
@@ -2813,7 +4077,14 @@ export default function Register() {
       </main>
     );
 
-  const bill = quote(cart, products, snapshot.settings?.roundingIncrement || 1, snapshot.settings?.taxMode || "exclusive");
+  let billError = "";
+  let bill: ReturnType<typeof quote>;
+  try {
+    bill = quote(cart, products, snapshot.settings?.roundingIncrement || 1, snapshot.settings?.taxMode || "exclusive");
+  } catch (reason) {
+    billError = reason instanceof Error ? reason.message : String(reason);
+    bill = quote({ ...cart, lines: [] }, products, 1, snapshot.settings?.taxMode || "exclusive");
+  }
   const receiptMoney = (amount:number) => money(amount, receipt?.currency || snapshot.settings?.currency || "INR");
   const filtered = products.filter(
     (product) =>
@@ -2833,15 +4104,7 @@ export default function Register() {
           fitment(product, cart.vehicle).status,
         )),
   );
-  const cartNeedsApproval = cart.lines.some(
-    (line: Json) =>
-      ["incompatible", "unverified"].includes(
-        fitment(
-          products.find((product) => product.id === line.productId)!,
-          cart.vehicle,
-        ).status,
-      ) && !line.overrideReason,
-  );
+  const cartNeedsApproval = cartNeedsApprovalFor(cart);
   return (
     <>
       <div className="app-shell">
@@ -2856,32 +4119,41 @@ export default function Register() {
               <div className="brand-name">
                 Motorline<span>.</span>
               </div>
-              <div className="brand-label">Automotive POS</div>
+              <div className="brand-label">
+                {snapshot.settings?.business?.tradingName ||
+                  snapshot.settings?.business?.legalName ||
+                  "Automotive POS"}
+              </div>
             </div>
           </div>
           <nav className="navigation" aria-label="Workspace">
-            <div className="nav-label">Workspace</div>
-            {sections.map((name) => (
-              <button
-                key={name}
-                className={`nav-link ${section === name ? "is-active" : ""}`}
-                aria-current={section === name ? "page" : undefined}
-                onClick={() => {
-                  setSection(name);
-                  setSearch("");
-                  setError("");
-                }}
-              >
-                <span className="nav-icon icon-box" aria-hidden="true" />
-                <span>{name}</span>
-              </button>
-            ))}
+            {navItems.map((item) => {
+              const tabs = tabsFor(item.tabs, role, features);
+              if (!tabs.length) return null;
+              const active = tabs.some((tab) => tab.name === section);
+              const attention =
+                item.label === "Settings" &&
+                (workspace.pending.length > 0 ||
+                  (snapshot.conflicts || []).some((entry: Json) => entry.status === "pending"));
+              return (
+                <button
+                  key={item.label}
+                  className={`nav-link ${active ? "is-active" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => openSection(tabs[0].name)}
+                >
+                  <span className={`nav-icon ${item.icon}`} aria-hidden="true" />
+                  <span>{item.label}</span>
+                  {attention && <span className="nav-badge" aria-hidden="true" title="Sales waiting to sync" />}
+                </button>
+              );
+            })}
           </nav>
           <div className="register-info">
             <div>
               <strong>{snapshot.branch?.name || session.branchId}</strong>
               <span className="register-label">
-                {session.user.name || session.user.email} · {role}
+                {session.user.name || session.user.email} · {titleCase(role || "")}
               </span>
             </div>
           </div>
@@ -2897,20 +4169,9 @@ export default function Register() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key !== "Enter" || section !== "Billing") return;
+                  if (event.key !== "Enter" || section !== "Billing" || !search.trim()) return;
                   event.preventDefault();
-                  const found = products.find((product) =>
-                    [
-                      product.sku,
-                      product.partNumber,
-                      ...(product.barcodes || []),
-                      ...(product.oemReferences || []),
-                    ].some((value) => normalize(value) === normalize(search)),
-                  );
-                  if (found) {
-                    addPart(found);
-                    setSearch("");
-                  } else toast("No matching part found.");
+                  handleScan(search);
                 }}
               />
               <kbd>Enter</kbd>
@@ -2925,16 +4186,20 @@ export default function Register() {
                   : "Never synced"}
               </small>
             </div>
-            <button
+            {canSell && <button
               className="button"
               onClick={() =>
                 setModal({
                   title: "Parked sales",
                   content: (
                     <div className="dialog-options">
+                      {!(snapshot.holds || []).length && (
+                        <p>No parked sales. Use Hold on the current sale to park it and reserve its stock.</p>
+                      )}
                       {(snapshot.holds || []).map((hold: Json) => (
                         <div className="parked-row" key={hold.id}>
                           <button
+                            type="button"
                             className="dialog-option"
                             onClick={() => {
                               if (cart.lines.length) {
@@ -2944,12 +4209,31 @@ export default function Register() {
                                 return;
                               }
                               setCart({ ...hold.cart, holdId: hold.id });
+                              setSection("Billing");
                               setModal(null);
                             }}
                           >
-                            {hold.number || hold.id}
+                            <strong>
+                              {(snapshot.customers || []).find(
+                                (customer: Json) =>
+                                  customer.id === hold.cart?.customerId,
+                              )?.name || "Walk-in customer"}
+                            </strong>
+                            <small>
+                              {(hold.cart?.lines || [])
+                                .map(
+                                  (line: Json) =>
+                                    `${line.qty} × ${productName(line.productId)}`,
+                                )
+                                .join(", ")}
+                            </small>
+                            <small>
+                              Parked {formatDate(hold.createdAt)} by{" "}
+                              {userName(hold.userId)}
+                            </small>
                           </button>
                           <button
+                            type="button"
                             className="button"
                             onClick={async () => {
                               try {
@@ -2975,24 +4259,12 @@ export default function Register() {
               }
             >
               Parked ({(snapshot.holds || []).length})
-            </button>
-            {window.motorlineNative?.platform === "android" && (
+            </button>}
+            {(window.motorlineNative?.platform === "android" || cameraScan) && (
               <button
                 className="button"
-                onClick={async () => {
-                  try {
-                    const code = await window.motorlineNative!.scan();
-                    if (code) {
-                      const part = products.find((product) =>
-                        product.barcodes?.includes(code),
-                      );
-                      if (part) addPart(part);
-                      else setSearch(code);
-                    }
-                  } catch (reason) {
-                    fail(reason);
-                  }
-                }}
+                onClick={() => void scanWithDevice()}
+                title="Scan a barcode with the camera"
               >
                 Scan
               </button>
@@ -3000,13 +4272,24 @@ export default function Register() {
           </header>
           <main id="workspace">
             <div className="workspace-heading">
-              <h1>{section === "Billing" ? "Sales terminal" : section}</h1>
-              <p>
-                {section === "Billing"
-                  ? "Build a bill for parts and services."
-                  : `${snapshot.branch?.name || session.branchId} workspace`}
-              </p>
+              <h1>{section === "Billing" ? "Sales terminal" : currentNav?.label || section}</h1>
+              <p>{sectionHelp[section] || snapshot.branch?.name}</p>
             </div>
+            {currentTabs.length > 1 && (
+              <div className="section-tabs" role="tablist" aria-label={`${currentNav?.label} views`}>
+                {currentTabs.map((tab) => (
+                  <button
+                    key={tab.name}
+                    role="tab"
+                    aria-selected={tab.name === section}
+                    className={`section-tab ${tab.name === section ? "is-active" : ""}`}
+                    onClick={() => openSection(tab.name)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {error && (
               <div className="error-banner" role="alert">
                 {error}
@@ -3018,7 +4301,7 @@ export default function Register() {
             {section === "Billing" ? (
               <div className="billing-layout">
                 <section className="catalog-panel">
-                  <button className="vehicle-picker" onClick={chooseVehicle}>
+                  {features.fitment && <button className="vehicle-picker" onClick={chooseVehicle}>
                     <span className="vehicle-icon">
                       <span className="icon-car" />
                     </span>
@@ -3035,9 +4318,9 @@ export default function Register() {
                         ? [cart.vehicle.engine, cart.vehicle.fuel]
                             .filter(Boolean)
                             .join(" · ")
-                        : "Select a vehicle to check compatibility"}
+                        : "Optional · choose one to check compatibility"}
                     </span>
-                  </button>
+                  </button>}
                   <div className="catalog-heading">
                     <h2>Parts catalog</h2>
                     <span className="catalog-count">
@@ -3072,7 +4355,9 @@ export default function Register() {
                           >
                             {product.type === "service"
                               ? "Service"
-                              : `${available(product.id)} available`}
+                              : available(product.id) > 0
+                                ? `${available(product.id)} available`
+                                : "Out of stock"}
                           </span>
                         </div>
                         <div className="part-info">
@@ -3083,7 +4368,9 @@ export default function Register() {
                           <div
                             className={`part-fitment fit-${fitment(product, cart.vehicle).status}`}
                           >
-                            {fitment(product, cart.vehicle).status} ·{" "}
+                            {cart.vehicle
+                              ? `${titleCase(fitment(product, cart.vehicle).status)}${product.partNumber ? " · " : ""}`
+                              : ""}
                             {product.partNumber}
                           </div>
                           <small className="bin-hint">
@@ -3091,7 +4378,12 @@ export default function Register() {
                               .filter(
                                 (item) =>
                                   item.productId === product.id &&
-                                  item.available > 0,
+                                  item.available > 0 &&
+                                  bins.some(
+                                    (bin) =>
+                                      bin.id === item.binId &&
+                                      bin.kind === "sellable",
+                                  ),
                               )
                               .map(
                                 (item) =>
@@ -3138,8 +4430,21 @@ export default function Register() {
                       Clear
                     </button>
                   </div>
-                  <label className="field">
-                    <span>Customer</span>
+                  <label className="field customer-field">
+                    <span>
+                      Customer
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() =>
+                          addContact("customers", {}, (saved) =>
+                            updateCart({ customerId: saved.id }),
+                          )
+                        }
+                      >
+                        + New
+                      </button>
+                    </span>
                     <select
                       value={cart.customerId}
                       onChange={(event) =>
@@ -3176,17 +4481,41 @@ export default function Register() {
                           <div className="line-description">
                             <strong>{line.product.name}</strong>
                             <small>
-                              {line.qty} × {money(line.unitPrice)} ·{" "}
-                              {locationName(line.binId)}
+                              {money(line.unitPrice)} each
+                              {line.binId ? ` · ${locationName(line.binId)}` : ""}
                             </small>
-                            <small
-                              className={`fit-${fitment(line.product, cart.vehicle).status}`}
-                            >
-                              {fitment(line.product, cart.vehicle).status}
-                              {line.overrideReason
-                                ? " · override recorded"
-                                : ""}
-                            </small>
+                            {cart.vehicle && (
+                              <small
+                                className={`fit-${fitment(line.product, cart.vehicle).status}`}
+                              >
+                                {titleCase(fitment(line.product, cart.vehicle).status)}
+                                {line.overrideReason
+                                  ? " · override recorded"
+                                  : ""}
+                              </small>
+                            )}
+                            {line.serials?.length > 0 && (
+                              <small>Serials {line.serials.join(", ")}</small>
+                            )}
+                            <div className="qty-stepper" aria-label={`Quantity of ${line.product.name}`}>
+                              <button
+                                type="button"
+                                aria-label="Decrease quantity"
+                                disabled={line.product.serialTracked}
+                                onClick={() => setLineQuantity(index, line.qty - 1)}
+                              >
+                                −
+                              </button>
+                              <span>{line.qty}</span>
+                              <button
+                                type="button"
+                                aria-label="Increase quantity"
+                                disabled={line.product.serialTracked}
+                                onClick={() => setLineQuantity(index, line.qty + 1)}
+                              >
+                                +
+                              </button>
+                            </div>
                           </div>
                           <button
                             className="line-remove"
@@ -3214,6 +4543,11 @@ export default function Register() {
                       </div>
                     )}
                   </div>
+                  {billError && (
+                    <p className="form-error cart-error" role="alert">
+                      {billError} Clear the sale or refresh the catalog.
+                    </p>
+                  )}
                   {cartNeedsApproval && (
                     <button
                       className="button approval-button"
@@ -3246,13 +4580,15 @@ export default function Register() {
                                 [
                                   {
                                     name: "discount",
-                                    label: "Discount amount",
+                                    label: `Discount amount (subtotal ${money(bill.subtotal)})`,
                                     type: "number",
                                     min: 0,
                                     step: "0.01",
+                                    value: ((cart.discount || 0) / 100).toFixed(2),
                                     required: true,
+                                    help: "Enter 0 to remove the discount.",
                                   },
-                                  reasonField,
+                                  { ...reasonField, value: cart.discountReason, required: false },
                                   ...(!manager
                                     ? [
                                         {
@@ -3265,7 +4601,15 @@ export default function Register() {
                                     : []),
                                 ],
                                 async (data) => {
-                                  if (!manager && Math.round(Number(data.discount) * 100) > (snapshot.settings.cashierDiscountLimit || 0) && !data.approvalId) throw new Error("Manager approval is required above your discount limit.");
+                                  const requested = Math.round(Number(data.discount) * 100);
+                                  if (!Number.isFinite(requested) || requested < 0) throw new Error("Enter a valid discount amount.");
+                                  if (requested > bill.subtotal) throw new Error(`Discount cannot exceed the subtotal of ${money(bill.subtotal)}.`);
+                                  if (requested === 0) {
+                                    updateCart({ discount: 0, discountReason: "", discountApprovalId: undefined });
+                                    return;
+                                  }
+                                  if (!String(data.reason || "").trim()) throw new Error("Enter a reason for the discount.");
+                                  if (!manager && requested > (snapshot.settings.cashierDiscountLimit || 0) && !data.approvalId) throw new Error("Manager approval is required above your discount limit.");
                                   const id = manager
                                     ? await approval(
                                         "discount",
@@ -3287,8 +4631,14 @@ export default function Register() {
                             Discount
                           </button>
                         </dt>
-                        <dd>−{money(bill.discount)}</dd>
+                        <dd>{bill.discount ? `−${money(bill.discount)}` : money(0)}</dd>
                       </div>
+                      {bill.rounding !== 0 && (
+                        <div>
+                          <dt>Rounding</dt>
+                          <dd>{money(bill.rounding)}</dd>
+                        </div>
+                      )}
                       <div className="grand-total">
                         <dt>Total payable</dt>
                         <dd>{money(bill.total)}</dd>
@@ -3304,15 +4654,18 @@ export default function Register() {
                       </button>
                       <button
                         className="primary-button"
-                        disabled={!cart.lines.length || cartNeedsApproval}
+                        disabled={!cart.lines.length || cartNeedsApproval || !!billError}
                         onClick={showCheckout}
+                        title="F6"
                       >
                         Checkout ↗
                       </button>
                     </div>
-                    <small className="transaction-reference">
-                      Transaction {cart.transactionId}
-                    </small>
+                    {!manager && (
+                      <small className="transaction-reference">
+                        Approval reference {cart.transactionId}
+                      </small>
+                    )}
                   </div>
                 </aside>
               </div>
@@ -3324,7 +4677,7 @@ export default function Register() {
       </div>
       <dialog
         ref={dialogRef}
-        className={`dialog ${modal?.fields && modal.fields.length > 8 ? "wide-dialog" : ""}`}
+        className={`dialog ${modal?.wide || (modal?.fields && modal.fields.filter((field) => !field.advanced).length > 6) ? "wide-dialog" : ""}`}
         onCancel={() => {
           setModal(null);
           setReceipt(null);
@@ -3344,8 +4697,19 @@ export default function Register() {
         </button>
         {receipt ? (
           <div className="receipt">
+            <p className="receipt-kind">
+              {receipt.invoiceId
+                ? receipt.voided ? "Credit note · invoice void" : "Credit note"
+                : receipt.taxScheme === "india-gst" ? "Tax invoice" : "Sales receipt"}
+            </p>
             <h2>{receipt.number || receipt.id}</h2>
-            <h3>{receipt.business?.legalName || receipt.business?.tradingName || "Sales receipt"}</h3>
+            <h3>{receipt.business?.legalName || receipt.business?.tradingName || snapshot.organization?.name || receipt.branch?.name || snapshot.branch?.name}</h3>
+            {receipt.invoiceNumber && receipt.invoiceId && (
+              <p>Against invoice {receipt.invoiceNumber}{receipt.invoiceDate ? ` dated ${formatDate(receipt.invoiceDate)}` : ""}</p>
+            )}
+            {receipt.id && !receipt.invoiceId && invoiceStatus(receipt) !== "Finalized" && (
+              <p className="receipt-flag">{invoiceStatus(receipt)}</p>
+            )}
             {receipt.business?.tradingName && receipt.business.tradingName !== receipt.business.legalName && <p>{receipt.business.tradingName}</p>}
             {receipt.business?.address && <p className="receipt-address">{receipt.business.address}</p>}
             {receipt.business?.taxRegistrationId && <p>Tax registration: {receipt.business.taxRegistrationId}</p>}
@@ -3358,8 +4722,10 @@ export default function Register() {
             {receipt.placeOfSupply && <p>Place of supply: {receipt.placeOfSupply}</p>}
             <p>
               {formatDate(receipt.createdAt || receipt.occurredAt)} ·{" "}
-              {receipt.status || "Finalized"}
+              {receipt.status || (receipt.invoiceId ? `Refund · ${receipt.refundType || "Cash"}` : "Finalized")}
+              {(receipt.cashierId || receipt.userId) ? ` · ${userName(receipt.cashierId || receipt.userId)}` : ""}
             </p>
+            {receipt.reason && receipt.invoiceId && <p>Reason: {receipt.reason}</p>}
             <DataTable
               rows={receipt.lines || []}
               columns={[
@@ -3378,27 +4744,55 @@ export default function Register() {
               ]}
             />
             <dl className="receipt-totals">
+              {receipt.subtotal !== undefined && (
+                <div>
+                  <dt>Subtotal</dt>
+                  <dd>{receiptMoney(receipt.subtotal)}</dd>
+                </div>
+              )}
+              {!!receipt.discount && (
+                <div>
+                  <dt>Discount{receipt.discountReason ? ` · ${receipt.discountReason}` : ""}</dt>
+                  <dd>−{receiptMoney(receipt.discount)}</dd>
+                </div>
+              )}
               {(receipt.taxComponents || []).map((component:Json)=><div key={component.name}><dt>{component.name}</dt><dd>{receiptMoney(component.amount)}</dd></div>)}
               <div>
                 <dt>{receipt.taxDisplayName || "Tax"}{receipt.taxMode === "inclusive" ? " included" : ""}</dt>
                 <dd>{receiptMoney(receipt.tax)}</dd>
               </div>
-              <div>
-                <dt>Discount</dt>
-                <dd>{receiptMoney(receipt.discount)}</dd>
-              </div>
-              <div>
-                <dt>Core charges</dt>
-                <dd>{receiptMoney(receipt.core || receipt.coreTotal)}</dd>
-              </div>
+              {!!(receipt.core || receipt.coreTotal) && (
+                <div>
+                  <dt>Refundable core charges</dt>
+                  <dd>{receiptMoney(receipt.core || receipt.coreTotal)}</dd>
+                </div>
+              )}
+              {!!receipt.rounding && (
+                <div>
+                  <dt>Rounding</dt>
+                  <dd>{receiptMoney(receipt.rounding)}</dd>
+                </div>
+              )}
               <div className="grand-total">
-                <dt>Total</dt>
+                <dt>{receipt.invoiceId ? "Total refunded" : "Total"}</dt>
                 <dd>{receiptMoney(receipt.total)}</dd>
               </div>
-              <div>
-                <dt>Change</dt>
-                <dd>{receiptMoney(receipt.change)}</dd>
-              </div>
+              {(receipt.tenders || []).map((tender: Json, index: number) => (
+                <div key={index}>
+                  <dt>
+                    Paid · {tender.type}
+                    {tender.reference ? ` · ${tender.reference}` : ""}
+                    {tender.type !== "Cash" && !tender.confirmed ? " · awaiting confirmation" : ""}
+                  </dt>
+                  <dd>{receiptMoney(tender.amount)}</dd>
+                </div>
+              ))}
+              {receipt.change !== undefined && (
+                <div>
+                  <dt>Change</dt>
+                  <dd>{receiptMoney(receipt.change)}</dd>
+                </div>
+              )}
             </dl>
             {receipt.receiptFooter && <p className="receipt-address">{receipt.receiptFooter}</p>}
             <div className="dialog-actions">
@@ -3427,17 +4821,23 @@ export default function Register() {
           modal && (
             <>
               <h2>{modal.title}</h2>
-              {modal.content}
               <form
+                onInvalidCapture={(event) => {
+                  const details = (event.target as HTMLElement).closest("details");
+                  if (details) details.open = true;
+                }}
                 onSubmit={async (event) => {
                   event.preventDefault();
                   if (!modal.action) return;
                   setBusy(true);
                   setError("");
                   try {
-                    await modal.action(
-                      Object.fromEntries(new FormData(event.currentTarget)),
-                    );
+                    const entries = new FormData(event.currentTarget);
+                    const data: Json = Object.fromEntries(entries);
+                    for (const field of modal.fields || [])
+                      if (field.type === "checks")
+                        data[field.name] = entries.getAll(field.name).map(String);
+                    await modal.action(data);
                     setModal(null);
                   } catch (reason) {
                     fail(reason);
@@ -3446,15 +4846,31 @@ export default function Register() {
                   }
                 }}
               >
-                <div
-                  className={
-                    modal.fields && modal.fields.length > 8 ? "editor-grid" : ""
-                  }
-                >
-                  {modal.fields?.map((field) => (
-                    <FieldInput key={field.name} field={field} />
-                  ))}
-                </div>
+                {modal.content}
+                {(() => {
+                  const basic = (modal.fields || []).filter((field) => !field.advanced);
+                  const more = (modal.fields || []).filter((field) => field.advanced);
+                  const grid = (count: number) => (count > 6 ? "editor-grid" : "");
+                  return (
+                    <>
+                      <div className={grid(basic.length)}>
+                        {basic.map((field) => (
+                          <FieldInput key={field.name} field={field} />
+                        ))}
+                      </div>
+                      {more.length > 0 && (
+                        <details className="more-options" open={modal.expanded}>
+                          <summary>More options ({more.length})</summary>
+                          <div className={grid(more.length)}>
+                            {more.map((field) => (
+                              <FieldInput key={field.name} field={field} />
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  );
+                })()}
                 {error && (
                   <p className="form-error" role="alert">
                     {error}

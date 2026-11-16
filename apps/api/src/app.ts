@@ -68,7 +68,10 @@ export async function createApp(db: Database) {
       .map((value) => value.trim())
       .filter(Boolean),
   ];
-  await app.register(cors, { origin: origins });
+  await app.register(cors, {
+    origin: origins,
+    methods: ["GET", "HEAD", "POST", "DELETE"],
+  });
   await app.register(rateLimit, { max: 500, timeWindow: "1 minute" });
   app.setErrorHandler((error: any, _request, reply) =>
     reply.code(error.statusCode || 500).send({
@@ -550,6 +553,18 @@ export async function createApp(db: Database) {
       )
         fail("Only cash is supported without provider confirmation.");
       settings.offlineTenders = body.offlineTenders;
+    }
+    if (body.features !== undefined) {
+      if (!body.features || typeof body.features !== "object" || Array.isArray(body.features))
+        fail("Choose which modules are switched on.");
+      const features: Record<string, boolean> = { ...(settings.features || {}) };
+      for (const [key, value] of Object.entries(body.features)) {
+        if (!["transfers", "fitment", "offline", "warranty"].includes(key))
+          fail("Unknown module.");
+        if (typeof value !== "boolean") fail("Module switches must be on or off.");
+        features[key] = value;
+      }
+      settings.features = features;
     }
     if (body.taxRates !== undefined) {
       if (

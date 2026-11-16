@@ -223,7 +223,8 @@ export function fitment(
   effectiveDate = now().slice(0, 10),
 ) {
   if (product.universal) return { status: "universal", missing: [] };
-  if (!vehicle) return { status: "unverified", missing: ["vehicle"] };
+  // Without a vehicle there is nothing to verify, so the sale is not a fitment override.
+  if (!vehicle) return { status: "unchecked", missing: [] };
   const rules = (product.fitments || []).filter(
     (rule: any) =>
       (!rule.effectiveFrom || rule.effectiveFrom <= effectiveDate) &&

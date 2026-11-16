@@ -794,3 +794,42 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
     await db.close();
   }
 });
+
+test("a sale without a vehicle needs no fitment override, a mismatched vehicle still does", async () => {
+  const db = await connectDatabase({ memory: true });
+  await migrate(db);
+  await seed(db);
+  const app = await createApp(db);
+  try {
+    const call = async (path: string, body: any, token?: string, status = 200) => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/" + path,
+        payload: body,
+        headers: token ? { authorization: "Bearer " + token } : {},
+      });
+      assert.equal(response.statusCode, status, `${path}: ${response.body}`);
+      return response.json();
+    };
+    const { token } = await call("auth/login", {
+      email: "cashier@motorline.local",
+      password: "MotorlineDemo123!",
+    });
+    const shift = await call("shifts/open", { openingCash: 0 }, token);
+    assert.equal((await call("fitments/check", { productId: "filter" }, token)).status, "unchecked");
+    const sale = (vehicle?: any) => ({
+      transactionId: randomUUID(),
+      shiftId: shift.id,
+      ...(vehicle ? { vehicle } : {}),
+      lines: [{ productId: "filter", qty: 1, binId: "bin-a1" }],
+      tenders: [{ type: "Cash", amount: 100000, confirmed: true }],
+    });
+    const invoice = await call("invoices", sale(), token);
+    assert.equal(invoice.lines[0].fitment.status, "unchecked");
+    assert.equal(invoice.lines[0].overrideReason, "");
+    await call("invoices", sale({ make: "Other", model: "Car", year: 2022 }), token, 400);
+  } finally {
+    await app.close();
+    await db.close();
+  }
+});

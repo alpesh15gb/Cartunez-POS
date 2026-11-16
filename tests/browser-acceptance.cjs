@@ -13,10 +13,10 @@ fs.mkdirSync(output,{recursive:true});
  page.on('pageerror',error=>errors.push(error.message));
  const dialog=page.locator('dialog');
  const submit=()=>dialog.locator('button[type="submit"]').click();
- const nav=name=>page.getByRole('navigation').getByRole('button',{name,exact:true}).click();
+ const nav=async name=>{const [area,tab]=({'Sales history':['Sales','Invoices'],Shifts:['Sales','Shifts'],Locations:['Inventory','Bins'],Reconciliation:['Settings','Sync & audit']})[name]||[name];await page.getByRole('navigation').getByRole('button',{name:area,exact:true}).click();if(tab)await page.getByRole('tab',{name:tab,exact:true}).click();};
  const field=(name,value)=>dialog.locator(`[name="${name}"]`).fill(value);
  try {
-  await page.goto('http://127.0.0.1:3000');
+  await page.goto(process.env.MOTORLINE_TEST_WEB || 'http://127.0.0.1:3000');
   await page.getByLabel('Server API',{exact:true}).fill(process.env.MOTORLINE_TEST_API || 'http://127.0.0.1:4000/api/v1');
   await page.getByLabel('Organization code',{exact:true}).fill('demo');
   await page.getByLabel('Branch code',{exact:true}).fill('pune');
@@ -41,8 +41,8 @@ fs.mkdirSync(output,{recursive:true});
   await dialog.locator('[name="productId"]').selectOption({label:`${sku} · Acceptance Cabin Filter`});
   await field('quantity','4');await field('cost','50');await submit();await dialog.waitFor({state:'hidden'});
   for(const bin of ['bin-a1','bin-a2']){
-   await page.getByRole('row').filter({hasText:'Acceptance Cabin Filter'}).last().getByRole('button',{name:'Receive stock'}).click();
-   await dialog.locator('[name="productId"]').selectOption({label:'Acceptance Cabin Filter · ordered 4'});
+   await page.getByRole('row').filter({hasText:'Acceptance Cabin Filter'}).first().getByRole('button',{name:'Receive stock'}).click();
+   await dialog.locator('[name="productId"]').selectOption({index:1});
    await field('quantity','2');await dialog.locator('[name="binId"]').selectOption(bin);await submit();await dialog.waitFor({state:'hidden'});
   }
   await nav('Inventory');
@@ -80,10 +80,10 @@ fs.mkdirSync(output,{recursive:true});
   await page.getByRole('button',{name:/Vehicle fitment/}).click();
   await dialog.locator('[name="preset"]').selectOption('swift');await submit();await dialog.waitFor({state:'hidden'});
   await page.locator('#global-search').fill('ML-SPARK-01');await page.locator('#global-search').press('Enter');
-  assert.match(await dialog.innerText(),/incompatible fitment/);
+  assert.match(await dialog.innerText(),/incompatible fitment/i);
   await page.getByRole('button',{name:'Close dialog',exact:true}).click();
   await page.locator('#global-search').fill('ML-BELT-01');await page.locator('#global-search').press('Enter');
-  assert.match(await dialog.innerText(),/unverified fitment/);
+  assert.match(await dialog.innerText(),/unverified fitment/i);
   await page.getByRole('button',{name:'Close dialog',exact:true}).click();
   await nav('Reports');await page.getByRole('button',{name:'Run report',exact:true}).click();await page.getByRole('button',{name:'Export CSV',exact:true}).waitFor();
   await page.setViewportSize({width:390,height:844});

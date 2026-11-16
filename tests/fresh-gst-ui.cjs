@@ -26,7 +26,7 @@ const { createFreshEnvironment } = require('./fresh-install-environment.cjs');
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     const dialog = page.locator('dialog');
     const button = name => page.getByRole('button', { name, exact: true });
-    const nav = name => page.getByRole('navigation').getByRole('button', { name, exact: true }).click();
+    const nav = async name => { const [area, tab] = ({'Sales history':['Sales','Invoices'],Shifts:['Sales','Shifts'],Locations:['Inventory','Bins'],Reconciliation:['Settings','Sync & audit']})[name] || [name]; await page.getByRole('navigation').getByRole('button', { name: area, exact: true }).click(); if (tab) await page.getByRole('tab', { name: tab, exact: true }).click(); };
     const field = (name, value) => dialog.locator(`[name="${name}"]`).fill(value);
     const select = (name, value) => dialog.locator(`[name="${name}"]`).selectOption(value);
     const save = async () => {
@@ -39,8 +39,9 @@ const { createFreshEnvironment } = require('./fresh-install-environment.cjs');
     await nav('Settings'); await button('Business details').click();
     for (const [name, value] of Object.entries({ legalName: 'Fictional GST Acceptance Ltd', tradingName: 'Fictional GST Shop', address: 'Fictional Street\nFictional City', taxRegistrationId: '27ABCDE1234F1Z5', stateCode: '27', branchName: 'Fictional GST Counter', branchAddress: 'Fictional Maharashtra Counter', branchStateCode: '27', receiptFooter: 'Fictional fixture; no real tax transaction' })) await field(name, value);
     await save();
-    await button('Edit settings').click();
-    for (const [name, value] of Object.entries({ currency: 'INR', invoicePrefix: 'GST', creditNotePrefix: 'GCR', taxDisplayName: 'GST', taxRates: '0, 18', tenderTypes: 'Cash', offlineTenders: 'Cash' })) await field(name, value);
+    await button('Edit settings').click(); await dialog.locator('summary').click();
+    for (const [name, value] of Object.entries({ currency: 'INR', invoicePrefix: 'GST', creditNotePrefix: 'GCR', taxDisplayName: 'GST', taxRates: '0, 18' })) await field(name, value);
+    for (const tender of ['Card', 'UPI']) await dialog.locator(`[name="tenderTypes"][value="${tender}"]`).uncheck();
     await select('taxMode', 'exclusive'); await select('taxScheme', 'india-gst'); await select('localTaxName', 'SGST'); await save();
     let data = await call('/bootstrap');
     assert.equal(data.settings.taxScheme, 'india-gst'); assert.equal(data.settings.localTaxName, 'SGST'); assert.equal(data.settings.business.stateCode, '27'); assert.equal(data.branch.stateCode, '27'); assert.equal(data.settings.business.taxRegistrationId, '27ABCDE1234F1Z5');
@@ -69,7 +70,7 @@ const { createFreshEnvironment } = require('./fresh-install-environment.cjs');
       assert.deepEqual(invoice.taxComponents, place === '27' ? [{ name: 'CGST', amount: 900 }, { name: 'SGST', amount: 900 }] : [{ name: 'IGST', amount: 1800 }]);
       invoices.push(invoice);
     }
-    await nav('Settings'); await button('Edit settings').click(); await select('taxScheme', 'general'); await field('taxDisplayName', 'Revised generic tax'); await save();
+    await nav('Settings'); await button('Edit settings').click(); await select('taxScheme', 'general'); await dialog.locator('summary').click(); await field('taxDisplayName', 'Revised generic tax'); await save();
     await button('Business details').click(); await field('legalName', 'Changed Later Fictional Company'); await save();
     await nav('Sales history');
     for (const invoice of invoices) {

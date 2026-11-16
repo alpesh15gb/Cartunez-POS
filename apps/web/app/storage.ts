@@ -101,15 +101,26 @@ export async function request(
   body?: unknown,
   method?: string,
 ): Promise<any> {
-  const response = await fetch(`${session.api}${path}`, {
-    method: method || (body === undefined ? "GET" : "POST"),
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal: AbortSignal.timeout(12000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${session.api}${path}`, {
+      method: method || (body === undefined ? "GET" : "POST"),
+      headers: {
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(12000),
+    });
+  } catch (reason) {
+    const timedOut =
+      reason instanceof DOMException && reason.name === "TimeoutError";
+    throw new Error(
+      timedOut
+        ? "The server took too long to respond. Check the connection and try again."
+        : `Cannot reach the server at ${session.api}. Check the address and network connection.`,
+    );
+  }
   const text = await response.text();
   let result;
   try {
@@ -144,7 +155,8 @@ export function fitment(
   vehicle: Json | null,
 ): { status: string; missing: string[] } {
   if (product.universal) return { status: "universal", missing: [] };
-  if (!vehicle) return { status: "unverified", missing: ["vehicle"] };
+  // No vehicle selected means no compatibility check is needed for the sale.
+  if (!vehicle) return { status: "unchecked", missing: [] };
   const today = new Date().toISOString().slice(0, 10);
   const fits = (product.fitments || []).filter(
     (fit: Json) =>
@@ -274,4 +286,36 @@ export function quote(cart: Json, products: Json[], roundingIncrement = 1, taxMo
     total,
     taxMode,
   };
+}
+/** True when the final digit is a valid GS1 (EAN/UPC) check digit. */
+export function gs1Valid(code: string) {
+  if (!/^\d+$/.test(code)) return false;
+  const digits = code.split("").map(Number);
+  const check = digits.pop()!;
+  const sum = digits
+    .reverse()
+    .reduce((total, digit, index) => total + digit * (index % 2 === 0 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === check;
+}
+/** Pick the symbology printed on packaging when the code is a valid retail number. */
+export function barcodeFormat(code: string) {
+  if (code.length === 13 && gs1Valid(code)) return "EAN13";
+  if (code.length === 12 && gs1Valid(code)) return "UPC";
+  if (code.length === 8 && gs1Valid(code)) return "EAN8";
+  return "CODE128";
+}
+/** Create an in-store EAN-13 (GS1 prefix 2 is reserved for internal use). */
+export function inStoreBarcode(taken: Set<string>) {
+  for (;;) {
+    let body = "2";
+    for (let index = 0; index < 11; index++)
+      body += Math.floor(Math.random() * 10);
+    const sum = body
+      .split("")
+      .map(Number)
+      .reverse()
+      .reduce((total, digit, index) => total + digit * (index % 2 === 0 ? 3 : 1), 0);
+    const code = body + ((10 - (sum % 10)) % 10);
+    if (!taken.has(code)) return code;
+  }
 }

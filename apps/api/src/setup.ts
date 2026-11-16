@@ -81,6 +81,8 @@ export async function bootstrapOwner(db: Database) {
       cashierDiscountLimit: 0,
       roundingIncrement: 1,
       taxRates: [0, 500, 1200, 1800, 2800],
+      // New shops start simple; owners can switch modules on in Settings.
+      features: { transfers: false, fitment: false, offline: false, warranty: true },
     });
     await putRecord(tx, org, "user", {
       id: "owner",
