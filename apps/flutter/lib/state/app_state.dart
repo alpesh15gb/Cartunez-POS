@@ -329,6 +329,11 @@ class AppState extends ChangeNotifier {
   List<String> get tenderTypes =>
       ((settings['tenderTypes'] as List?) ?? const ['Cash', 'Card', 'UPI']).map((e) => '$e').toList();
   bool get gst => settings['taxScheme'] == 'india-gst';
+  bool get usesIndiaBusinessTime => (settings['currency'] ?? 'INR') == 'INR';
+
+  DateTime businessTime(DateTime instant) => instant.toUtc().add(
+        usesIndiaBusinessTime ? const Duration(hours: 5, minutes: 30) : Duration.zero,
+      );
 
   bool feature(String key) {
     final features = settings['features'];
@@ -471,11 +476,18 @@ class AppState extends ChangeNotifier {
 
   /// Barcodes first, then SKU, then manufacturer and cross references.
   List<Json> findByCode(String code) {
+    final raw = code.trim();
+    if (raw.isEmpty) return [];
+    final gtin = canonicalGtin(scannedProductCode(raw));
+    final barcodeMatches = products.where((p) => (p['barcodes'] as List? ?? const []).any((v) {
+      final stored = '$v'.trim();
+      return stored == raw || (gtin != null && canonicalGtin(stored) == gtin);
+    })).toList();
+    if (barcodeMatches.isNotEmpty) return barcodeMatches;
     final key = normalize(code);
     if (key.isEmpty) return [];
     bool exact(Iterable values) => values.any((v) => normalize(v) == key);
     final tiers = <bool Function(Json)>[
-      (p) => exact(p['barcodes'] as List? ?? const []),
       (p) => exact([p['sku']]),
       (p) => exact([
             p['partNumber'],
@@ -491,6 +503,13 @@ class AppState extends ChangeNotifier {
     }
     return [];
   }
+
+  String? uniqueProductIdForCode(String code) {
+    final matches = findByCode(code);
+    return matches.length == 1 ? matches.single['id'] as String : null;
+  }
+
+  String? binIdForCode(String code) => bins.where((bin) => bin['id'] == code.trim()).firstOrNull?['id'] as String?;
 
   @override
   void dispose() {

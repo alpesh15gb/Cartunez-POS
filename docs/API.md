@@ -92,6 +92,8 @@ Device and server clocks must remain synchronized. The server allows up to 60 se
 
 Optional filters are `dateFrom`, `dateTo`, `branchId`, `cashier`, `category`, `supplierId`, `sku`, and `paymentType` where relevant. Branch selection must match the authenticated branch. Sales, returns, tax, and margin use finalized invoice and credit-note snapshots. Net receipts subtract merchandise and core refunds. Shift cash subtracts refunds recorded in that shift, including core refunds. Inventory valuation uses current catalog cost, and aging consumes historical bin ledger receipts FIFO to show the age of remaining units. A bin transfer starts the destination bin's receipt age.
 
+Date bounds are inclusive business dates in `YYYY-MM-DD`. Reports use `Asia/Kolkata` for INR and UTC for other currencies. `daily-sales` groups invoice activity, credit notes and core refunds by their own transaction dates. `tenders` reports collected, refunded and net amounts for each payment type. It rejects product filters because split tenders are recorded at invoice level. Report totals and rows come from the same read snapshot. CSV exports contain amounts in minor currency units.
+
 ## Deployment and error behavior
 
 `CORS_ORIGINS` adds exact allowed browser origins. Configure the shop HTTPS hostname, such as `https://pos.shop.local`. Desktop `motorline://app` and Android `https://localhost` are included. No wildcard origin is used. PostgreSQL stays on the Compose private network. Nginx proxies `/api/` and serves the static web export.

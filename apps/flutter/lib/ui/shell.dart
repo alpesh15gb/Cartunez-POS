@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../main.dart';
 import '../state/app_state.dart';
+import 'barcode_scan.dart';
 import 'login.dart';
 import 'screens/billing.dart';
 import 'screens/dashboard.dart';
@@ -138,6 +138,12 @@ class _ShellState extends State<Shell> {
   /// wherever the cursor is, unless the user is typing into a field.
   bool _onKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+    if (event.synthesized || Navigator.of(context).canPop() ||
+        HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isAltPressed ||
+        HardwareKeyboard.instance.isMetaPressed) {
+      _buffer.clear();
+      return false;
+    }
     if (event.logicalKey == LogicalKeyboardKey.f2) {
       controller.searchFocus.requestFocus();
       return true;
@@ -147,7 +153,8 @@ class _ShellState extends State<Shell> {
       if (context != null && ModalRoute.of(context)?.isCurrent == true) startCheckout(context);
       return true;
     }
-    if (_typingInField() || ModalRoute.of(context)?.isCurrent != true && Navigator.of(context).canPop()) {
+    if (_typingInField() || !{'billing', 'parts', 'bins'}.contains(controller.section)) {
+      _buffer.clear();
       return false;
     }
     final now = DateTime.now();
@@ -156,14 +163,17 @@ class _ShellState extends State<Shell> {
     if (event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter) {
       final code = _buffer.toString();
       _buffer.clear();
-      if (code.length >= 3) {
+      if (code.isNotEmpty) {
         handleScan(context, controller, code);
         return true;
       }
       return false;
     }
     final char = event.character;
-    if (char != null && char.length == 1 && char.codeUnitAt(0) >= 32) _buffer.write(char);
+    if (char != null && char.length == 1 && _buffer.length < 512 &&
+        (char.codeUnitAt(0) >= 32 || char == '\x1d')) {
+      _buffer.write(char);
+    }
     return false;
   }
 
@@ -444,7 +454,7 @@ class _TopBar extends StatelessWidget {
               focusNode: controller.searchFocus,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: controller.section == 'billing' ? 'Search or scan parts  (F2)' : 'Search this list',
+                hintText: controller.section == 'billing' ? (narrow ? 'Find a part' : 'Search or scan parts  (F2)') : 'Search this list',
                 prefixIcon: const Icon(Icons.search, size: 20),
                 suffixIcon: ValueListenableBuilder(
                   valueListenable: controller.search,
@@ -454,16 +464,19 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
               onSubmitted: (value) {
-                if (controller.section == 'billing' && value.trim().isNotEmpty) handleScan(context, controller, value);
+                if ({'billing', 'parts', 'bins'}.contains(controller.section) && value.trim().isNotEmpty) handleScan(context, controller, value);
               },
             ),
           ),
         ),
         const SizedBox(width: 8),
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android && app.canSell)
+        if ({'billing', 'parts', 'bins'}.contains(controller.section))
           IconButton.filledTonal(
-            tooltip: 'Scan with camera',
-            onPressed: () => scanWithCamera(context, controller),
+            tooltip: 'Scan barcode',
+            onPressed: () async {
+              final code = await requestBarcode(context);
+              if (code != null && context.mounted) handleScan(context, controller, code);
+            },
             icon: const Icon(Icons.qr_code_scanner),
           ),
         if (!narrow) const Spacer(),

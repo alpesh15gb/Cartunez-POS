@@ -5,11 +5,11 @@ Windows program and as an Android app, all talking to the server API in `apps/ap
 
 ## What it does
 
-- Billing: catalog with photos and stock, barcode scanning (USB/Bluetooth scanners anywhere in the
-  app, camera on Android), repeat scans add one more, cart with quantity steppers, discounts,
+- Billing: catalog with photos and stock, USB/Bluetooth keyboard-mode scanners with an Enter suffix,
+  and camera scanning on Android and supported browsers. Repeat scans add one more. The register also has discounts,
   retail/wholesale, hold and resume, cash/card/UPI and split payments with change, receipts.
 - Sales: invoices and credit notes, returns, voids, shifts with cash counts.
-- Customers, suppliers, parts (with in-store EAN-13 barcodes), bins, stock adjust/count/move,
+- Customers, suppliers, parts (with in-store Code 128 barcodes and support for existing EAN/UPC labels), bins, stock adjust/count/move,
   purchase orders and receiving, label printing (50 × 30 mm), dashboard, reports with CSV export,
   settings, modules, staff, branches, approvals, sync and audit.
 - Optional modules (vehicle fitment, branch transfers, warranty & cores) follow Settings › Modules.
@@ -18,6 +18,17 @@ Windows program and as an Android app, all talking to the server API in `apps/ap
 
 Not in the app yet: enrolled offline counters with their own invoice ranges, and fitment CSV import
 (both were in the retired Next.js app).
+
+## Scanner and report checks
+
+- In Billing, Parts, or Bins, use **Scan barcode** or focus the search field and scan with an Enter
+  suffix. Scanner buttons in stock and receiving forms select the matching part or bin. The Windows app
+  uses keyboard-mode scanners. For a webcam on Windows, open the HTTPS web app in a browser that allows camera access.
+- Product lookup preserves leading zeroes and punctuation and matches equivalent valid UPC/EAN/GTIN
+  representations. New internal codes print as Code 128. Print thermal labels at actual size and test a sample with each counter scanner.
+- INR reports use IST business dates. Reports cover the active branch. The tender report reconciles
+  recorded invoices, change and refunds. Compare Card and UPI with the provider statement separately.
+  CSV amounts are integer minor units, such as paise for INR.
 
 ## Build
 

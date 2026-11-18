@@ -10,14 +10,15 @@ class DashboardScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    final today = DateTime.now();
+    final today = app.businessTime(DateTime.now());
     bool isToday(Object? value) {
-      final d = DateTime.tryParse('$value')?.toLocal();
+      final parsed = DateTime.tryParse('$value');
+      final d = parsed == null ? null : app.businessTime(parsed);
       return d != null && d.year == today.year && d.month == today.month && d.day == today.day;
     }
 
     final sales = app.list('invoices').where((i) => isToday(i['createdAt'])).toList();
-    final refunds = app.list('returns').where((r) => isToday(r['createdAt'])).toList();
+    final refunds = [...app.list('returns'), ...app.list('coreReturns')].where((r) => isToday(r['createdAt']));
     final gross = sales.fold<int>(0, (n, i) => n + (i['total'] as int));
     final refunded = refunds.fold<int>(0, (n, r) => n + (r['total'] as int));
     final low = app.products

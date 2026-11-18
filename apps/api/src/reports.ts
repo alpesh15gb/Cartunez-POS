@@ -26,9 +26,32 @@ export async function report(
     fail("This report requires manager access.", 403);
   if (filters.branchId && filters.branchId !== actor.branchId)
     fail("Switch to the requested branch before reporting.", 403);
-  const inDate = (date: string) =>
-    (!filters.dateFrom || date.slice(0, 10) >= filters.dateFrom) &&
-    (!filters.dateTo || date.slice(0, 10) <= filters.dateTo);
+  for (const key of ["dateFrom", "dateTo"]) {
+    const value = filters[key];
+    if (value === undefined) continue;
+    const time = new Date(`${value}T00:00:00Z`);
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+        !Number.isFinite(time.getTime()) || time.toISOString().slice(0, 10) !== value)
+      fail("Use a valid date in YYYY-MM-DD format.");
+  }
+  if (filters.dateFrom && filters.dateTo && filters.dateFrom > filters.dateTo)
+    fail("The start date must be on or before the end date.");
+  const settings = await getRecord(db, actor.organizationId, "settings", "settings");
+  const timeZone = settings?.currency === "INR" ? "Asia/Kolkata" : "UTC";
+  const dayFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  });
+  const businessDay = (date: string) => dayFormatter.format(new Date(date));
+  const inDate = (date: string) => {
+    if (!filters.dateFrom && !filters.dateTo) return true;
+    const day = businessDay(date);
+    return (!filters.dateFrom || day >= filters.dateFrom) && (!filters.dateTo || day <= filters.dateTo);
+  };
+  const productFiltered = !!(filters.category || filters.supplierId || filters.sku);
+  if (name === "tenders" && productFiltered)
+    fail("Tender amounts are recorded per invoice. Remove part filters to reconcile payments.");
+  if (filters.paymentType && !["Cash", "Card", "UPI"].includes(filters.paymentType))
+    fail("Choose a supported payment method.");
   const products = await records(db, actor.organizationId, "product");
   const productMatch = (product: any) =>
     (!filters.category || product.category === filters.category) &&
@@ -37,6 +60,7 @@ export async function report(
   const productIds = new Set(
     products.filter(productMatch).map((product) => product.id),
   );
+  const lineMatches = (line: any) => !productFiltered || productIds.has(line.productId);
   const allSales = (
     await records(db, actor.organizationId, "invoice", actor.branchId)
   ).filter(
@@ -51,7 +75,7 @@ export async function report(
   const sales: any[] = allSales
     .map((sale) => ({
       ...sale,
-      lines: sale.lines.filter((line: any) => productIds.has(line.productId)),
+      lines: sale.lines.filter(lineMatches),
     }))
     .filter((sale) => sale.lines.length);
   const returns: any[] = (
@@ -65,7 +89,7 @@ export async function report(
     )
     .map((item) => ({
       ...item,
-      lines: item.lines.filter((line: any) => productIds.has(line.productId)),
+      lines: item.lines.filter(lineMatches),
     }))
     .filter((item) => item.lines.length);
   const gross = sales.reduce(
@@ -123,7 +147,8 @@ export async function report(
   ).filter(
     (item) =>
       inDate(item.createdAt) &&
-      productIds.has(item.productId) &&
+      lineMatches(item) &&
+      (!filters.cashier || item.userId === filters.cashier) &&
       (!filters.paymentType || item.refundType === filters.paymentType),
   );
   const coreRefundTotal = coreRefunds.reduce(
@@ -134,6 +159,7 @@ export async function report(
     gross,
     returns: refundTotal,
     coreReturns: coreRefundTotal,
+    coreDeposits: cores,
     net: gross - refundTotal - coreRefundTotal,
     discount: discountTotal,
     tax,
@@ -151,14 +177,31 @@ export async function report(
     })),
   );
   let rows: any[];
-  if (
+  if (name === "daily-sales") {
+    const days = new Map<string, { day: string; sales: number; gross: number; returns: number; coreReturns: number; net: number }>();
+    const activity = (createdAt: string) => {
+      const day = businessDay(createdAt);
+      const row = days.get(day) ?? { day, sales: 0, gross: 0, returns: 0, coreReturns: 0, net: 0 };
+      days.set(day, row);
+      return row;
+    };
+    for (const sale of sales) {
+      const row = activity(sale.createdAt);
+      row.sales++;
+      row.gross += sale.lines.reduce((sum: number, line: any) => sum + line.total, 0);
+    }
+    for (const item of returns)
+      activity(item.createdAt).returns += item.lines.reduce((sum: number, line: any) => sum + line.total, 0);
+    for (const item of coreRefunds) activity(item.createdAt).coreReturns += item.total;
+    rows = [...days.values()].sort((a, b) => b.day.localeCompare(a.day));
+    for (const row of rows) row.net = row.gross - row.returns - row.coreReturns;
+  } else if (
     name === "sales" ||
     name === "discounts" ||
-    name === "margin" ||
-    name === "daily-sales"
+    name === "margin"
   )
     rows = sales
-      .filter((sale) => name !== "discounts" || sale.discount > 0)
+      .filter((sale) => name !== "discounts" || sale.lines.some((line: any) => line.discount > 0))
       .map((sale) => ({
         id: sale.id,
         invoiceId: sale.id,
@@ -178,14 +221,23 @@ export async function report(
           (sum: number, line: any) => sum + line.cost * line.qty,
           0,
         ),
+        ...(name === "margin" ? { margin: sale.lines.reduce((sum: number, line: any) =>
+          sum + line.total - line.tax - (line.cost + line.coreCharge) * line.qty, 0) } : {}),
         tenders: sale.tenders,
       }));
-  else if (name === "returns") rows = returns;
+  else if (name === "returns") rows = returns.map((item) => ({
+    ...item,
+    total: item.lines.reduce((sum: number, line: any) => sum + line.total, 0),
+    tax: item.lines.reduce((sum: number, line: any) => sum + line.tax, 0),
+  }));
   else if (name === "tax")
     rows = flat
       .map((line) => ({
         invoiceId: line.invoiceId,
+        document: line.number,
+        date: line.createdAt,
         sku: line.sku,
+        hsnSac: line.hsnSac || "",
         taxRate: line.taxRate,
         taxable:
           line.subtotal -
@@ -198,7 +250,11 @@ export async function report(
         returns.flatMap((item) =>
           item.lines.map((line: any) => ({
             invoiceId: item.invoiceId,
+            document: item.number,
+            date: item.createdAt,
             sku: line.sku,
+            hsnSac: line.hsnSac || "",
+            taxRate: line.taxRate,
             taxable: -(
               line.subtotal -
               line.discount -
@@ -223,9 +279,8 @@ export async function report(
   else if (name === "tenders")
     rows = ["Cash", "Card", "UPI"]
       .filter((type) => !filters.paymentType || filters.paymentType === type)
-      .map((type) => ({
-        type,
-        collected: sales.reduce(
+      .map((type) => {
+        const collected = sales.reduce(
           (sum, sale) =>
             sum +
             sale.tenders
@@ -233,15 +288,16 @@ export async function report(
               .reduce((n: number, tender: any) => n + tender.amount, 0) -
             (type === "Cash" ? sale.change : 0),
           0,
-        ),
-        refunded:
+        );
+        const refunded =
           returns
             .filter((item) => item.refundType === type)
             .reduce((sum, item) => sum + item.total, 0) +
           coreRefunds
             .filter((item) => item.refundType === type)
-            .reduce((sum, item) => sum + item.total, 0),
-      }));
+            .reduce((sum, item) => sum + item.total, 0);
+        return { type, collected, refunded, net: collected - refunded };
+      });
   else if (name === "stock-movement")
     rows = (
       await db.query(
@@ -403,9 +459,7 @@ export async function report(
           })),
       )
       .concat(
-        (await records(db, actor.organizationId, "coreReturn", actor.branchId))
-          .filter((item) => inDate(item.createdAt))
-          .map((item) => ({ ...item, refunded: item.total })),
+        coreRefunds.map((item) => ({ ...item, refunded: item.total })),
       );
   else if (name === "fitment")
     rows = (
@@ -433,7 +487,22 @@ export async function report(
   else fail("Unknown report.", 404);
   const sum = (key: string) =>
     rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
-  if (["stock-by-bin", "valuation", "aging"].includes(name))
+  if (name === "daily-sales") totals = { sales: sales.length, gross, returns: refundTotal, coreReturns: coreRefundTotal, net: totals.net };
+  else if (name === "returns") totals = { creditNotes: rows.length, returns: sum("total"), tax: sum("tax") };
+  else if (name === "discounts") totals = { sales: rows.length, discount: sum("discount"), total: sum("total") };
+  else if (name === "tax") {
+    totals = { taxable: sum("taxable"), tax: sum("tax") };
+    const componentKeys: Record<string, string> = { CGST: "cgst", SGST: "sgst", IGST: "igst", UTGST: "utgst" };
+    for (const row of rows) {
+      for (const component of row.taxComponents) {
+        const key = componentKeys[component.name];
+        if (!key) continue;
+        row[key] = (row[key] ?? 0) + component.amount;
+        totals[key] = (totals[key] ?? 0) + component.amount;
+      }
+    }
+  }
+  else if (["stock-by-bin", "valuation", "aging"].includes(name))
     totals = {
       quantity: sum("quantity"),
       available: sum("available"),
@@ -498,6 +567,8 @@ export async function report(
     totals,
     confirmedOnly: true,
     pendingConflicts: conflicts,
+    branchId: actor.branchId,
+    timeZone,
     generatedAt: now(),
   };
 }

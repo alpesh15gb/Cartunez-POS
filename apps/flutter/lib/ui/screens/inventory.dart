@@ -19,8 +19,9 @@ class PartsScreen extends StatelessWidget {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
+        final matches = q.isEmpty ? const <Json>[] : app.findByCode(search.text);
         final rows = app.products
-            .where((p) => q.isEmpty ||
+            .where((p) => matches.isNotEmpty ? matches.contains(p) : q.isEmpty ||
                 [p['name'], p['sku'], p['partNumber'], p['brand'], p['category'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
                     .any((v) => normalize(v).contains(q)))
             .toList();
@@ -28,14 +29,16 @@ class PartsScreen extends StatelessWidget {
           if (app.canStock)
             Toolbar([
               FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part')),
-              OutlinedButton(onPressed: () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
-              OutlinedButton(onPressed: () => stockOperation(context, 'count'), child: const Text('Stock count')),
+              OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
+              OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'count'), child: const Text('Stock count')),
               OutlinedButton.icon(
-                onPressed: () => printLabels(context, [for (final p in rows) _label(p)]),
+                onPressed: rows.isEmpty ? null : () => printLabels(context, [for (final p in rows) _label(p)]),
                 icon: const Icon(Icons.qr_code_2, size: 18),
                 label: Text(q.isEmpty ? 'Print all labels' : 'Print ${rows.length} labels'),
               ),
             ]),
+          if (app.canStock && app.bins.isEmpty && app.products.isNotEmpty)
+            Align(alignment: Alignment.centerLeft, child: TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a bin to receive or adjust stock'))),
           DataList(
             rows: rows,
             empty: q.isEmpty ? 'No parts yet. Add your first part.' : 'No part matches.',
@@ -50,14 +53,15 @@ class PartsScreen extends StatelessWidget {
               Col('Stock', (p) {
                 if (p['type'] == 'service') return const Text('Service');
                 final n = app.available('${p['id']}');
-                return Row(mainAxisSize: MainAxisSize.min, children: [
+                return Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
                   Text('$n', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  if (n <= (p['reorderLevel'] ?? 0)) ...[const SizedBox(width: 6), StatusChip(n <= 0 ? 'Out of stock' : 'Low')],
+                  if (n <= (p['reorderLevel'] ?? 0)) StatusChip(n <= 0 ? 'Out of stock' : 'Low'),
                 ]);
               }),
               Col('Retail', (p) => Text(app.money(p['retailPrice'] as num?)), numeric: true),
               if (app.canStock) Col('Cost', (p) => Text(app.money(p['cost'] as num?)), numeric: true),
             ],
+            actionWidth: 52,
             actions: app.canStock
                 ? (p) => [
                       IconButton(tooltip: 'Print label', onPressed: () => printLabels(context, [_label(p)]), icon: const Icon(Icons.qr_code_2)),
@@ -95,7 +99,7 @@ Future<void> editProduct(BuildContext context, Json product) async {
       FieldSpec('category', 'Category',
           value: product['category'], required: true, suggestions: {...app.products.map((p) => '${p['category']}')}.toList()),
       FieldSpec('partNumber', 'Manufacturer part number', value: product['partNumber']),
-      FieldSpec('barcodes', 'Barcode', value: joined('barcodes'), help: 'Scan it from the box. Leave empty to create one.'),
+      FieldSpec('barcodes', 'Barcodes', value: joined('barcodes'), help: 'Scan into this field or separate codes with commas. Leave empty to generate one.', barcodeInput: true),
       FieldSpec('retailPrice', 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
       FieldSpec('wholesalePrice', 'Wholesale price', kind: FieldKind.money, value: money('wholesalePrice'), help: 'Blank uses the retail price.'),
       FieldSpec('cost', 'Purchase cost', kind: FieldKind.money, value: money('cost'), required: true),
@@ -138,7 +142,7 @@ Future<void> editProduct(BuildContext context, Json product) async {
           final owner = app.products.firstWhere((p) => (p['barcodes'] as List? ?? []).contains(code));
           throw FormProblem('Barcode $code already belongs to ${owner['name']}.');
         }
-        if (code.length == 13 && RegExp(r'^\d+$').hasMatch(code) && !gs1Valid(code)) {
+        if (!(product['barcodes'] as List? ?? []).contains(code) && code.length == 13 && RegExp(r'^\d+$').hasMatch(code) && !gs1Valid(code)) {
           throw FormProblem('$code has a wrong check digit. Scan it again from the box.');
         }
       }
@@ -178,15 +182,15 @@ Future<void> stockOperation(BuildContext context, String kind) async {
     context,
     title: {'adjust': 'Adjust stock', 'count': 'Stock count', 'move': 'Move stock'}[kind]!,
     fields: [
-      FieldSpec('productId', 'Part', kind: FieldKind.select, options: parts, required: true),
+      FieldSpec('productId', 'Part', kind: FieldKind.select, options: parts, required: true, barcodeChoice: app.uniqueProductIdForCode),
       if (kind == 'move') ...[
-        FieldSpec('fromBinId', 'From bin', kind: FieldKind.select, options: allBins, required: true),
-        FieldSpec('toBinId', 'To bin', kind: FieldKind.select, options: allBins, required: true),
+        FieldSpec('fromBinId', 'From bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),
+        FieldSpec('toBinId', 'To bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),
       ] else
-        FieldSpec('binId', 'Bin', kind: FieldKind.select, options: allBins, required: true),
+        FieldSpec('binId', 'Bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),
       FieldSpec(kind == 'count' ? 'counted' : 'quantity',
           kind == 'count' ? 'Counted quantity' : kind == 'move' ? 'Quantity' : 'Change (+ adds, − removes)',
-          kind: FieldKind.number, required: true),
+          kind: kind == 'adjust' ? FieldKind.signedNumber : FieldKind.number, required: true),
       const FieldSpec('reason', 'Reason', required: true),
       const FieldSpec('serials', 'Serial numbers', advanced: true, help: 'Serial-tracked parts only, separated by commas.'),
       if (!app.isManager && kind != 'move') FieldSpec('approvalId', 'Manager approval ID', required: true, help: 'Reference $transactionId'),
@@ -208,6 +212,7 @@ class BinsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
+    final search = ShellScope.of(context).search;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Toolbar([
         FilledButton.icon(onPressed: () => editBin(context, const {}), icon: const Icon(Icons.add), label: const Text('Add bin')),
@@ -218,16 +223,16 @@ class BinsScreen extends StatelessWidget {
           label: const Text('Print bin labels'),
         ),
       ]),
-      DataList(
-        rows: app.bins,
-        empty: 'No bins yet. Add where stock is kept.',
+      ValueListenableBuilder(valueListenable: search, builder: (context, value, _) => DataList(
+        rows: app.bins.where((b) => normalize(b['id']) == normalize(value.text) || normalize(app.binName(b)).contains(normalize(value.text))).toList(),
+        empty: app.bins.isEmpty ? 'No bins yet. Add where stock is kept.' : 'No matching bins.',
         onTap: (b) => editBin(context, b),
         columns: [
           Col('Bin', (b) => Text(app.binName(b), style: const TextStyle(fontWeight: FontWeight.w700)), flex: 2),
           Col('Condition', (b) => StatusChip(titleCase('${b['kind']}'))),
           Col('Units', (b) => Text('${app.stock.where((s) => s['binId'] == b['id']).fold<int>(0, (n, s) => n + ((s['quantity'] ?? 0) as int))}'), numeric: true),
         ],
-      ),
+      )),
     ]);
   }
 }

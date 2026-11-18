@@ -376,6 +376,21 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       salesReport.totals.net,
       salesReport.totals.gross - salesReport.totals.returns,
     );
+    const daily = await call("GET", "reports/daily-sales", undefined, tok);
+    assert.equal(daily.rows.reduce((sum: number, row: any) => sum + row.net, 0), salesReport.totals.net);
+    const tender = await call("GET", "reports/tenders", undefined, tok);
+    assert.equal(tender.rows.reduce((sum: number, row: any) => sum + row.net, 0), tender.totals.net);
+    assert.equal(tender.totals.net, salesReport.totals.net);
+    await call("GET", "reports/tenders?category=Filters", undefined, tok, 400);
+    await call("GET", "reports/sales?dateFrom=2025-02-30", undefined, tok, 400);
+    await putRecord(db, "demo", "invoice", {
+      ...final.invoices[0], id: "report-boundary-fixture", createdAt: "2025-01-01T19:00:00Z",
+    }, "pune");
+    const boundary = await call("GET", "reports/daily-sales?dateFrom=2025-01-02&dateTo=2025-01-02", undefined, tok);
+    assert.equal(boundary.timeZone, "Asia/Kolkata");
+    assert.equal(boundary.rows[0].day, "2025-01-02");
+    await call("POST", "products", { ...part, id: undefined, sku: "UPC-FIXTURE", barcodes: ["036000291452"] }, tok);
+    await call("POST", "products", { ...part, id: undefined, sku: "EAN-FIXTURE", barcodes: ["0036000291452"] }, tok, 409);
     for (const report of [
       "returns",
       "discounts",

@@ -53,6 +53,13 @@ export const normalize = (value: any) =>
   String(value ?? "")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
+export function barcodeKey(code: string) {
+  if (![8, 12, 13, 14].includes(code.length) || !/^\d+$/.test(code)) return code;
+  const digits = [...code].map(Number);
+  const check = digits.pop();
+  const sum = digits.reverse().reduce((total, digit, index) => total + digit * (index % 2 === 0 ? 3 : 1), 0);
+  return (10 - sum % 10) % 10 === check ? code.padStart(14, "0") : code;
+}
 export function multiline(
   value: unknown,
   label: string,

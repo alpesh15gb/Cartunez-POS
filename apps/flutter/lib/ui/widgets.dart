@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../core/api.dart';
 import '../core/billing.dart';
+import 'barcode_scan.dart';
 import 'theme.dart';
 
 String titleCase(String value) => value.isEmpty ? value : value[0].toUpperCase() + value.substring(1);
@@ -38,7 +39,7 @@ class FormProblem implements Exception {
 
 // ---------------- form dialog ----------------
 
-enum FieldKind { text, number, money, multiline, select, checks, password, email, phone, date }
+enum FieldKind { text, number, signedNumber, money, multiline, select, checks, password, email, phone, date }
 
 class FieldSpec {
   const FieldSpec(
@@ -51,6 +52,8 @@ class FieldSpec {
     this.advanced = false,
     this.help,
     this.suggestions = const [],
+    this.barcodeInput = false,
+    this.barcodeChoice,
   });
   final String name;
   final String label;
@@ -61,6 +64,8 @@ class FieldSpec {
   final bool advanced;
   final String? help;
   final List<String> suggestions;
+  final bool barcodeInput;
+  final String? Function(String code)? barcodeChoice;
 }
 
 /// Opens a form; [onSubmit] may throw to keep the dialog open with a message.
@@ -144,6 +149,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     if (!_form.currentState!.validate()) {
       if (widget.fields.any((f) => f.advanced && f.required)) setState(() => _more = true);
       return;
@@ -174,9 +180,10 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
     String? validate(String? value) {
       final text = (value ?? '').trim();
       if (field.required && text.isEmpty) return 'Required';
-      if ((field.kind == FieldKind.number || field.kind == FieldKind.money) && text.isNotEmpty) {
-        final n = num.tryParse(text);
-        if (n == null || n < 0) return 'Enter a valid number';
+      if (text.isNotEmpty) {
+        if (field.kind == FieldKind.signedNumber && int.tryParse(text) == null) return 'Enter a whole number';
+        if (field.kind == FieldKind.number && (int.tryParse(text) ?? -1) < 0) return 'Enter a non-negative whole number';
+        if (field.kind == FieldKind.money && (num.tryParse(text) ?? -1) < 0) return 'Enter a valid amount';
       }
       return null;
     }
@@ -185,9 +192,23 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
     switch (field.kind) {
       case FieldKind.select:
         return DropdownButtonFormField<String>(
+          key: field.barcodeChoice == null ? null : ValueKey((field.name, _values[field.name])),
           initialValue: _values[field.name] as String?,
           isExpanded: true,
-          decoration: decoration,
+          decoration: field.barcodeChoice == null ? decoration : decoration.copyWith(suffixIcon: IconButton(
+            tooltip: 'Scan to select ${field.label.toLowerCase()}',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: _busy ? null : () async {
+              final scan = await requestBarcode(context);
+              if (scan == null || !mounted) return;
+              final choice = field.barcodeChoice!(scan);
+              final valid = choice != null && field.options.any((option) => option.$1 == choice);
+              setState(() {
+                if (valid) _values[field.name] = choice;
+                _error = valid ? null : 'That barcode does not uniquely match an available ${field.label.toLowerCase()}.';
+              });
+            },
+          )),
           items: [for (final o in field.options) DropdownMenuItem(value: o.$1, child: Text(o.$2, overflow: TextOverflow.ellipsis))],
           onChanged: (v) => setState(() => _values[field.name] = v),
           validator: (v) => field.required && (v == null || v.isEmpty) ? 'Required' : null,
@@ -209,12 +230,24 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
         final controller = _text[field.name]!;
         final input = TextFormField(
           controller: controller,
-          decoration: decoration,
+          decoration: field.barcodeInput ? decoration.copyWith(suffixIcon: IconButton(
+            tooltip: 'Capture barcode',
+            icon: const Icon(Icons.qr_code_scanner),
+            onPressed: () async {
+              final scanned = await requestBarcode(context);
+              if (scanned != null && mounted) {
+                final code = scannedProductCode(scanned);
+                final codes = splitList(controller.text);
+                if (!codes.contains(code)) controller.text = [...codes, code].join(', ');
+              }
+            },
+          )) : decoration,
           validator: validate,
           obscureText: field.kind == FieldKind.password,
           maxLines: field.kind == FieldKind.multiline ? 3 : 1,
           keyboardType: switch (field.kind) {
             FieldKind.number => TextInputType.number,
+            FieldKind.signedNumber => const TextInputType.numberWithOptions(signed: true),
             FieldKind.money => const TextInputType.numberWithOptions(decimal: true),
             FieldKind.email => TextInputType.emailAddress,
             FieldKind.phone => TextInputType.phone,
@@ -222,11 +255,13 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
             _ => TextInputType.text,
           },
           inputFormatters: field.kind == FieldKind.number
-              ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9-]'))]
+              ? [FilteringTextInputFormatter.digitsOnly]
+              : field.kind == FieldKind.signedNumber
+                  ? [TextInputFormatter.withFunction((old, next) => RegExp(r'^-?\d*$').hasMatch(next.text) ? next : old)]
               : field.kind == FieldKind.money
                   ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))]
                   : null,
-          onFieldSubmitted: field.kind == FieldKind.multiline ? null : (_) => _save(),
+          onFieldSubmitted: field.kind == FieldKind.multiline || field.barcodeInput ? null : (_) => _save(),
         );
         if (field.suggestions.isEmpty) return input;
         return RawAutocomplete<String>(
@@ -280,7 +315,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
     final more = widget.fields.where((f) => f.advanced).toList();
     final screen = MediaQuery.sizeOf(context).width;
     final wide = basic.length > 6 && screen > 760;
-    return AlertDialog(
+    return PopScope(canPop: !_busy, child: AlertDialog(
       title: Text(widget.title),
       scrollable: true,
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -319,7 +354,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
               : Text(widget.submit),
         ),
       ],
-    );
+    ));
   }
 }
 
@@ -342,12 +377,14 @@ class DataList extends StatelessWidget {
     this.actions,
     this.empty = 'Nothing here yet.',
     this.onTap,
+    this.actionWidth = 220,
   });
   final List<Json> rows;
   final List<Col> columns;
   final List<Widget> Function(Json row)? actions;
   final String empty;
   final void Function(Json row)? onTap;
+  final double actionWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -400,11 +437,13 @@ class DataList extends StatelessWidget {
               for (final col in columns)
                 Expanded(
                   flex: col.flex,
-                  child: Text(col.label,
-                      textAlign: col.numeric ? TextAlign.right : TextAlign.left,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: Text(col.label, textAlign: col.numeric ? TextAlign.right : TextAlign.left,
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Brand.muted)),
+                  ),
                 ),
-              if (actions != null) const SizedBox(width: 220),
+              if (actions != null) SizedBox(width: actionWidth),
             ]),
           ),
           for (final (index, row) in rows.indexed) ...[
@@ -424,7 +463,7 @@ class DataList extends StatelessWidget {
                     ),
                   if (actions != null)
                     SizedBox(
-                      width: 220,
+                    width: actionWidth,
                       child: Wrap(alignment: WrapAlignment.end, spacing: 6, runSpacing: 6, children: actions!(row)),
                     ),
                 ]),

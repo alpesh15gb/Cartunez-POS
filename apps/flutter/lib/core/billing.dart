@@ -162,6 +162,26 @@ bool gs1Valid(String code) {
   return (10 - sum % 10) % 10 == check;
 }
 
+String? canonicalGtin(String code) =>
+    const {8, 12, 13, 14}.contains(code.length) && gs1Valid(code) ? code.padLeft(14, '0') : null;
+
+String barcodeKey(Object? value) {
+  final code = '${value ?? ''}'.trim();
+  return canonicalGtin(code) ?? code;
+}
+
+/// Extract just AI 01 from a recognized GS1 scan, preserving ordinary codes.
+String scannedProductCode(String value) {
+  final code = value.trim();
+  final element = RegExp(r'^(?:\(01\)|\](?:d2|Q3|C1)01|\x1d01)(\d{14})').firstMatch(code)?.group(1);
+  final uri = Uri.tryParse(code);
+  final path = uri?.scheme == 'https' || uri?.scheme == 'http' ? uri!.pathSegments : const <String>[];
+  final digitalLink = path.length >= 2 && path[0] == '01' ? path[1] : null;
+  final gtin = element ?? digitalLink;
+  if (gtin != null && gtin.length == 14 && gs1Valid(gtin)) return gtin;
+  return code;
+}
+
 String barcodeFormat(String code) {
   if (code.length == 13 && gs1Valid(code)) return 'EAN13';
   if (code.length == 12 && gs1Valid(code)) return 'UPC';
@@ -169,16 +189,11 @@ String barcodeFormat(String code) {
   return 'CODE128';
 }
 
-/// In-store EAN-13 using GS1 prefix 2, which is reserved for internal use.
+/// Private Code 128 identifier with a distinct Cartunez prefix.
 String inStoreBarcode(Set<String> taken) {
   final random = Random.secure();
   while (true) {
-    final body = '2${List.generate(11, (_) => random.nextInt(10)).join()}';
-    var sum = 0;
-    for (var i = 0; i < 12; i++) {
-      sum += int.parse(body[11 - i]) * (i.isEven ? 3 : 1);
-    }
-    final code = '$body${(10 - sum % 10) % 10}';
+    final code = 'CTZ-${List.generate(12, (_) => random.nextInt(10)).join()}';
     if (!taken.contains(code)) return code;
   }
 }

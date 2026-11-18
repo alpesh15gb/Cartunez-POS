@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../shell.dart';
 import '../widgets.dart';
 
 class OrdersScreen extends StatelessWidget {
@@ -10,11 +11,21 @@ class OrdersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
+    final shell = ShellScope.of(context);
+    final hasSuppliers = app.list('suppliers').isNotEmpty;
+    final hasParts = app.products.any((p) => p['type'] != 'service');
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Toolbar([FilledButton.icon(onPressed: () => newOrder(context), icon: const Icon(Icons.add), label: const Text('New purchase order'))]),
+      Toolbar([
+        FilledButton.icon(onPressed: hasSuppliers && hasParts ? () => newOrder(context) : null, icon: const Icon(Icons.add), label: const Text('New purchase order')),
+        if (!hasSuppliers) TextButton(onPressed: () => shell.open('suppliers'), child: const Text('Add a supplier')),
+        if (!hasParts) TextButton(onPressed: () => shell.open('parts'), child: const Text('Add a part')),
+        if (app.sellableBins.isEmpty && app.list('purchaseOrders').isNotEmpty)
+          TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a sellable bin to receive stock')),
+      ]),
       DataList(
         rows: app.list('purchaseOrders').reversed.toList(),
         empty: 'No purchase orders yet.',
+        actionWidth: 112,
         columns: [
           Col('Created', (o) => Text(formatDate(o['createdAt']))),
           Col('Supplier', (o) => Text('${app.list('suppliers').where((s) => s['id'] == o['supplierId']).firstOrNull?['name'] ?? '—'}',
@@ -24,7 +35,7 @@ class OrdersScreen extends StatelessWidget {
           Col('Status', (o) => StatusChip(titleCase('${o['status']}'))),
         ],
         actions: (o) => [
-          if (o['status'] != 'received') FilledButton.tonal(onPressed: () => receiveOrder(context, o), child: const Text('Receive')),
+          if (o['status'] != 'received') FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => receiveOrder(context, o), child: const Text('Receive')),
         ],
       ),
     ]);
@@ -43,6 +54,7 @@ Future<void> newOrder(BuildContext context) async {
       FieldSpec('productId', 'Part',
           kind: FieldKind.select,
           required: true,
+          barcodeChoice: app.uniqueProductIdForCode,
           options: optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']} · cost ${app.money(p['cost'] as num?)}')),
       const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
       const FieldSpec('cost', 'Unit cost', kind: FieldKind.money, help: 'Blank uses the part\'s current cost.'),
@@ -65,6 +77,7 @@ Future<void> newOrder(BuildContext context) async {
 
 Future<void> receiveOrder(BuildContext context, Json order) async {
   final app = context.appRead;
+  final transactionId = uuid();
   final open = [for (final l in order['lines'] as List) if ((l['received'] as int) < (l['quantity'] as int)) l];
   await showFormDialog<void>(
     context,
@@ -74,17 +87,18 @@ Future<void> receiveOrder(BuildContext context, Json order) async {
       FieldSpec('productId', 'Part',
           kind: FieldKind.select,
           required: true,
+          barcodeChoice: app.uniqueProductIdForCode,
           value: open.length == 1 ? open.first['productId'] : null,
           options: [for (final l in open) ('${l['productId']}', '${app.productName('${l['productId']}')} · ${l['quantity'] - l['received']} outstanding')]),
       FieldSpec('quantity', 'Quantity received', kind: FieldKind.number, required: true,
           value: open.length == 1 ? open.first['quantity'] - open.first['received'] : 1),
       FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: true,
-          value: app.sellableBins.firstOrNull?['id'], options: optionsOf(app.sellableBins, app.binName)),
+          barcodeChoice: app.binIdForCode, value: app.sellableBins.firstOrNull?['id'], options: optionsOf(app.sellableBins, app.binName)),
       const FieldSpec('landedCost', 'Freight / landed cost for this delivery', kind: FieldKind.money, value: 0, advanced: true),
       const FieldSpec('serials', 'Serial numbers', advanced: true),
     ],
     onSubmit: (v) async => app.mutate('/purchase-orders/${order['id']}/receive', {
-      'transactionId': uuid(),
+      'transactionId': transactionId,
       'landedCost': ((double.tryParse('${v['landedCost']}') ?? 0) * 100).round(),
       'lines': [
         {'productId': v['productId'], 'quantity': int.tryParse('${v['quantity']}') ?? 0, 'binId': v['binId'], 'serials': splitList(v['serials'])},

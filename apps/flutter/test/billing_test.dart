@@ -48,11 +48,17 @@ void main() {
     expect(gs1Valid('4006381333932'), isFalse);
     expect(barcodeFormat('036000291452'), 'UPC');
     expect(barcodeFormat('ML-OIL-01'), 'CODE128');
+    expect(barcodeKey('036000291452'), barcodeKey('0036000291452'));
+    expect(barcodeKey('036000291453'), '036000291453');
+    expect(barcodeKey('ML-OIL-01'), isNot(barcodeKey('MLOIL01')));
+    expect(scannedProductCode(']d2010003600029145210LOT-A'), '00036000291452');
+    expect(scannedProductCode('https://id.example/01/00036000291452/10/LOT-A'), '00036000291452');
+    expect(scannedProductCode('https://example.com/ordinary-qr'), 'https://example.com/ordinary-qr');
     final taken = <String>{};
     for (var i = 0; i < 300; i++) {
       final code = inStoreBarcode(taken);
-      expect(code, matches(RegExp(r'^2\d{12}$')));
-      expect(gs1Valid(code), isTrue);
+      expect(code, matches(RegExp(r'^CTZ-\d{12}$')));
+      expect(barcodeFormat(code), 'CODE128');
       expect(taken.add(code), isTrue);
     }
   });

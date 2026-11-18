@@ -25,6 +25,7 @@ import {
   approved,
   idempotent,
   normalize,
+  barcodeKey,
   roundRatio,
 } from "./domain.js";
 import { finalizeSale, returnInvoice } from "./sales.js";
@@ -660,17 +661,21 @@ export async function createApp(db: Database) {
           409,
         );
     }
-    if (
-      products.some(
-        (other) =>
-          other.id !== product.id &&
-          (normalize(other.sku) === normalize(product.sku) ||
-            other.barcodes.some((barcode: string) =>
-              product.barcodes.includes(barcode),
-            )),
-      )
-    )
-      fail("SKU or barcode already exists.", 409);
+    const existingBarcodes = new Set((existing?.barcodes || []).map(barcodeKey));
+    const addedBarcodes = product.barcodes.filter((code: string) => !existingBarcodes.has(barcodeKey(code)));
+    for (const other of products) {
+      if (other.id === product.id) continue;
+      const otherBarcodes: string[] = other.barcodes || [];
+      const sku = normalize(product.sku);
+      if (
+        sku === normalize(other.sku) ||
+        (sku !== normalize(existing?.sku) && otherBarcodes.some((code) => normalize(code) === sku)) ||
+        addedBarcodes.some((code: string) =>
+          otherBarcodes.some((barcode) => barcodeKey(barcode) === barcodeKey(code)) ||
+          normalize(code) === normalize(other.sku),
+        )
+      ) fail(`SKU or barcode conflicts with ${other.name}.`, 409);
+    }
     if (
       existing &&
       (await records(tx, actor.organizationId, "hold")).some((hold) =>
@@ -1843,22 +1848,21 @@ export async function createApp(db: Database) {
     });
   });
   app.get("/api/v1/reports/:name", async (request: any, reply) => {
-    const result = await report(
-      db,
+    const result = await db.readSnapshot((snapshot) => report(
+      snapshot,
       request.actor,
       request.params.name,
       request.query,
-    );
+    ));
     if (request.query.format === "csv") {
       const keys = [
         ...new Set(result.rows.flatMap((row: any) => Object.keys(row))),
       ];
-      const escape = (value: any) =>
-        '"' +
-        String(
-          typeof value === "object" ? JSON.stringify(value) : (value ?? ""),
-        ).replace(/"/g, '""') +
-        '"';
+      const escape = (value: any) => {
+        const raw = value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
+        const cell = typeof value === "string" && /^(?:\s*[=+@-]|[\t\r\n])/.test(raw) ? `'${raw}` : raw;
+        return `"${cell.replace(/"/g, '""')}"`;
+      };
       const csv = [
         keys.map(escape).join(","),
         ...result.rows.map((row: any) =>

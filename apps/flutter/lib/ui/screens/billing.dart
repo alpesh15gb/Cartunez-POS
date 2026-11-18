@@ -2,7 +2,6 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
@@ -34,9 +33,11 @@ class _BillingScreenState extends State<BillingScreen> {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
+        final exactMatches = q.isEmpty ? const <Json>[] : app.findByCode(search.text);
         final vehicle = app.cart['vehicle'] as Map?;
         final categories = {'All parts', ...app.products.map((p) => '${p['category']}')}.toList();
         final parts = app.products.where((p) {
+          if (exactMatches.isNotEmpty) return exactMatches.contains(p);
           if (category != 'All parts' && p['category'] != category) return false;
           if (q.isNotEmpty &&
               ![p['name'], p['sku'], p['partNumber'], p['description'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
@@ -57,6 +58,10 @@ class _BillingScreenState extends State<BillingScreen> {
               const SizedBox(height: 4),
               Text(app.openShift == null ? 'Open a shift to start selling.' : 'Scan or pick parts, then take payment.',
                   style: Theme.of(context).textTheme.bodySmall),
+              if (app.openShift == null)
+                Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+                  onPressed: () => shell.open('shifts'), icon: const Icon(Icons.point_of_sale), label: const Text('Go to shifts'),
+                )),
               const SizedBox(height: 16),
               SizedBox(
                 height: 38,
@@ -76,7 +81,10 @@ class _BillingScreenState extends State<BillingScreen> {
             ]),
           ),
           if (parts.isEmpty)
-            SliverToBoxAdapter(child: EmptyState(message: q.isEmpty ? 'No parts in this category.' : 'No part matches "${search.text}".'))
+            SliverToBoxAdapter(child: Column(children: [
+              EmptyState(message: app.products.isEmpty ? 'No parts in the catalog yet.' : q.isEmpty ? 'No parts in this category.' : 'No part matches "${search.text}".'),
+              if (app.products.isEmpty) TextButton(onPressed: () => shell.open('parts'), child: const Text('Go to parts')),
+            ]))
           else
             SliverPadding(
               padding: EdgeInsets.fromLTRB(wide ? 28 : 16, 0, wide ? 20 : 16, wide ? 28 : 96),
@@ -494,7 +502,7 @@ Future<void> addPart(BuildContext context, Json product) async {
     app.toast('Your role cannot create sales.');
     return;
   }
-  final service = product['type'] == 'service' || product['category'] == 'Services';
+  final service = product['type'] == 'service';
   final choices = app.sellableBins.where((b) => app.available('${product['id']}', '${b['id']}') > 0).toList();
   if (!service && choices.isEmpty) {
     app.toast('${product['name']} is out of stock.');
@@ -531,6 +539,7 @@ Future<void> addPart(BuildContext context, Json product) async {
       final lines = (app.cart['lines'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
       final existing = lines.indexWhere((l) => l['productId'] == product['id'] && l['binId'] == binId);
       final already = existing >= 0 ? lines[existing]['qty'] as int : 0;
+      if (qty + already > 9999) throw FormProblem('A sale line can contain at most 9999 units.');
       if (binId != null && qty + already > app.available('${product['id']}', binId)) {
         throw FormProblem('Only ${app.available('${product['id']}', binId)} available in that bin.');
       }
@@ -591,60 +600,31 @@ void handleScan(BuildContext context, ShellController shell, String raw) {
   shell.search.clear();
   HapticFeedback.selectionClick();
   if (product['serialTracked'] != true) {
-    final lines = app.cart['lines'] as List;
+    final lines = (app.cart['lines'] as List).cast<Json>();
     for (var i = 0; i < lines.length; i++) {
       if (lines[i]['productId'] != product['id']) continue;
       if (setLineQuantity(context, i, (lines[i]['qty'] as int) + 1, quiet: true)) {
-        app.toast('${product['name']} × ${(app.cart['lines'] as List)[i]['qty']}');
         return;
       }
     }
+    final vehicle = app.cart['vehicle'] as Map?;
+    final needsOverride = vehicle != null && fitment(product, Map<String, dynamic>.from(vehicle)).needsOverride;
+    final service = product['type'] == 'service';
+    final binChoices = app.sellableBins.where((bin) =>
+        app.available('${product['id']}', '${bin['id']}') > 0 &&
+        !lines.any((line) => line['productId'] == product['id'] && line['binId'] == bin['id'])).toList();
+    if (!needsOverride && (service || binChoices.length == 1)) {
+      if (service && lines.any((line) => line['productId'] == product['id'])) {
+        app.toast('A sale line can contain at most 9999 units.');
+        return;
+      }
+      app.updateCart({'lines': [...lines, {
+        'productId': product['id'], 'qty': 1, 'binId': service ? null : binChoices.single['id'], 'serials': <String>[],
+      }]});
+      return;
+    }
   }
   addPart(context, product);
-}
-
-Future<void> scanWithCamera(BuildContext context, ShellController shell) async {
-  final code = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const _CameraScanPage()));
-  if (code != null && context.mounted) handleScan(context, shell, code);
-}
-
-class _CameraScanPage extends StatefulWidget {
-  const _CameraScanPage();
-  @override
-  State<_CameraScanPage> createState() => _CameraScanPageState();
-}
-
-class _CameraScanPageState extends State<_CameraScanPage> {
-  bool done = false;
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(title: const Text('Scan barcode'), backgroundColor: Colors.black, foregroundColor: Colors.white),
-        body: Stack(children: [
-          MobileScanner(
-            onDetect: (capture) {
-              final value = capture.barcodes.map((b) => b.rawValue).whereType<String>().firstOrNull;
-              if (value == null || done) return;
-              done = true;
-              HapticFeedback.mediumImpact();
-              Navigator.pop(context, value);
-            },
-          ),
-          Center(
-            child: Container(
-              width: 280,
-              height: 150,
-              decoration: BoxDecoration(border: Border.all(color: Brand.lime, width: 3), borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const Positioned(
-            left: 0,
-            right: 0,
-            bottom: 48,
-            child: Text('Hold the barcode inside the frame', textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
-          ),
-        ]),
-      );
 }
 
 Future<void> chooseVehicle(BuildContext context) async {
@@ -893,6 +873,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
   int _minor(String text) => ((double.tryParse(text) ?? 0) * 100).round();
 
   Future<void> _complete() async {
+    if (busy) return;
     final app = context.appRead;
     final paid = _minor(amount.text) + (split ? _minor(second.text) : 0);
     final cash = (tender == 'Cash' ? _minor(amount.text) : 0) + (split && secondTender == 'Cash' ? _minor(second.text) : 0);
@@ -935,7 +916,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     }.where((v) => v >= total).take(4).toList();
     return CallbackShortcuts(
       bindings: {const SingleActivator(LogicalKeyboardKey.enter, control: true): _complete},
-      child: AlertDialog(
+      child: PopScope(canPop: !busy, child: AlertDialog(
         title: Row(children: [
           const Expanded(child: Text('Take payment')),
           Text(app.money(total), style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -1064,7 +1045,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
             label: Text(app.online ? 'Complete sale' : 'Save sale'),
           ),
         ],
-      ),
+      )),
     );
   }
 }

@@ -172,8 +172,8 @@ class ShiftsScreen extends StatelessWidget {
         empty: 'No shifts yet.',
         columns: [
           Col('Cashier', (s) => Text(app.userName('${s['userId']}'), style: const TextStyle(fontWeight: FontWeight.w700))),
-          Col('Opened', (s) => Text(formatDate(s['openedAt']))),
-          Col('Closed', (s) => Text(s['closedAt'] == null ? '—' : formatDate(s['closedAt']))),
+          Col('Opened', (s) => Text(formatDate(s['openedAt'])), flex: 2),
+          Col('Closed', (s) => Text(s['closedAt'] == null ? '—' : formatDate(s['closedAt'])), flex: 2),
           Col('Expected', (s) => Text(s['closedAt'] != null ? app.money(s['expectedCash'] as num?) : app.isManager ? app.money(app.expectedCash(s)) : '—'), numeric: true),
           Col('Counted', (s) => Text(s['closedAt'] == null ? '—' : app.money(s['countedCash'] as num?)), numeric: true),
           Col('Variance', (s) => s['closedAt'] == null
@@ -181,7 +181,8 @@ class ShiftsScreen extends StatelessWidget {
               : Text(app.money(s['variance'] as num?), style: TextStyle(color: (s['variance'] ?? 0) == 0 ? Brand.forest : Brand.danger, fontWeight: FontWeight.w700)), numeric: true),
           Col('Status', (s) => StatusChip(s['closedAt'] == null ? 'Open' : 'Closed')),
         ],
-        actions: (s) => [
+        actionWidth: 90,
+        actions: !app.isManager ? null : (s) => [
           if (s['closedAt'] == null && s['userId'] != app.session?.userId && app.isManager)
             OutlinedButton(onPressed: () => closeShift(context, s), child: const Text('Close')),
         ],

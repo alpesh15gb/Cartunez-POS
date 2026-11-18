@@ -695,6 +695,7 @@ test("production configuration, fresh setup, session revocation, proxy limits, t
     }
     const gstReport = await call("GET", "reports/tax", undefined, gstToken);
     assert.equal(gstReport.totals.tax, 10);
+    assert.equal(gstReport.totals.cgst + gstReport.totals.sgst + gstReport.totals.igst, 10);
     assert.equal(
       gstReport.rows.reduce(
         (sum: number, row: any) =>

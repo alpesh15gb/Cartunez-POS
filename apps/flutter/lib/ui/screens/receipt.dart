@@ -201,6 +201,11 @@ Barcode _symbology(String code) => switch (barcodeFormat(code)) {
 Future<void> printLabels(BuildContext context, List<LabelItem> items) async {
   final app = context.appRead;
   if (items.isEmpty) return app.toast('Nothing to print.');
+  for (final item in items) {
+    if (!_symbology(item.code).isValid(item.code)) {
+      return app.toast('The barcode on ${item.name} cannot be printed. Use a printable barcode or SKU.');
+    }
+  }
   final copies = await showFormDialog<int>(
     context,
     title: items.length == 1 ? 'Label · ${items.first.name}' : '${items.length} labels',
@@ -222,7 +227,10 @@ Future<void> printLabels(BuildContext context, List<LabelItem> items) async {
         build: (_) => pw.Column(children: [
           pw.Text(item.name, maxLines: 1, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 1),
-          pw.Expanded(child: pw.BarcodeWidget(barcode: _symbology(item.code), data: item.code, textStyle: const pw.TextStyle(fontSize: 6))),
+          pw.Expanded(child: pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 2 * PdfPageFormat.mm),
+            child: pw.BarcodeWidget(barcode: _symbology(item.code), data: item.code, textStyle: const pw.TextStyle(fontSize: 6)),
+          )),
           pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
             pw.Text(item.sku ?? '', style: const pw.TextStyle(fontSize: 5.5)),
             if (item.price != null) pw.Text(app.money(item.price), style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),

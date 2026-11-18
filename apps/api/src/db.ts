@@ -10,6 +10,7 @@ export interface QueryResult {
 export interface Database {
   query(sql: string, values?: unknown[]): Promise<QueryResult>;
   transaction<T>(fn: (db: Database) => Promise<T>): Promise<T>;
+  readSnapshot<T>(fn: (db: Database) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 export async function connectDatabase(
@@ -32,9 +33,30 @@ export async function connectDatabase(
           const tx: Database = {
             query: (sql, values) => client.query(sql, values),
             transaction: async (callback) => callback(tx),
+            readSnapshot: async (callback) => callback(tx),
             close: async () => {},
           };
           const result = await fn(tx);
+          await client.query("COMMIT");
+          return result;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        } finally {
+          client.release();
+        }
+      },
+      async readSnapshot(fn) {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const snapshot: Database = {
+            query: (sql, values) => client.query(sql, values),
+            transaction: async (callback) => callback(snapshot),
+            readSnapshot: async (callback) => callback(snapshot),
+            close: async () => {},
+          };
+          const result = await fn(snapshot);
           await client.query("COMMIT");
           return result;
         } catch (error) {
@@ -55,17 +77,20 @@ export async function connectDatabase(
       : options.dataDir || process.env.PGLITE_PATH || "./motorline-data",
   );
   await pg.waitReady;
+  const transaction: Database["transaction"] = (fn) =>
+    pg.transaction(async (client) => {
+      const tx: Database = {
+        query: (sql, values) => client.query(sql, values),
+        transaction: async (callback) => callback(tx),
+        readSnapshot: async (callback) => callback(tx),
+        close: async () => {},
+      };
+      return fn(tx);
+    });
   return {
     query: (sql, values) => pg.query(sql, values),
-    transaction: (fn) =>
-      pg.transaction(async (client) => {
-        const tx: Database = {
-          query: (sql, values) => client.query(sql, values),
-          transaction: async (callback) => callback(tx),
-          close: async () => {},
-        };
-        return fn(tx);
-      }),
+    transaction,
+    readSnapshot: transaction,
     close: () => pg.close(),
   };
 }
