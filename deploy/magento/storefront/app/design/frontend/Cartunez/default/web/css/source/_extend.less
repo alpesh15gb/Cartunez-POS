@@ -174,7 +174,7 @@ a:hover, .alink:hover { color: @cz-forest-dark; }
         width: 140px;
         height: 140px;
         border-radius: 32px;
-        background: @cz-lime;
+        background: @cz-lime url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='3.25 0 48 48'><path d='M12.5 34 L18.5 14 L24 14 L18 34 Z' fill='%2314221F'/><path d='M21.5 34 L27.5 14 L33 14 L27 34 Z' fill='%2314221F'/><path d='M30.5 34 L36.5 14 L42 14 L36 34 Z' fill='%2314221F'/></svg>") center / 100% 100% no-repeat;
     }
     .cz-button {
         display: inline-block;
@@ -208,7 +208,9 @@ a:hover, .alink:hover { color: @cz-forest-dark; }
 .cz-section-title { font-size: 22px; font-weight: 800; margin: 8px 0 14px; }
 
 // ---------- Footer ----------
-.page-footer { background: @cz-ink; color: #D5E3DA; margin-top: 40px; }
+.page-wrapper .page-footer,
+.page-footer .footer.content { background: @cz-ink; color: #D5E3DA; }
+.page-footer { margin-top: 40px; }
 .footer.content {
     border-top: 0;
     padding-top: 32px;
@@ -238,4 +240,18 @@ a:hover, .alink:hover { color: @cz-forest-dark; }
     .nav-sections, .navigation { background: #fff; }
     .navigation .level0 > .level-top { color: @cz-ink; }
     .logo img { width: 160px; height: 38px; }
+}
+
+// ---------- Desktop (Luma sets these again in its desktop styles) ----------
+.media-width(@extremum, @break) when (@extremum = 'min') and (@break = @screen__m) {
+    .page-header .panel.wrapper { background-color: @cz-ink; }
+    .page-wrapper .page-footer,
+    .page-footer .footer.content { background: @cz-ink; color: #D5E3DA; }
+    .footer.content {
+        .links > li { background: transparent; }
+        .links a, .links strong { color: #fff; }
+        .links a:hover { color: @cz-lime; }
+    }
+    .nav-sections { background: @cz-forest; }
+    .navigation { background: @cz-forest; }
 }

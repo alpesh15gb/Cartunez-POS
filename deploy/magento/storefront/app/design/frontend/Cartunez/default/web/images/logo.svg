@@ -1,7 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="200" height="48" viewBox="0 0 200 48" role="img" aria-label="Cartunez">
   <rect x="0" y="0" width="48" height="48" rx="12" fill="#C4EC78"/>
-  <path d="M12.5 34 L18.5 14 L24 14 L18 34 Z" fill="#14221F"/>
-  <path d="M21.5 34 L27.5 14 L33 14 L27 34 Z" fill="#14221F"/>
-  <path d="M30.5 34 L36.5 14 L42 14 L36 34 Z" fill="#14221F"/>
+  <g transform="translate(-3.25 0)">
+    <path d="M12.5 34 L18.5 14 L24 14 L18 34 Z" fill="#14221F"/>
+    <path d="M21.5 34 L27.5 14 L33 14 L27 34 Z" fill="#14221F"/>
+    <path d="M30.5 34 L36.5 14 L42 14 L36 34 Z" fill="#14221F"/>
+  </g>
   <text x="58" y="33" font-family="'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="26" font-weight="800" letter-spacing="-0.5" fill="#14221F">Cartunez<tspan fill="#5E9B2E">.</tspan></text>
 </svg>
