@@ -3,6 +3,9 @@ import { createApp } from "./app.js";
 import { seed } from "./seed.js";
 import { bootstrapOwner } from "./setup.js";
 import { runtimeConfig } from "./config.js";
+import { startMagentoWorker } from "./magento.js";
+import { startOrderPolling } from "./magento-orders.js";
+import { startDailyMagentoCheck } from "./magento-check.js";
 runtimeConfig();
 const db = await connectDatabase();
 await migrate(db);
@@ -14,7 +17,13 @@ await app.listen({
   host: process.env.HOST || "0.0.0.0",
 });
 console.log(`Motorline API listening on ${process.env.PORT || 4000}`);
+const stopMagento = startMagentoWorker(db);
+const stopOrders = startOrderPolling(db);
+const stopCheck = startDailyMagentoCheck(db);
 const shutdown = async () => {
+  stopMagento();
+  stopOrders();
+  stopCheck();
   await app.close();
   await db.close();
   process.exit(0);

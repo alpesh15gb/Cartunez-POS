@@ -108,3 +108,18 @@ Future<dynamic> fetchJson(Uri uri) async {
   if (response.statusCode != 200) return null;
   return jsonDecode(response.body);
 }
+
+/// Downloads a file (such as a part photo) from the API.
+Future<List<int>> fetchBytes(String api, String token, String path) async {
+  try {
+    final response = await _client
+        .get(Uri.parse('$api$path'), headers: {if (token.isNotEmpty) 'Authorization': 'Bearer $token'})
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) throw ApiError('Could not load the photo.', response.statusCode);
+    return response.bodyBytes;
+  } on TimeoutException {
+    throw OfflineError('The server took too long to respond.');
+  } on http.ClientException {
+    throw OfflineError('Cannot reach the server.');
+  }
+}

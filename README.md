@@ -25,6 +25,7 @@ Open a shift before billing. Scan a barcode or search a part, add it to the sale
 - Follow [CARTUNEZ-DEPLOYMENT.md](docs/CARTUNEZ-DEPLOYMENT.md) for the VPS, and [DEPLOYMENT.md](docs/DEPLOYMENT.md) for a generic Docker Compose installation.
 - Read [GO-LIVE-INPUTS.md](docs/GO-LIVE-INPUTS.md) for settings entered directly in the application.
 - Follow [apps/flutter/README.md](apps/flutter/README.md) for the web build, the Windows installer and the Android APK.
+- Read [MAGENTO.md](docs/MAGENTO.md) to connect a Magento 2 store and publish parts online.
 - Read [OFFLINE.md](docs/OFFLINE.md) for how sales are kept when the server is unreachable.
 - Read [API.md](docs/API.md) and [api-contract.json](docs/api-contract.json) for API endpoints and examples.
 

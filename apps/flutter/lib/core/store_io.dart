@@ -32,13 +32,28 @@ class LocalStore {
     }
   }
 
-  Future<void> write(String key, Object? value) async {
+  /// Writes per key run one after another, so two saves of the same key
+  /// (say the cart and a sync) can never race over the same temporary file.
+  final _queues = <String, Future<void>>{};
+  int _seq = 0;
+
+  Future<void> write(String key, Object? value) {
+    final previous = _queues[key] ?? Future<void>.value();
+    final next = previous.catchError((_) {}).then((_) => _write(key, value));
+    _queues[key] = next;
+    next.whenComplete(() {
+      if (identical(_queues[key], next)) _queues.remove(key);
+    }).ignore();
+    return next;
+  }
+
+  Future<void> _write(String key, Object? value) async {
     final file = _file(key);
     if (value == null) {
       if (await file.exists()) await file.delete();
       return;
     }
-    final temp = File('${file.path}.tmp');
+    final temp = File('${file.path}.$pid.${_seq++}.tmp');
     await temp.writeAsString(jsonEncode(value), flush: true);
     await temp.rename(file.path);
   }

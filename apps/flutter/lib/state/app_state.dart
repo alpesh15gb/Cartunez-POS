@@ -7,7 +7,7 @@ import '../core/api.dart';
 import '../core/billing.dart';
 import '../core/store.dart';
 
-const allFeatures = ['transfers', 'fitment', 'offline', 'warranty'];
+const allFeatures = ['transfers', 'fitment', 'offline', 'warranty', 'onlineStore'];
 
 Json emptyCart() => {
       'transactionId': uuid(),
@@ -170,6 +170,26 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------- server ----------
+  /// Photos of a part, main photo first.
+  List<Json> photosOf(String productId) =>
+      list('productImages').where((i) => i['productId'] == productId).toList()..sort((a, b) => ((a['position'] as num?) ?? 0).compareTo((b['position'] as num?) ?? 0));
+
+  final _photoCache = <String, Future<Uint8List>>{};
+
+  /// A photo's bytes, downloaded once per app session (photo IDs never change).
+  Future<Uint8List> photoBytes(String imageId) {
+    final s = session;
+    if (s == null) return Future.error(ApiError('Sign in to continue.', 401));
+    return _photoCache.putIfAbsent(imageId, () async {
+      try {
+        return Uint8List.fromList(await fetchBytes(s.api, s.token, '/product-images/$imageId'));
+      } catch (e) {
+        _photoCache.remove(imageId);
+        rethrow;
+      }
+    });
+  }
+
   Future<dynamic> api(String path, {Object? body, String? method}) {
     final s = session;
     if (s == null) throw ApiError('Sign in to continue.', 401);
@@ -348,6 +368,8 @@ class AppState extends ChangeNotifier {
 
   bool feature(String key) {
     final features = settings['features'];
+    // The online store is new: off until the owner switches it on.
+    if (key == 'onlineStore') return features is Map && features[key] == true;
     if (features is Map && features[key] == false) return false;
     return true;
   }

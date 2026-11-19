@@ -7,6 +7,7 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../shell.dart';
 import '../theme.dart';
+import '../photos.dart';
 import '../widgets.dart';
 import 'people.dart';
 import 'receipt.dart';
@@ -167,7 +168,6 @@ class _PartCard extends StatelessWidget {
     final stock = app.available('${product['id']}');
     final low = !service && stock <= (product['reorderLevel'] ?? 0);
     final price = app.cart['priceLevel'] == 'wholesale' ? product['wholesalePrice'] : product['retailPrice'];
-    final icon = '${product['icon'] ?? ''}';
     final vehicle = app.cart['vehicle'] as Map?;
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -179,10 +179,7 @@ class _PartCard extends StatelessWidget {
             child: Stack(fit: StackFit.expand, children: [
               Container(
                 color: const Color(0xFFEFF3F0),
-                child: icon.isNotEmpty
-                    ? Image.asset('assets/parts/$icon.jpg', fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const Icon(Icons.settings_outlined, size: 44, color: Color(0xFF8FA99B)))
-                    : const Icon(Icons.settings_outlined, size: 44, color: Color(0xFF8FA99B)),
+                child: PartPhoto(product: product),
               ),
               Positioned(
                 left: 8,

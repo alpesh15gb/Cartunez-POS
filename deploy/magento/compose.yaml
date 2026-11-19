@@ -1,0 +1,99 @@
+# Magento 2 for shop.cartunez.in, as its own Docker project ("cartunezshop").
+# Only the web container publishes a port, and only on 127.0.0.1:18600; host
+# Nginx terminates HTTPS. Database, search and cache are on a private network.
+# Secrets live in /etc/cartunez-shop (root only) and are never in this repo.
+name: cartunezshop
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: magento
+      MARIADB_USER: magento
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    command: ["--max_allowed_packet=64M", "--innodb_buffer_pool_size=512M", "--innodb_log_file_size=128M"]
+    secrets: [db_password, db_root_password]
+    volumes: [db:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      retries: 30
+    networks: [internal]
+    mem_limit: 1g
+    logging: &logs
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+  search:
+    image: opensearchproject/opensearch:2.19.1
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    volumes: [search:/usr/share/opensearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      retries: 30
+    networks: [internal]
+    mem_limit: 1200m
+    logging: *logs
+
+  cache:
+    image: valkey/valkey:8.0-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    networks: [internal]
+    mem_limit: 320m
+    logging: *logs
+
+  php:
+    build: { context: ., dockerfile: php.Dockerfile }
+    image: cartunezshop-php:8.3
+    restart: unless-stopped
+    volumes: [code:/var/www/magento]
+    networks: [internal]
+    mem_limit: 1500m
+    logging: *logs
+
+  cron:
+    image: cartunezshop-php:8.3
+    restart: unless-stopped
+    command: ["sh", "-c", "while true; do [ -f app/etc/env.php ] && php bin/magento cron:run >/dev/null 2>&1; sleep 60; done"]
+    volumes: [code:/var/www/magento]
+    depends_on: [php]
+    networks: [internal]
+    mem_limit: 768m
+    logging: *logs
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ["127.0.0.1:18600:8080"]
+    volumes:
+      - code:/var/www/magento:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [php]
+    networks: [internal]
+    mem_limit: 256m
+    logging: *logs
+
+volumes:
+  db:
+  search:
+  code:
+
+networks:
+  internal:
+
+secrets:
+  db_password:
+    file: /etc/cartunez-shop/db_password
+  db_root_password:
+    file: /etc/cartunez-shop/db_root_password

@@ -30,6 +30,11 @@ import {
 } from "./domain.js";
 import { finalizeSale, returnInvoice } from "./sales.js";
 import { report } from "./reports.js";
+import { magentoRoutes } from "./magento.js";
+import { magentoOrderRoutes } from "./magento-orders.js";
+import { productImageRoutes, productImages } from "./product-images.js";
+import { magentoCheckRoutes } from "./magento-check.js";
+import { queueMagentoSync } from "./online-queue.js";
 import { runtimeConfig } from "./config.js";
 import {
   currencyCode,
@@ -50,7 +55,7 @@ const permittedOrigins = [
   "capacitor://localhost",
   "motorline://app",
 ];
-export async function createApp(db: Database) {
+export async function createApp(db: Database, options: { fetch?: typeof globalThis.fetch } = {}) {
   const configuration = runtimeConfig();
   const app = Fastify({
     logger: process.env.LOG_LEVEL
@@ -255,6 +260,18 @@ export async function createApp(db: Database) {
       );
     }
     data.stock = await inventory(db, actor);
+    data.onlineListings = ["owner", "manager"].includes(actor.role)
+      ? await records(db, actor.organizationId, "onlineListing")
+      : [];
+    data.productImages = await productImages(db, actor.organizationId);
+    data.onlineOrders = ["owner", "manager"].includes(actor.role)
+      ? (await records(db, actor.organizationId, "onlineOrder")).slice(-300)
+      : [];
+    if (["owner", "manager"].includes(actor.role)) {
+      const cursor = await getRecord(db, actor.organizationId, "magentoCursor", "orders");
+      data.onlineOrdersCheck = cursor ? { at: cursor.checkedAt, error: cursor.error } : null;
+      data.magentoCheck = (await getRecord(db, actor.organizationId, "magentoCheck", "latest")) || null;
+    }
     data.settings = await getRecord(
       db,
       actor.organizationId,
@@ -424,6 +441,10 @@ export async function createApp(db: Database) {
     await audit(tx, actor, "branch", branchId, "Branch configuration updated");
     return branch;
   });
+  magentoRoutes(app, db, post, () => options.fetch || globalThis.fetch);
+  magentoOrderRoutes(app, db, post, () => options.fetch || globalThis.fetch);
+  productImageRoutes(app, db, post);
+  magentoCheckRoutes(app, db, () => options.fetch || globalThis.fetch);
   post("settings", async (tx, actor, body) => {
     allow(actor, ["owner"]);
     const settings = (await getRecord(
@@ -561,7 +582,7 @@ export async function createApp(db: Database) {
         fail("Choose which modules are switched on.");
       const features: Record<string, boolean> = { ...(settings.features || {}) };
       for (const [key, value] of Object.entries(body.features)) {
-        if (!["transfers", "fitment", "offline", "warranty"].includes(key))
+        if (!["transfers", "fitment", "offline", "warranty", "onlineStore"].includes(key))
           fail("Unknown module.");
         if (typeof value !== "boolean") fail("Module switches must be on or off.");
         features[key] = value;
@@ -688,7 +709,9 @@ export async function createApp(db: Database) {
     )
       fail("Complete or release parked sales before editing this part.", 409);
     await audit(tx, actor, "product", product.id, "Catalog update");
-    return putRecord(tx, actor.organizationId, "product", product);
+    const saved = await putRecord(tx, actor.organizationId, "product", product);
+    await queueMagentoSync(tx, actor.organizationId, [product.id], "product");
+    return saved;
   });
   for (const kind of ["customer", "supplier"] as const)
     post(kind + "s", async (tx, actor, body) => {
@@ -1367,13 +1390,29 @@ export async function createApp(db: Database) {
       cart,
       createdAt: previous?.createdAt || now(),
     };
-    return putRecord(tx, actor.organizationId, "hold", hold, actor.branchId);
+    const savedHold = await putRecord(tx, actor.organizationId, "hold", hold, actor.branchId);
+    // Parked sales hold stock, so the website shows less.
+    await queueMagentoSync(
+      tx,
+      actor.organizationId,
+      [...cart.lines, ...(previous?.cart.lines || [])].map((line: any) => line.productId),
+      "hold",
+      actor.branchId,
+    );
+    return savedHold;
   });
   app.delete("/api/v1/holds/:id", async (request: any) =>
     db.transaction(async (tx) => {
       const actor = request.actor;
       allow(actor, ["owner", "manager", "cashier"]);
-      await scoped(tx, actor, "hold", request.params.id);
+      const released = await scoped(tx, actor, "hold", request.params.id);
+      await queueMagentoSync(
+        tx,
+        actor.organizationId,
+        (released.cart?.lines || []).map((line: any) => line.productId),
+        "hold",
+        actor.branchId,
+      );
       await tx.query(
         "DELETE FROM records WHERE organization_id=$1 AND kind=$2 AND id=$3",
         [actor.organizationId, "hold", request.params.id],

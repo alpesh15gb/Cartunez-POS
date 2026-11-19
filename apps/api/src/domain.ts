@@ -1,3 +1,4 @@
+import { queueMagentoSync } from "./online-queue.js";
 import {
   createHash,
   randomUUID,
@@ -194,6 +195,8 @@ export async function adjust(
       product.cost,
     ],
   );
+  // Keep the website's stock in step (only for the branch that sells online).
+  await queueMagentoSync(db, actor.organizationId, [productId], reason, actor.branchId);
 }
 export async function inventory(db: Database, actor: Actor) {
   const holds = await records(db, actor.organizationId, "hold", actor.branchId);
@@ -203,8 +206,29 @@ export async function inventory(db: Database, actor: Actor) {
       [actor.organizationId, actor.branchId],
     )
   ).rows;
+  // Units held for open Magento orders, taken from the fullest sellable bins first.
+  const online = new Map<string, number>();
+  for (const order of await records(db, actor.organizationId, "onlineOrder", actor.branchId))
+    for (const line of order.lines || [])
+      if (line.productId)
+        online.set(line.productId, (online.get(line.productId) || 0) + Number(line.reserved || 0) + Number(line.awaiting || 0));
+  const sellable = new Set(
+    (await records(db, actor.organizationId, "location", actor.branchId)).filter((b) => b.kind === "sellable").map((b) => b.id),
+  );
+  const onlineByBin = new Map<string, number>();
+  for (const [productId, units] of online) {
+    let left = units;
+    for (const row of rows
+      .filter((r) => r.product_id === productId && sellable.has(r.bin_id))
+      .sort((a, b) => Number(b.quantity) - Number(a.quantity))) {
+      if (left <= 0) break;
+      const take = Math.min(left, Math.max(0, Number(row.quantity)));
+      onlineByBin.set(productId + "|" + row.bin_id, take);
+      left -= take;
+    }
+  }
   return rows.map((row) => {
-    const reserved = holds.reduce(
+    const reserved = (onlineByBin.get(row.product_id + "|" + row.bin_id) || 0) + holds.reduce(
       (sum, hold) =>
         sum +
         (hold.cart.lines || [])

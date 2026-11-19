@@ -10,6 +10,8 @@ import 'login.dart';
 import 'screens/billing.dart';
 import 'screens/dashboard.dart';
 import 'screens/inventory.dart';
+import 'screens/online.dart';
+import 'screens/online_orders.dart';
 import 'screens/people.dart';
 import 'screens/purchasing.dart';
 import 'screens/reports.dart';
@@ -21,6 +23,7 @@ import 'widgets.dart';
 const _sellers = ['owner', 'manager', 'cashier'];
 const _stock = ['owner', 'manager', 'inventory'];
 const _everyone = ['owner', 'manager', 'cashier', 'inventory'];
+const _managers = ['owner', 'manager'];
 
 class TabDef {
   const TabDef(this.id, this.label, this.roles, this.help, this.build, {this.feature});
@@ -59,6 +62,12 @@ final areas = <Area>[
         feature: 'transfers'),
     TabDef('warranty', 'Warranty & cores', _stock, 'Supplier warranty claims and core deposit refunds.',
         () => const WarrantyScreen(), feature: 'warranty'),
+  ]),
+  Area('Online store', Icons.storefront_outlined, [
+    TabDef('online', 'Products', _managers, 'Publish parts to your Magento store and set online prices and availability.',
+        () => const OnlineStoreScreen(), feature: 'onlineStore'),
+    TabDef('online-orders', 'Orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
+        () => const OnlineOrdersScreen(), feature: 'onlineStore'),
   ]),
   Area('Purchasing', Icons.local_shipping_outlined, [
     TabDef('orders', 'Orders', _stock, 'Order from suppliers and receive goods into bins.', () => const OrdersScreen()),

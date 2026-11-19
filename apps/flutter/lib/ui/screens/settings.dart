@@ -6,12 +6,14 @@ import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'labels.dart';
+import 'online.dart';
 
 const _featureLabels = {
   'fitment': 'Vehicle fitment',
   'transfers': 'Branch transfers',
   'warranty': 'Warranty & cores',
   'offline': 'Offline counters',
+  'onlineStore': 'Online store (Magento)',
 };
 
 class SettingsScreen extends StatelessWidget {
@@ -58,6 +60,18 @@ class SettingsScreen extends StatelessWidget {
           ),
         ]),
       ]),
+      if (app.isManager && app.feature('onlineStore'))
+        _Card(title: 'Online store', children: [
+          Text(app.magentoConnected ? 'Magento: ${app.magento['baseUrl']}' : 'Magento not connected',
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(app.magentoConnected ? 'Stock, prices and published parts are kept up to date automatically.' : 'Connect your Magento store to publish parts.',
+              style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (app.isOwner) OutlinedButton(onPressed: () => editMagento(context), child: Text(app.magentoConnected ? 'Magento settings' : 'Connect Magento')),
+            if (app.magentoConnected) OutlinedButton(onPressed: () => testMagento(context), child: const Text('Test connection')),
+          ]),
+        ]),
       _Card(title: 'Barcode labels', children: [
         Text(labelPrinterSummary(app), style: const TextStyle(fontWeight: FontWeight.w700)),
         Text('Shows ${labelDesignSummary(app)}.', style: Theme.of(context).textTheme.bodySmall),

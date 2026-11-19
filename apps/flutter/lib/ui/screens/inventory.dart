@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../shell.dart';
+import '../photos.dart';
 import '../widgets.dart';
 import 'receipt.dart';
 
@@ -61,9 +62,10 @@ class PartsScreen extends StatelessWidget {
               Col('Retail', (p) => Text(app.money(p['retailPrice'] as num?)), numeric: true),
               if (app.canStock) Col('Cost', (p) => Text(app.money(p['cost'] as num?)), numeric: true),
             ],
-            actionWidth: 52,
+            actionWidth: 100,
             actions: app.canStock
                 ? (p) => [
+                      IconButton(tooltip: 'Photos', onPressed: () => editPhotos(context, p), icon: const Icon(Icons.photo_library_outlined)),
                       IconButton(tooltip: 'Print label', onPressed: () => printLabels(context, [productLabel(context.appRead, p)]), icon: const Icon(Icons.qr_code_2)),
                     ]
                 : null,
