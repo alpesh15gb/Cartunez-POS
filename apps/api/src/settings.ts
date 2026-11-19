@@ -147,7 +147,7 @@ export function labelLayout(value: unknown) {
   const allowed = new Set([
     "widthMm", "heightMm", "columns", "gapMm", "shopName", "name", "brand",
     "partNumber", "sku", "bin", "digits", "price", "nameSize", "priceSize", "extra",
-    "sizes", "positions",
+    "sizes", "positions", "barcodeWidth", "barcodeHeight",
   ]);
   const parts = ["shop", "name", "detail", "barcode", "info", "price", "note", "extra"];
   const textSizes = ["small", "medium", "large", "xlarge"];
@@ -187,6 +187,8 @@ export function labelLayout(value: unknown) {
     price: choice("price", ["price", "mrp", "both", "none"], "price"),
     sizes: labelSizes(input, parts, textSizes),
     positions: labelPositions(input.positions, parts),
+    barcodeWidth: choice("barcodeWidth", ["auto", "small", "medium", "large", "xlarge"], "auto"),
+    barcodeHeight: choice("barcodeHeight", ["auto", "small", "medium", "large", "xlarge"], "auto"),
     extra: text(input.extra ?? "", "label extra text", false, 60),
   };
 }

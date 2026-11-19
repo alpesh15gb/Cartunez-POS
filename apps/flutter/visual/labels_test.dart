@@ -70,6 +70,13 @@ void main() {
     final priceRow = find.ancestor(of: find.text('Price').last, matching: find.byType(Row)).first;
     await tester.tap(find.descendant(of: priceRow, matching: find.text('XL')));
     await tester.pumpAndSettle();
+    // Barcode: thinner bars, taller.
+    for (final (row, size) in [('Width', 'S'), ('Height', 'L')]) {
+      final r = find.ancestor(of: find.text(row).last, matching: find.byType(Row)).first;
+      await tester.ensureVisible(r);
+      await tester.tap(find.descendant(of: r, matching: find.text(size)));
+      await tester.pumpAndSettle();
+    }
     final previewFinder = find.descendant(of: find.byType(AlertDialog), matching: find.byType(LabelPreview));
     await tester.ensureVisible(previewFinder);
     await tester.pumpAndSettle();
@@ -93,6 +100,8 @@ void main() {
     expect(saved['columns'], 2);
     expect(saved['extra'], 'Ph 98765 43210');
     expect((saved['sizes'] as Map)['price'], 'xlarge');
+    expect(saved['barcodeWidth'], 'small');
+    expect(saved['barcodeHeight'], 'large');
     final namePos = (saved['positions'] as Map)['name'] as Map;
     expect((namePos['x'] as num).toDouble(), closeTo(11.2, 1.5));
 

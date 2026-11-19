@@ -20,6 +20,15 @@ const labelPartNames = {
 
 const labelSizes4 = ['small', 'medium', 'large', 'xlarge'];
 
+/// Barcode width and height choices; 'auto' fits the barcode to the free space.
+const barcodeSizes = ['auto', 'small', 'medium', 'large', 'xlarge'];
+
+/// Narrow-bar width in mm for each barcode width (about 1-4 dots on a 203 dpi printer).
+const _barMm = {'small': 0.13, 'medium': 0.25, 'large': 0.375, 'xlarge': 0.5};
+
+/// Bar height in mm for each barcode height.
+const _barHeightMm = {'small': 5.0, 'medium': 8.0, 'large': 12.0, 'xlarge': 16.0};
+
 /// How a shop's labels look. Saved in the shop settings so every counter
 /// prints the same label.
 class LabelLayout {
@@ -38,6 +47,8 @@ class LabelLayout {
     this.price = 'price',
     this.sizes = const {},
     this.positions = const {},
+    this.barcodeWidth = 'auto',
+    this.barcodeHeight = 'auto',
     this.extra = '',
   });
 
@@ -56,6 +67,9 @@ class LabelLayout {
 
   /// Parts the owner dragged somewhere else: top-left corner in mm.
   final Map<String, ({double x, double y})> positions;
+
+  /// Barcode bar thickness and bar height (see [barcodeSizes]).
+  final String barcodeWidth, barcodeHeight;
 
   /// Free text printed along the bottom, e.g. a phone number.
   final String extra;
@@ -82,6 +96,8 @@ class LabelLayout {
         'price': price,
         'sizes': {for (final e in sizes.entries) e.key: e.value},
         'positions': {for (final e in positions.entries) e.key: {'x': _round(e.value.x), 'y': _round(e.value.y)}},
+        'barcodeWidth': barcodeWidth,
+        'barcodeHeight': barcodeHeight,
         'extra': extra,
       };
 
@@ -125,6 +141,8 @@ class LabelLayout {
       price: prices.contains(j?['price']) ? j!['price'] as String : 'price',
       sizes: sizes,
       positions: positions,
+      barcodeWidth: barcodeSizes.contains(j?['barcodeWidth']) ? j!['barcodeWidth'] as String : 'auto',
+      barcodeHeight: barcodeSizes.contains(j?['barcodeHeight']) ? j!['barcodeHeight'] as String : 'auto',
       extra: '${j?['extra'] ?? ''}'.trim(),
     );
   }
@@ -144,6 +162,8 @@ class LabelLayout {
     String? price,
     Map<String, String>? sizes,
     Map<String, ({double x, double y})>? positions,
+    String? barcodeWidth,
+    String? barcodeHeight,
     String? extra,
   }) =>
       LabelLayout(
@@ -161,6 +181,8 @@ class LabelLayout {
         price: price ?? this.price,
         sizes: sizes ?? this.sizes,
         positions: positions ?? this.positions,
+        barcodeWidth: barcodeWidth ?? this.barcodeWidth,
+        barcodeHeight: barcodeHeight ?? this.barcodeHeight,
         extra: extra ?? this.extra,
       );
 
@@ -345,20 +367,32 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
     final modules = barcodeModules(format, data.code);
     final dotsPerMm = dpi / 25.4;
     final innerDots = (inner * dotsPerMm).floor();
-    final module = (innerDots ~/ modules).clamp(1, 4);
+    final widest = (innerDots ~/ modules).clamp(1, 6);
+    final wanted = _barMm[layout.barcodeWidth];
+    // Auto: the widest bars that fit (up to 4 dots). A chosen width keeps its
+    // printed size on any printer resolution, but never runs off the label.
+    final module = wanted == null ? widest.clamp(1, 4) : (wanted * dotsPerMm).round().clamp(1, widest);
+    final narrowed = wanted != null && (wanted * dotsPerMm).round() > widest;
     final width = module * modules / dotsPerMm;
     // The printer scales the digits with the bar width; EAN/UPC digits are larger.
     final digitsHeight = !layout.digits ? 0.0 : (format == 'CODE128' ? module * 9 : module * 11) / dotsPerMm + 0.3;
-    // A moved barcode keeps the height it would have had in the automatic layout.
-    var bars = bottom - top - 0.2 - digitsHeight;
+    // Auto height fills the free space (a moved barcode keeps the height it would
+    // have had there); a chosen height is fixed.
+    final fixed = _barHeightMm[layout.barcodeHeight];
+    var bars = fixed ?? bottom - top - 0.2 - digitsHeight;
     if (innerDots < modules) {
       warning = 'This barcode is too long for a ${_mm(w)} mm label. Use a wider label or a shorter code.';
-    } else if (bars < 4) {
+    } else if (narrowed) {
+      warning = 'The barcode width was reduced so it fits on a ${_mm(w)} mm label.';
+    } else if (fixed == null && bars < 4) {
       warning = 'Too much on this label: the barcode is only ${_mm(bars.clamp(0, 99))} mm tall and may not scan. '
           'Turn off a line, use smaller text or a taller label.';
     }
     bars = bars.clamp(2.5, 200);
-    out.add(LabelElement.barcode(data.code, _margin + ((inner - width) / 2).clamp(0, inner), top, width.clamp(0, inner), bars + digitsHeight,
+    // A barcode shorter than the free space sits in the middle of it.
+    final spare = bottom - top - 0.2 - bars - digitsHeight;
+    final barTop = top + (spare > 0 ? spare / 2 : 0);
+    out.add(LabelElement.barcode(data.code, _margin + ((inner - width) / 2).clamp(0, inner), barTop, width.clamp(0, inner), bars + digitsHeight,
         format: format, module: module, barHeight: bars, digits: layout.digits));
   }
 
@@ -375,7 +409,7 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
       else
         e,
   ];
-  if (warning == null && moved.isNotEmpty && _overlaps(placed)) {
+  if (warning == null && (moved.isNotEmpty || layout.barcodeHeight != 'auto') && _overlaps(placed)) {
     warning = 'Some lines overlap on the label. Drag them apart or use smaller text.';
   }
   return LabelPlan(placed, warning: warning);

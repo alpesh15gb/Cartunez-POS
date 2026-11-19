@@ -387,6 +387,39 @@ class _LabelDesignerState extends State<_LabelDesigner> {
             ]),
           ),
         ),
+      Padding(padding: const EdgeInsets.only(top: 16, bottom: 4), child: Text('Barcode size', style: theme.textTheme.labelLarge)),
+      for (final (label, value, change) in [
+        ('Width', layout.barcodeWidth, (String v) => layout.copyWith(barcodeWidth: v)),
+        ('Height', layout.barcodeHeight, (String v) => layout.copyWith(barcodeHeight: v)),
+      ])
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: selected == 'barcode' ? const Color(0xFFEAF5ED) : null,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Expanded(child: Text(label, style: const TextStyle(fontWeight: FontWeight.w500))),
+            SegmentedButton<String>(
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6)),
+              segments: const [
+                ButtonSegment(value: 'auto', label: Text('Auto'), tooltip: 'Fit the label'),
+                ButtonSegment(value: 'small', label: Text('S'), tooltip: 'Small'),
+                ButtonSegment(value: 'medium', label: Text('M'), tooltip: 'Medium'),
+                ButtonSegment(value: 'large', label: Text('L'), tooltip: 'Large'),
+                ButtonSegment(value: 'xlarge', label: Text('XL'), tooltip: 'Extra large'),
+              ],
+              selected: {value},
+              onSelectionChanged: owner ? (v) => _set(change(v.first)) : null,
+            ),
+          ]),
+        ),
+      Padding(
+        padding: const EdgeInsets.only(left: 8, top: 4),
+        child: Text('Auto fits the free space. Very thin bars (S) can be hard for some scanners to read.',
+            style: theme.textTheme.bodySmall),
+      ),
       const SizedBox(height: 14),
       TextField(
         controller: extra,

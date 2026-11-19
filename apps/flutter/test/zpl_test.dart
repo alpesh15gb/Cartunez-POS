@@ -138,4 +138,26 @@ void main() {
     final clash = layout.withPosition('price', (x: 1.2, y: 1.2));
     expect(planLabel(clash, part).warning, contains('overlap'));
   });
+
+  test('the barcode can be made thinner, wider, shorter or taller', () {
+    LabelElement bar(LabelLayout l, {int dpi = 203}) => planLabel(l, part, dpi: dpi).elements.firstWhere((e) => e.barcode);
+    final big = layout.copyWith(widthMm: 75, heightMm: 50);
+    expect(bar(big.copyWith(barcodeWidth: 'small')).module, 1);
+    expect(bar(big.copyWith(barcodeWidth: 'xlarge')).module, 4);
+    expect(bar(big.copyWith(barcodeWidth: 'small')).width, lessThan(bar(big.copyWith(barcodeWidth: 'large')).width));
+    // The same printed size on a 300 dpi printer.
+    expect(bar(big.copyWith(barcodeWidth: 'medium'), dpi: 300).module, 3);
+    expect(bar(big.copyWith(barcodeHeight: 'small')).barHeight, 5);
+    expect(bar(big.copyWith(barcodeHeight: 'large')).barHeight, 12);
+    expect(zplJob(const [part], big.copyWith(barcodeWidth: 'small', barcodeHeight: 'small')), contains('^BY1,3,40^'));
+  });
+
+  test('a barcode too wide or too tall for the label is reported', () {
+    final narrow = planLabel(layout.copyWith(barcodeWidth: 'xlarge'), part);
+    expect(narrow.warning, contains('reduced'));
+    expect(narrow.elements.firstWhere((e) => e.barcode).x + narrow.elements.firstWhere((e) => e.barcode).width, lessThanOrEqualTo(50));
+    expect(planLabel(layout.copyWith(barcodeHeight: 'xlarge'), part).warning, contains('overlap'));
+    final saved = LabelLayout.fromJson(layout.copyWith(barcodeWidth: 'large', barcodeHeight: 'small').toJson());
+    expect((saved.barcodeWidth, saved.barcodeHeight), ('large', 'small'));
+  });
 }
