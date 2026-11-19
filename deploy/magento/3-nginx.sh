@@ -96,9 +96,10 @@ server {
 }"
 
 echo '== Checks'
-code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN/")
-echo "https://$DOMAIN/ without password: HTTP $code (401 expected while in staging)"
-code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN/rest/V1/store/storeConfigs")
-echo "REST API without token: HTTP $code (401 expected: Magento asks for a token)"
+# Checks report problems instead of stopping the script.
+check() { curl -sS -o /dev/null -w '%{http_code}' -m 15 "$@" 2>&1 || true; }
+echo "https://$DOMAIN/ without password: $(check "https://$DOMAIN/") (401 expected while in staging)"
+echo "REST API without token: $(check "https://$DOMAIN/rest/V1/store/storeConfigs") (401 expected: Magento asks for a token)"
+echo "Same checks through this server's own Nginx: $(check --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/") / $(check --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/rest/V1/store/storeConfigs")"
 echo
 echo "Done. Staging login: cat $CONF/staging-login.txt   Admin login: cat $CONF/admin-login.txt"
