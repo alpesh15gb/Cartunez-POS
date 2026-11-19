@@ -872,9 +872,19 @@ test("the owner saves one label design for the shop; others cannot change it", a
     const saved = await call("settings", { labelLayout: design }, owner);
     assert.deepEqual(saved.labelLayout, {
       widthMm: 38, heightMm: 25, columns: 2, gapMm: 2, shopName: false, name: true, brand: true,
-      partNumber: false, sku: true, bin: false, digits: true, price: "mrp", nameSize: "medium",
-      priceSize: "medium", extra: "Ph 98765",
+      partNumber: false, sku: true, bin: false, digits: true, price: "mrp", sizes: {},
+      positions: {}, extra: "Ph 98765",
     });
+    const moved = await call("settings", {
+      labelLayout: { ...design, sizes: { shop: "xlarge" }, positions: { price: { x: 2, y: 3.25 } } },
+    }, owner);
+    assert.deepEqual(moved.labelLayout.sizes, { shop: "xlarge" });
+    assert.deepEqual(moved.labelLayout.positions, { price: { x: 2, y: 3.3 } });
+    const legacy = await call("settings", { labelLayout: { nameSize: "large" } }, owner);
+    assert.deepEqual(legacy.labelLayout.sizes, { name: "large" });
+    await call("settings", { labelLayout: { sizes: { shop: "huge" } } }, owner, 400);
+    await call("settings", { labelLayout: { sizes: { logo: "large" } } }, owner, 400);
+    await call("settings", { labelLayout: { positions: { price: { x: 500, y: 1 } } } }, owner, 400);
     await call("settings", { labelLayout: { columns: 5 } }, owner, 400);
     await call("settings", { labelLayout: { price: "free" } }, owner, 400);
     await call("settings", { labelLayout: { logo: true } }, owner, 400);

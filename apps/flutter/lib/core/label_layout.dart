@@ -1,7 +1,24 @@
-// Shop label design: which lines appear on a barcode label and how big they
-// are. planLabel() places everything in millimetres once; the Zebra (ZPL),
-// PDF and on-screen preview renderers all draw from that same plan.
+// Shop label design: which lines appear on a barcode label, how big they are
+// and where they sit. planLabel() places everything in millimetres once; the
+// Zebra (ZPL), PDF and on-screen preview renderers all draw from that plan.
 import 'billing.dart';
+
+/// The parts of a label that can be sized and moved.
+const labelParts = ['shop', 'name', 'detail', 'barcode', 'info', 'price', 'note', 'extra'];
+
+/// What each part is called in the designer.
+const labelPartNames = {
+  'shop': 'Shop name',
+  'name': 'Part name',
+  'detail': 'Brand / part number',
+  'barcode': 'Barcode',
+  'info': 'SKU / bin',
+  'price': 'Price',
+  'note': 'MRP note',
+  'extra': 'Extra line',
+};
+
+const labelSizes4 = ['small', 'medium', 'large', 'xlarge'];
 
 /// How a shop's labels look. Saved in the shop settings so every counter
 /// prints the same label.
@@ -19,8 +36,8 @@ class LabelLayout {
     this.bin = false,
     this.digits = true,
     this.price = 'price',
-    this.nameSize = 'medium',
-    this.priceSize = 'medium',
+    this.sizes = const {},
+    this.positions = const {},
     this.extra = '',
   });
 
@@ -34,15 +51,20 @@ class LabelLayout {
   /// 'price' (catalog price), 'mrp' (price including tax), 'both' or 'none'.
   final String price;
 
-  /// 'small', 'medium' or 'large'.
-  final String nameSize, priceSize;
+  /// Text size per part ('small', 'medium', 'large', 'xlarge'); missing parts use [defaultSize].
+  final Map<String, String> sizes;
+
+  /// Parts the owner dragged somewhere else: top-left corner in mm.
+  final Map<String, ({double x, double y})> positions;
 
   /// Free text printed along the bottom, e.g. a phone number.
   final String extra;
 
   double get rollWidthMm => columns * widthMm + (columns - 1) * gapMm;
 
-  static const sizes = ['small', 'medium', 'large'];
+  static String defaultSize(String part) => part == 'name' || part == 'price' ? 'medium' : 'small';
+  String sizeOf(String part) => sizes[part] ?? defaultSize(part);
+
   static const prices = ['price', 'mrp', 'both', 'none'];
 
   Map<String, dynamic> toJson() => {
@@ -58,16 +80,36 @@ class LabelLayout {
         'bin': bin,
         'digits': digits,
         'price': price,
-        'nameSize': nameSize,
-        'priceSize': priceSize,
+        'sizes': {for (final e in sizes.entries) e.key: e.value},
+        'positions': {for (final e in positions.entries) e.key: {'x': _round(e.value.x), 'y': _round(e.value.y)}},
         'extra': extra,
       };
 
   static LabelLayout fromJson(Map? j, {String? fallbackSize}) {
     double num0(Object? v, double d) => (v is num) ? v.toDouble() : d;
     bool flag(Object? v, bool d) => v is bool ? v : d;
-    String pick(Object? v, List<String> allowed, String d) => allowed.contains(v) ? v as String : d;
     final size = (fallbackSize ?? '50x25').split('x');
+    final sizes = <String, String>{};
+    // Designs saved before per-line sizes kept only the name and price sizes.
+    for (final (old, part) in [('nameSize', 'name'), ('priceSize', 'price')]) {
+      if (labelSizes4.contains(j?[old])) sizes[part] = j![old] as String;
+    }
+    final savedSizes = j?['sizes'];
+    if (savedSizes is Map) {
+      for (final e in savedSizes.entries) {
+        if (labelParts.contains(e.key) && labelSizes4.contains(e.value)) sizes[e.key as String] = e.value as String;
+      }
+    }
+    final positions = <String, ({double x, double y})>{};
+    final savedPositions = j?['positions'];
+    if (savedPositions is Map) {
+      for (final e in savedPositions.entries) {
+        final v = e.value;
+        if (labelParts.contains(e.key) && v is Map && v['x'] is num && v['y'] is num) {
+          positions[e.key as String] = (x: (v['x'] as num).toDouble().clamp(0, 110), y: (v['y'] as num).toDouble().clamp(0, 150));
+        }
+      }
+    }
     return LabelLayout(
       widthMm: num0(j?['widthMm'], double.tryParse(size.first) ?? 50).clamp(20, 110),
       heightMm: num0(j?['heightMm'], double.tryParse(size.last) ?? 25).clamp(10, 150),
@@ -80,9 +122,9 @@ class LabelLayout {
       sku: flag(j?['sku'], true),
       bin: flag(j?['bin'], false),
       digits: flag(j?['digits'], true),
-      price: pick(j?['price'], prices, 'price'),
-      nameSize: pick(j?['nameSize'], sizes, 'medium'),
-      priceSize: pick(j?['priceSize'], sizes, 'medium'),
+      price: prices.contains(j?['price']) ? j!['price'] as String : 'price',
+      sizes: sizes,
+      positions: positions,
       extra: '${j?['extra'] ?? ''}'.trim(),
     );
   }
@@ -100,8 +142,8 @@ class LabelLayout {
     bool? bin,
     bool? digits,
     String? price,
-    String? nameSize,
-    String? priceSize,
+    Map<String, String>? sizes,
+    Map<String, ({double x, double y})>? positions,
     String? extra,
   }) =>
       LabelLayout(
@@ -117,11 +159,23 @@ class LabelLayout {
         bin: bin ?? this.bin,
         digits: digits ?? this.digits,
         price: price ?? this.price,
-        nameSize: nameSize ?? this.nameSize,
-        priceSize: priceSize ?? this.priceSize,
+        sizes: sizes ?? this.sizes,
+        positions: positions ?? this.positions,
         extra: extra ?? this.extra,
       );
+
+  /// A copy with one part's size changed.
+  LabelLayout withSize(String part, String size) => copyWith(sizes: {...sizes, part: size});
+
+  /// A copy with one part moved (or put back in its automatic place when [at] is null).
+  LabelLayout withPosition(String part, ({double x, double y})? at) {
+    final next = {...positions};
+    at == null ? next.remove(part) : next[part] = at;
+    return copyWith(positions: next);
+  }
 }
+
+double _round(double v) => (v * 10).round() / 10;
 
 /// The facts about one part (or bin) that a label may show. Prices arrive
 /// already formatted for the target ("Rs. 649.00" for Zebra, "₹649.00" for PDF).
@@ -145,7 +199,7 @@ enum LabelAlign { left, center, right }
 
 /// One thing to draw, positioned in millimetres from the label's top-left.
 class LabelElement {
-  const LabelElement.text(this.text, this.x, this.y, this.width, this.height,
+  const LabelElement.text(this.part, this.text, this.x, this.y, this.width, this.height,
       {this.bold = false, this.align = LabelAlign.left})
       : barcode = false,
         format = '',
@@ -155,10 +209,13 @@ class LabelElement {
 
   const LabelElement.barcode(this.text, this.x, this.y, this.width, this.height,
       {required this.format, required this.module, required this.barHeight, required this.digits})
-      : barcode = true,
+      : part = 'barcode',
+        barcode = true,
         bold = false,
         align = LabelAlign.center;
 
+  /// Which part of the label this is (see [labelParts]).
+  final String part;
   final bool barcode;
   final String text;
   final double x, y, width, height;
@@ -171,19 +228,26 @@ class LabelElement {
   final int module;
   final double barHeight;
   final bool digits;
+
+  LabelElement moved(double nx, double ny, double nwidth) => barcode
+      ? LabelElement.barcode(text, nx, ny, width, height, format: format, module: module, barHeight: barHeight, digits: digits)
+      : LabelElement.text(part, text, nx, ny, nwidth, height, bold: bold, align: LabelAlign.left);
 }
 
 class LabelPlan {
   const LabelPlan(this.elements, {this.warning});
   final List<LabelElement> elements;
 
-  /// Set when the design leaves too little room for a scannable barcode.
+  /// Set when the design leaves too little room for a scannable barcode, or lines overlap.
   final String? warning;
 }
 
-const _margin = 1.2, _rowGap = 0.4, _smallText = 2.0;
-const _nameText = {'small': 2.0, 'medium': 2.6, 'large': 3.3};
-const _priceText = {'small': 2.4, 'medium': 3.0, 'large': 3.8};
+const _margin = 1.2, _rowGap = 0.4;
+const _textMm = {'small': 2.0, 'medium': 2.6, 'large': 3.4, 'xlarge': 4.4};
+const _priceMm = {'small': 2.4, 'medium': 3.0, 'large': 3.8, 'xlarge': 4.8};
+
+/// Text height in mm for [part] at its chosen size.
+double textHeight(LabelLayout layout, String part) => (part == 'price' ? _priceMm : _textMm)[layout.sizeOf(part)]!;
 
 /// Bars plus quiet zones, in modules.
 int barcodeModules(String format, String code) => switch (format) {
@@ -201,55 +265,66 @@ String fitText(String text, double width, double height) {
   return text.length <= max ? text : '${text.substring(0, (max - 1).clamp(1, text.length))}…';
 }
 
+/// Estimated printed width of [text] at [height] mm.
+double textWidth(String text, double height) => text.length * height * 0.55 + 0.4;
+
 /// Places every enabled line and the barcode on one label of [layout] for a
-/// printer of [dpi] dots per inch.
+/// printer of [dpi] dots per inch. Parts the owner moved keep their position.
 LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
   final w = layout.widthMm, h = layout.heightMm;
   final inner = w - 2 * _margin;
   final out = <LabelElement>[];
+  final moved = layout.positions;
   var top = _margin;
   var bottom = h - _margin;
 
-  void line(String text, double size, {bool bold = false, LabelAlign align = LabelAlign.left}) {
+  // Moved parts are placed later and do not take space in the automatic flow.
+  void line(String part, String text, {bool bold = false, LabelAlign align = LabelAlign.left}) {
     if (text.trim().isEmpty) return;
-    out.add(LabelElement.text(fitText(text.trim(), inner, size), _margin, top, inner, size, bold: bold, align: align));
-    top += size + _rowGap;
+    final size = textHeight(layout, part);
+    out.add(LabelElement.text(part, fitText(text.trim(), inner, size), _margin, top, inner, size, bold: bold, align: align));
+    if (!moved.containsKey(part)) top += size + _rowGap;
   }
 
   // Top: shop, part name, brand / part number.
-  if (layout.shopName) line(data.shop, _smallText, bold: true, align: LabelAlign.center);
-  if (layout.name) line(data.name, _nameText[layout.nameSize]!, bold: true);
+  if (layout.shopName) line('shop', data.shop, bold: true, align: LabelAlign.center);
+  if (layout.name) line('name', data.name, bold: true);
   final detail = [
     if (layout.brand) data.brand,
     if (layout.partNumber && data.partNumber.isNotEmpty) 'PN ${data.partNumber}',
   ].where((s) => s.trim().isNotEmpty).join(' · ');
-  line(detail, _smallText);
+  line('detail', detail);
 
   // Bottom, working upwards: extra text, then SKU/bin with the price, then the MRP note.
   if (layout.extra.isNotEmpty) {
-    bottom -= _smallText;
-    out.add(LabelElement.text(fitText(layout.extra, inner, _smallText), _margin, bottom, inner, _smallText, align: LabelAlign.center));
-    bottom -= _rowGap;
+    final size = textHeight(layout, 'extra');
+    final y = bottom - size;
+    out.add(LabelElement.text('extra', fitText(layout.extra, inner, size), _margin, y, inner, size, align: LabelAlign.center));
+    if (!moved.containsKey('extra')) bottom = y - _rowGap;
   }
-  final big = _priceText[layout.priceSize]!;
+  final big = textHeight(layout, 'price');
+  final small = textHeight(layout, 'info');
   final priceText = switch (layout.price) {
     'price' || 'both' => data.price,
     'mrp' => data.mrp == null ? null : 'MRP ${data.mrp}',
     _ => null,
   };
+  final hasPrice = (priceText ?? '').isNotEmpty;
   final left = [if (layout.sku) data.sku, if (layout.bin) data.bin].where((s) => s.trim().isNotEmpty).join(' · ');
-  if ((priceText ?? '').isNotEmpty || left.isNotEmpty) {
-    final rowHeight = (priceText ?? '').isNotEmpty ? big : _smallText;
-    bottom -= rowHeight;
-    if ((priceText ?? '').isNotEmpty) {
-      out.add(LabelElement.text(priceText!, _margin, bottom, inner, big, bold: true, align: LabelAlign.right));
+  if (hasPrice || left.isNotEmpty) {
+    final priceFlows = hasPrice && !moved.containsKey('price');
+    final infoFlows = left.isNotEmpty && !moved.containsKey('info');
+    final rowHeight = priceFlows ? (big > small ? big : small) : small;
+    final y = bottom - rowHeight;
+    if (hasPrice) {
+      out.add(LabelElement.text('price', priceText!, _margin, priceFlows ? y : bottom - big, inner, big, bold: true, align: LabelAlign.right));
     }
     if (left.isNotEmpty) {
-      final priceWidth = (priceText ?? '').isEmpty ? 0.0 : priceText!.length * big * 0.55 + 1;
+      final priceWidth = priceFlows ? textWidth(priceText!, big) + 0.6 : 0.0;
       final width = (inner - priceWidth).clamp(inner * 0.3, inner);
-      out.add(LabelElement.text(fitText(left, width, _smallText), _margin, bottom + rowHeight - _smallText, width, _smallText));
+      out.add(LabelElement.text('info', fitText(left, width, small), _margin, y + rowHeight - small, width, small));
     }
-    bottom -= _rowGap;
+    if (priceFlows || infoFlows) bottom = y - _rowGap;
   }
   final note = switch (layout.price) {
     'mrp' when data.mrp != null => 'Incl. of all taxes',
@@ -257,9 +332,10 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
     _ => '',
   };
   if (note.isNotEmpty) {
-    bottom -= _smallText;
-    out.add(LabelElement.text(fitText(note, inner, _smallText), _margin, bottom, inner, _smallText, align: LabelAlign.right));
-    bottom -= _rowGap;
+    final size = textHeight(layout, 'note');
+    final y = bottom - size;
+    out.add(LabelElement.text('note', fitText(note, inner, size), _margin, y, inner, size, align: LabelAlign.right));
+    if (!moved.containsKey('note')) bottom = y - _rowGap;
   }
 
   // Middle: the barcode, as wide and tall as the remaining space allows.
@@ -273,8 +349,8 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
     final width = module * modules / dotsPerMm;
     // The printer scales the digits with the bar width; EAN/UPC digits are larger.
     final digitsHeight = !layout.digits ? 0.0 : (format == 'CODE128' ? module * 9 : module * 11) / dotsPerMm + 0.3;
-    final space = bottom - top - 0.2;
-    var bars = space - digitsHeight;
+    // A moved barcode keeps the height it would have had in the automatic layout.
+    var bars = bottom - top - 0.2 - digitsHeight;
     if (innerDots < modules) {
       warning = 'This barcode is too long for a ${_mm(w)} mm label. Use a wider label or a shorter code.';
     } else if (bars < 4) {
@@ -285,7 +361,45 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
     out.add(LabelElement.barcode(data.code, _margin + ((inner - width) / 2).clamp(0, inner), top, width.clamp(0, inner), bars + digitsHeight,
         format: format, module: module, barHeight: bars, digits: layout.digits));
   }
-  return LabelPlan(out, warning: warning);
+
+  // Parts the owner dragged: put them where they were dropped, kept inside the label.
+  final placed = [
+    for (final e in out)
+      if (moved[e.part] case final at?)
+        () {
+          final width = e.barcode ? e.width : textWidth(e.text, e.height).clamp(1.0, w - 2 * _margin);
+          final x = at.x.clamp(0.0, (w - width).clamp(0.0, w));
+          final y = at.y.clamp(0.0, (h - e.height).clamp(0.0, h));
+          return e.moved(x, y, width);
+        }()
+      else
+        e,
+  ];
+  if (warning == null && moved.isNotEmpty && _overlaps(placed)) {
+    warning = 'Some lines overlap on the label. Drag them apart or use smaller text.';
+  }
+  return LabelPlan(placed, warning: warning);
+}
+
+/// The area a part actually covers, in mm (text is measured by its characters,
+/// not its full-width box).
+({double l, double t, double r, double b}) labelBox(LabelElement e) {
+  if (e.barcode) return (l: e.x, t: e.y, r: e.x + e.width, b: e.y + e.height);
+  final tw = textWidth(e.text, e.height).clamp(0.0, e.width);
+  final l = switch (e.align) { LabelAlign.left => e.x, LabelAlign.center => e.x + (e.width - tw) / 2, LabelAlign.right => e.x + e.width - tw };
+  return (l: l, t: e.y, r: l + tw, b: e.y + e.height);
+}
+
+/// Whether any two parts cover the same area.
+bool _overlaps(List<LabelElement> elements) {
+  final boxes = elements.map(labelBox).toList();
+  for (var i = 0; i < boxes.length; i++) {
+    for (var j = i + 1; j < boxes.length; j++) {
+      final a = boxes[i], b = boxes[j];
+      if (a.l < b.r - 0.3 && b.l < a.r - 0.3 && a.t < b.b - 0.3 && b.t < a.b - 0.3) return true;
+    }
+  }
+  return false;
 }
 
 String _mm(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);

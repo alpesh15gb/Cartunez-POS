@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:cartunez_pos/core/store.dart';
 import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
+import 'package:cartunez_pos/ui/label_render.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,6 +26,8 @@ void main() {
     HttpOverrides.global = null;
     await _font('Roboto', ['$fonts/roboto-regular.ttf', '$fonts/roboto-medium.ttf', '$fonts/roboto-bold.ttf']);
     await _font('MaterialIcons', ['$fonts/materialicons-regular.otf']);
+    // The label preview draws with the app's bundled font.
+    await _font('CartunezSans', ['assets/fonts/Roboto-Regular.ttf', 'assets/fonts/Roboto-Medium.ttf', 'assets/fonts/Roboto-Bold.ttf']);
   });
 
   testWidgets('label printer setup and test label over the network', (tester) async {
@@ -63,6 +66,21 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'Extra line (optional)'), 'Ph 98765 43210');
     await tester.pumpAndSettle();
+    // Make the price extra large, then drag the part name 10 mm to the right.
+    final priceRow = find.ancestor(of: find.text('Price').last, matching: find.byType(Row)).first;
+    await tester.tap(find.descendant(of: priceRow, matching: find.text('XL')));
+    await tester.pumpAndSettle();
+    final previewFinder = find.descendant(of: find.byType(AlertDialog), matching: find.byType(LabelPreview));
+    await tester.ensureVisible(previewFinder);
+    await tester.pumpAndSettle();
+    final preview = tester.getRect(previewFinder);
+    final pxPerMm = preview.width / 102; // two 50 mm labels + 2 mm gap
+    final nameAt = preview.topLeft + Offset(4 * pxPerMm, 2.4 * pxPerMm);
+    await tester.dragFrom(nameAt, Offset(10 * pxPerMm, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('Part name selected · drag it to move'), findsOneWidget);
+    expect(find.text('Reset positions'), findsOneWidget);
+    await expectLater(previewFinder, matchesGoldenFile('out/labels-01b-dragged.png'));
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/labels-01-design.png'));
     await tester.runAsync(() async {
       await tester.tap(find.text('Save design'));
@@ -74,6 +92,9 @@ void main() {
     expect(saved['price'], 'mrp');
     expect(saved['columns'], 2);
     expect(saved['extra'], 'Ph 98765 43210');
+    expect((saved['sizes'] as Map)['price'], 'xlarge');
+    final namePos = (saved['positions'] as Map)['name'] as Map;
+    expect((namePos['x'] as num).toDouble(), closeTo(11.2, 1.5));
 
     // This device prints to a network Zebra.
     await tester.runAsync(() async {

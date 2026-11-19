@@ -89,20 +89,53 @@ void main() {
   });
 
   test('a crowded design warns that the barcode may not scan', () {
-    final crowded = layout.copyWith(shopName: true, brand: true, partNumber: true, price: 'both', nameSize: 'large', priceSize: 'large', extra: 'x');
+    final crowded = layout.copyWith(shopName: true, brand: true, partNumber: true, price: 'both', sizes: {'name': 'large', 'price': 'large'}, extra: 'x');
     expect(planLabel(crowded, part).warning, contains('may not scan'));
     expect(planLabel(layout, part).warning, isNull);
     expect(planLabel(crowded.copyWith(heightMm: 50, widthMm: 75), part).warning, isNull);
   });
 
   test('layout survives saving and loading, with safe limits', () {
-    final custom = layout.copyWith(widthMm: 38, columns: 2, brand: true, price: 'mrp', nameSize: 'large', extra: 'Hi');
+    final custom = layout.copyWith(widthMm: 38, columns: 2, brand: true, price: 'mrp', sizes: {'shop': 'xlarge'}, positions: {'price': (x: 10.0, y: 15.5)}, extra: 'Hi');
     final back = LabelLayout.fromJson(custom.toJson());
     expect(back.toJson(), custom.toJson());
     final wild = LabelLayout.fromJson({'widthMm': 999, 'columns': 9, 'price': 'free', 'nameSize': 'huge'});
     expect(wild.widthMm, 110);
     expect(wild.columns, 3);
     expect(wild.price, 'price');
-    expect(wild.nameSize, 'medium');
+    expect(wild.sizeOf('name'), 'medium');
+  });
+
+  test('designs saved before per-line sizes keep their name and price sizes', () {
+    final old = LabelLayout.fromJson({'nameSize': 'large', 'priceSize': 'small'});
+    expect(old.sizeOf('name'), 'large');
+    expect(old.sizeOf('price'), 'small');
+    expect(old.sizeOf('shop'), 'small');
+  });
+
+  test('the shop name can be made bigger', () {
+    final shop = layout.copyWith(shopName: true);
+    double height(LabelLayout l) => planLabel(l, part).elements.firstWhere((e) => e.part == 'shop').height;
+    expect(height(shop.withSize('shop', 'xlarge')), greaterThan(height(shop)));
+    expect(zplJob(const [part], shop.withSize('shop', 'xlarge')), contains('^A0N,35,35^FB'));
+  });
+
+  test('a moved line prints where it was dropped and leaves room for the barcode', () {
+    final moved = layout.withPosition('price', (x: 2.0, y: 2.0));
+    final plan = planLabel(moved, part);
+    final price = plan.elements.firstWhere((e) => e.part == 'price');
+    expect((price.x, price.y), (2.0, 2.0));
+    expect(price.align, LabelAlign.left);
+    expect(zplJob(const [part], moved), contains('^FO16,16^A0N,24,24^FB'));
+    // Lines dropped outside the label are pulled back inside.
+    final off = planLabel(layout.withPosition('name', (x: 49.0, y: 24.0)), part).elements.firstWhere((e) => e.part == 'name');
+    expect(off.x + off.width, lessThanOrEqualTo(50));
+    expect(off.y + off.height, lessThanOrEqualTo(25));
+    expect(layout.withPosition('price', (x: 2.0, y: 2.0)).withPosition('price', null).positions, isEmpty);
+  });
+
+  test('overlapping lines are reported', () {
+    final clash = layout.withPosition('price', (x: 1.2, y: 1.2));
+    expect(planLabel(clash, part).warning, contains('overlap'));
   });
 }

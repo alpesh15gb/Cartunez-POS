@@ -36,7 +36,9 @@ Settings › Barcode labels › **Design label** (owner only) sets one design fo
 the server so every counter prints the same label: label size (presets or a custom width × height),
 1-3 labels across the roll and the gap between them, which lines print (shop name, part name, brand,
 part number, SKU, bin location, digits under the barcode), price (selling price, MRP including tax,
-both, or none), part name and price text size, and an optional extra line. A live preview uses a real
+both, or none), a text size for every line (S, M, L, XL), and an optional extra line. Drag any line or
+the barcode on the preview to move it; **Put back** / **Reset positions** return to the automatic layout,
+and the designer warns when lines overlap. A live preview uses a real
 part from the catalog and warns when the barcode would be too short to scan. `lib/core/label_layout.dart`
 places everything in millimetres; the Zebra (ZPL), PDF and preview renderers all draw from that plan.
 

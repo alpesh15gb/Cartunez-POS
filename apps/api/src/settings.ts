@@ -147,7 +147,10 @@ export function labelLayout(value: unknown) {
   const allowed = new Set([
     "widthMm", "heightMm", "columns", "gapMm", "shopName", "name", "brand",
     "partNumber", "sku", "bin", "digits", "price", "nameSize", "priceSize", "extra",
+    "sizes", "positions",
   ]);
+  const parts = ["shop", "name", "detail", "barcode", "info", "price", "note", "extra"];
+  const textSizes = ["small", "medium", "large", "xlarge"];
   for (const key of Object.keys(input))
     if (!allowed.has(key)) fail(`Unknown label setting ${key}.`);
   const number = (key: string, min: number, max: number, fallback: number) => {
@@ -182,8 +185,43 @@ export function labelLayout(value: unknown) {
     bin: flag("bin", false),
     digits: flag("digits", true),
     price: choice("price", ["price", "mrp", "both", "none"], "price"),
-    nameSize: choice("nameSize", ["small", "medium", "large"], "medium"),
-    priceSize: choice("priceSize", ["small", "medium", "large"], "medium"),
+    sizes: labelSizes(input, parts, textSizes),
+    positions: labelPositions(input.positions, parts),
     extra: text(input.extra ?? "", "label extra text", false, 60),
   };
+}
+
+function labelSizes(input: Record<string, unknown>, parts: string[], sizes: string[]) {
+  const result: Record<string, string> = {};
+  // Older clients send only the part name and price sizes.
+  for (const [old, part] of [["nameSize", "name"], ["priceSize", "price"]]) {
+    if (input[old] === undefined) continue;
+    if (typeof input[old] !== "string" || !sizes.includes(input[old] as string))
+      fail(`Label ${old} must be one of ${sizes.join(", ")}.`);
+    result[part] = input[old] as string;
+  }
+  const raw = input.sizes ?? {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("Label text sizes are invalid.");
+  for (const [part, size] of Object.entries(raw as Record<string, unknown>)) {
+    if (!parts.includes(part)) fail(`Unknown label part ${part}.`);
+    if (typeof size !== "string" || !sizes.includes(size))
+      fail(`Label text size must be one of ${sizes.join(", ")}.`);
+    result[part] = size;
+  }
+  return result;
+}
+
+function labelPositions(raw: unknown, parts: string[]) {
+  const result: Record<string, { x: number; y: number }> = {};
+  if (raw === undefined) return result;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("Label positions are invalid.");
+  for (const [part, at] of Object.entries(raw as Record<string, unknown>)) {
+    if (!parts.includes(part)) fail(`Unknown label part ${part}.`);
+    const { x, y } = (at || {}) as Record<string, unknown>;
+    if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y) ||
+        x < 0 || x > 110 || y < 0 || y > 150)
+      fail("Label positions must be inside the label.");
+    result[part] = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+  }
+  return result;
 }

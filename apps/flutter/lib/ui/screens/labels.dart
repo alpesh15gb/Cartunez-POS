@@ -218,6 +218,12 @@ class _LabelDesignerState extends State<_LabelDesigner> {
   bool saving = false;
   String? problem;
 
+  /// The part selected on the preview (outlined, and highlighted in Text sizes).
+  String? selected;
+
+  /// Where the dragged part started, in mm.
+  ({double x, double y})? dragOrigin;
+
   @override
   void initState() {
     super.initState();
@@ -353,10 +359,34 @@ class _LabelDesignerState extends State<_LabelDesigner> {
       ]),
       segments('Price', layout.price, const [('price', 'Price'), ('mrp', 'MRP'), ('both', 'Both'), ('none', 'None')],
           (v) => layout.copyWith(price: v)),
-      segments('Part name size', layout.nameSize, const [('small', 'Small'), ('medium', 'Medium'), ('large', 'Large')],
-          (v) => layout.copyWith(nameSize: v)),
-      segments('Price size', layout.priceSize, const [('small', 'Small'), ('medium', 'Medium'), ('large', 'Large')],
-          (v) => layout.copyWith(priceSize: v)),
+      Padding(padding: const EdgeInsets.only(top: 16, bottom: 4), child: Text('Text sizes', style: theme.textTheme.labelLarge)),
+      for (final part in _textParts(layout))
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => selected = part),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: selected == part ? const Color(0xFFEAF5ED) : null,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(children: [
+              Expanded(child: Text(labelPartNames[part]!, style: TextStyle(fontWeight: selected == part ? FontWeight.w700 : FontWeight.w500))),
+              SegmentedButton<String>(
+                showSelectedIcon: false,
+                style: SegmentedButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 6)),
+                segments: const [
+                  ButtonSegment(value: 'small', label: Text('S'), tooltip: 'Small'),
+                  ButtonSegment(value: 'medium', label: Text('M'), tooltip: 'Medium'),
+                  ButtonSegment(value: 'large', label: Text('L'), tooltip: 'Large'),
+                  ButtonSegment(value: 'xlarge', label: Text('XL'), tooltip: 'Extra large'),
+                ],
+                selected: {layout.sizeOf(part)},
+                onSelectionChanged: owner ? (v) => _set(layout.withSize(part, v.first)) : null,
+              ),
+            ]),
+          ),
+        ),
       const SizedBox(height: 14),
       TextField(
         controller: extra,
@@ -373,9 +403,40 @@ class _LabelDesignerState extends State<_LabelDesigner> {
       Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(color: const Color(0xFFEFF3F0), borderRadius: BorderRadius.circular(12)),
-        child: Center(child: LabelPreview(layout: layout, plans: [plan], maxWidth: wide ? 380 : 340)),
+        child: Center(
+          child: LabelPreview(
+            layout: layout,
+            plans: [plan],
+            maxWidth: wide ? 380 : 340,
+            selected: selected,
+            onSelect: (part) => setState(() => selected = part),
+            onDragStart: !owner
+                ? null
+                : (part) {
+                    final element = plan.elements.where((e) => e.part == part).firstOrNull;
+                    if (element == null) return;
+                    final box = labelBox(element);
+                    dragOrigin = (x: box.l, y: box.t);
+                  },
+            onDrag: !owner
+                ? null
+                : (part, dx, dy) {
+                    final origin = dragOrigin;
+                    if (origin == null) return;
+                    _set(layout.withPosition(part, (x: origin.x + dx, y: origin.y + dy)));
+                  },
+          ),
+        ),
       ),
       const SizedBox(height: 8),
+      _MoveBar(
+        selected: selected,
+        layout: layout,
+        owner: owner,
+        onPutBack: (part) => _set(layout.withPosition(part, null)),
+        onResetAll: () => _set(layout.copyWith(positions: const {})),
+      ),
+      const SizedBox(height: 6),
       Text(
         '${_size(layout)} · ${zebra ? 'prices print as "Rs." on the Zebra' : 'printed through the print dialog'}',
         style: theme.textTheme.bodySmall,
@@ -411,15 +472,17 @@ class _LabelDesignerState extends State<_LabelDesigner> {
       title: const Text('Label design'),
       content: SizedBox(
         width: wide ? 860 : 520,
-        child: SingleChildScrollView(
-          child: wide
-              ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Expanded(child: controls),
-                  const SizedBox(width: 24),
-                  Expanded(child: preview),
-                ])
-              : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [preview, const SizedBox(height: 16), controls]),
-        ),
+        // Wide screens: the preview stays in view while the controls scroll.
+        height: wide ? (MediaQuery.sizeOf(context).height * 0.72).clamp(420.0, 680.0) : null,
+        child: wide
+            ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: SingleChildScrollView(child: Padding(padding: const EdgeInsets.only(right: 8, top: 6), child: controls))),
+                const SizedBox(width: 24),
+                Expanded(child: SingleChildScrollView(child: preview)),
+              ])
+            : SingleChildScrollView(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [preview, const SizedBox(height: 16), controls]),
+              ),
       ),
       actions: [
         if (problem != null) Text(problem!, style: const TextStyle(color: Brand.danger)),
@@ -428,6 +491,46 @@ class _LabelDesignerState extends State<_LabelDesigner> {
           FilledButton(onPressed: saving ? null : _save, child: Text(saving ? 'Saving…' : 'Save design')),
       ],
     );
+  }
+}
+
+/// Text parts that are switched on in [l], in label order.
+List<String> _textParts(LabelLayout l) => [
+      if (l.shopName) 'shop',
+      if (l.name) 'name',
+      if (l.brand || l.partNumber) 'detail',
+      if (l.sku || l.bin) 'info',
+      if (l.price != 'none') 'price',
+      if (l.price == 'mrp' || l.price == 'both') 'note',
+      if (l.extra.isNotEmpty) 'extra',
+    ];
+
+/// Under the preview: how to move things, and buttons to put them back.
+class _MoveBar extends StatelessWidget {
+  const _MoveBar({required this.selected, required this.layout, required this.owner, required this.onPutBack, required this.onResetAll});
+  final String? selected;
+  final LabelLayout layout;
+  final bool owner;
+  final ValueChanged<String> onPutBack;
+  final VoidCallback onResetAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    final part = selected;
+    return Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, runSpacing: 4, children: [
+      Icon(Icons.open_with, size: 16, color: small?.color),
+      Text(
+        part == null
+            ? (owner ? 'Drag any line or the barcode on the preview to move it.' : 'Tap a line to see it outlined.')
+            : '${labelPartNames[part]} selected${owner ? ' · drag it to move' : ''}',
+        style: small,
+      ),
+      if (owner && part != null && layout.positions.containsKey(part))
+        TextButton(onPressed: () => onPutBack(part), child: const Text('Put back')),
+      if (owner && layout.positions.isNotEmpty)
+        TextButton(onPressed: onResetAll, child: const Text('Reset positions')),
+    ]);
   }
 }
 

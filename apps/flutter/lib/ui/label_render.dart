@@ -1,6 +1,7 @@
 // Draws a planned label (see core/label_layout.dart) as a PDF page or as an
 // on-screen preview. Both follow the same millimetre plan as the Zebra output.
 import 'package:barcode/barcode.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -82,30 +83,100 @@ pw.Widget _pdfElement(LabelElement e, double offset) {
 
 // ---------- On-screen preview ----------
 
-/// Draws the label (or a row of labels) to scale.
-class LabelPreview extends StatelessWidget {
-  const LabelPreview({super.key, required this.layout, required this.plans, this.maxWidth = 420});
+/// Draws the label (or a row of labels) to scale. With [onDrag], parts can be
+/// tapped to select and dragged to move (in the first label of the row).
+class LabelPreview extends StatefulWidget {
+  const LabelPreview({
+    super.key,
+    required this.layout,
+    required this.plans,
+    this.maxWidth = 420,
+    this.selected,
+    this.onSelect,
+    this.onDragStart,
+    this.onDrag,
+  });
   final LabelLayout layout;
   final List<LabelPlan> plans;
   final double maxWidth;
+  final String? selected;
+  final ValueChanged<String?>? onSelect;
+
+  /// Called when a part starts being dragged.
+  final ValueChanged<String>? onDragStart;
+
+  /// Called while a part is dragged, with the total movement since the drag started, in mm.
+  final void Function(String part, double dxMm, double dyMm)? onDrag;
+
+  @override
+  State<LabelPreview> createState() => _LabelPreviewState();
+}
+
+class _LabelPreviewState extends State<LabelPreview> {
+  String? dragging;
+  Offset dragFrom = Offset.zero;
+
+  double get scale => widget.maxWidth / widget.layout.rollWidthMm;
+
+  /// The part under [local] (pixels), text before the barcode.
+  String? _hit(Offset local) {
+    if (widget.plans.isEmpty) return null;
+    final l = widget.layout;
+    final pitch = l.widthMm + l.gapMm;
+    final column = (local.dx / scale / pitch).floor();
+    final x = local.dx / scale - column * pitch, y = local.dy / scale;
+    final elements = [...widget.plans.first.elements]..sort((a, b) => (a.barcode ? 1 : 0) - (b.barcode ? 1 : 0));
+    for (final e in elements) {
+      final box = labelBox(e);
+      const pad = 0.6;
+      if (x >= box.l - pad && x <= box.r + pad && y >= box.t - pad && y <= box.b + pad) return e.part;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
     // Fixed width (no LayoutBuilder) so the preview can sit inside dialogs.
-    final scale = maxWidth / layout.rollWidthMm;
-    return SizedBox(
-      width: maxWidth,
-      height: layout.heightMm * scale,
-      child: CustomPaint(painter: _LabelPainter(layout, plans, scale)),
+    final paint = SizedBox(
+      width: widget.maxWidth,
+      height: widget.layout.heightMm * scale,
+      child: CustomPaint(painter: _LabelPainter(widget.layout, widget.plans, scale, widget.selected)),
+    );
+    if (widget.onDrag == null && widget.onSelect == null) return paint;
+    return MouseRegion(
+      cursor: SystemMouseCursors.move,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        // Pick the part under the finger where it first touched, not after the drag slop.
+        dragStartBehavior: DragStartBehavior.down,
+        onTapUp: (d) => widget.onSelect?.call(_hit(d.localPosition)),
+        onPanStart: (d) {
+          dragging = _hit(d.localPosition);
+          dragFrom = d.localPosition;
+          if (dragging != null) {
+            widget.onSelect?.call(dragging);
+            widget.onDragStart?.call(dragging!);
+          }
+        },
+        // Measured from where the finger first touched, so no movement is lost
+        // while the gesture is being recognised.
+        onPanUpdate: (d) {
+          final total = d.localPosition - dragFrom;
+          if (dragging != null) widget.onDrag?.call(dragging!, total.dx / scale, total.dy / scale);
+        },
+        onPanEnd: (_) => dragging = null,
+        child: paint,
+      ),
     );
   }
 }
 
 class _LabelPainter extends CustomPainter {
-  _LabelPainter(this.layout, this.plans, this.scale);
+  _LabelPainter(this.layout, this.plans, this.scale, this.selected);
   final LabelLayout layout;
   final List<LabelPlan> plans;
   final double scale;
+  final String? selected;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -123,6 +194,21 @@ class _LabelPainter extends CustomPainter {
       final plan = plans[c % plans.length];
       for (final e in plan.elements) {
         e.barcode ? _barcode(canvas, e, offset, ink) : _text(canvas, e, offset);
+      }
+      // Outline the selected part on the first label.
+      if (c == 0 && selected != null) {
+        for (final e in plan.elements.where((e) => e.part == selected)) {
+          final box = labelBox(e);
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+                Rect.fromLTRB((box.l - 0.4) * scale, (box.t - 0.3) * scale, (box.r + 0.4) * scale, (box.b + 0.3) * scale),
+                Radius.circular(0.6 * scale)),
+            Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.5
+              ..color = const Color(0xFF117755),
+          );
+        }
       }
     }
   }
