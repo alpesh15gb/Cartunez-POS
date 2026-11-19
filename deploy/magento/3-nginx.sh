@@ -11,6 +11,9 @@ SITE=/etc/nginx/sites-available/cartunez-shop.conf
 LINK=/etc/nginx/sites-enabled/cartunez-shop.conf
 ACME=/var/www/cartunez-shop-acme
 CONF=/etc/cartunez-shop
+# Nginx workers (www-data) cannot open /etc/cartunez-shop (root only), so the
+# staging password file lives next to the Nginx configuration instead.
+HTPASSWD=/etc/nginx/cartunez-shop.htpasswd
 UPSTREAM=127.0.0.1:18600
 
 nginx -t >/dev/null 2>&1 || die 'Nginx configuration already has errors; fix them before adding a site.'
@@ -54,6 +57,7 @@ if [[ ! -s "$CONF/htpasswd" ]]; then
   unset pass
   echo "Saved $CONF/staging-login.txt (root only)."
 fi
+install -m 640 -o root -g www-data "$CONF/htpasswd" "$HTPASSWD"
 
 echo '== Step B: HTTPS site'
 proxy="proxy_pass http://$UPSTREAM;
@@ -83,7 +87,7 @@ server {
     # Staging: private and hidden from search engines. Remove these three lines at launch.
     add_header X-Robots-Tag \"noindex, nofollow\" always;
     auth_basic \"Cartunez shop (staging)\";
-    auth_basic_user_file $CONF/htpasswd;
+    auth_basic_user_file $HTPASSWD;
 
     # The POS talks to Magento's REST API with its own token, so no staging password here.
     location /rest/ {
