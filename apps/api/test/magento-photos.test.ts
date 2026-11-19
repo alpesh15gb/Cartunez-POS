@@ -15,6 +15,7 @@ const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwA
 function fakeMagento() {
   const products = new Map<string, any>();
   const media = new Map<string, Map<number, any>>();
+  const categories = new Map<number, any>();
   const calls: { method: string; path: string; body?: any }[] = [];
   let nextEntry = 1;
   const fetch = (async (url: string | URL, init: any = {}) => {
@@ -24,6 +25,19 @@ function fakeMagento() {
     calls.push({ method, path, body });
     const reply = (status: number, data: unknown) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
     let m: RegExpMatchArray | null;
+    // Categories under the root category (2), found by name or created.
+    if (path === "/rest/all/V1/categories/list") {
+      const u = new URL(String(url));
+      const name = u.searchParams.get("searchCriteria[filter_groups][0][filters][0][value]");
+      const items = [...categories.values()].filter((c) => c.name === name);
+      return reply(200, { items, total_count: items.length });
+    }
+    if (path === "/rest/all/V1/categories" && method === "POST") {
+      const c = { id: 100 + categories.size, ...body.category };
+      categories.set(c.id, c);
+      return reply(200, c);
+    }
+
     if ((m = path.match(/^\/rest\/all\/V1\/products\/([^/]+)\/media\/(\d+)$/))) {
       const gallery = media.get(m[1]) || new Map();
       if (method === "DELETE") {

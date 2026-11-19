@@ -79,6 +79,7 @@ export function magentoProduct(
   prices: { mrp: number; selling: number },
   qty: number,
   config: any,
+  categoryId: number | null = null,
 ) {
   const published = !!listing.published;
   const onOrder = listing.availability === "order";
@@ -107,6 +108,8 @@ export function magentoProduct(
       weight: 1,
       extension_attributes: {
         website_ids: [Number(config.websiteId || 1)],
+        // The POS category decides the shop category (one per part).
+        category_links: categoryId ? [{ position: 0, category_id: String(categoryId) }] : [],
         stock_item: {
           qty,
           is_in_stock: inStock,
@@ -175,6 +178,54 @@ export async function magentoRequest(
   }
   if (!response.ok) throw new MagentoError(magentoMessage(parsed, response.status), response.status);
   return parsed;
+}
+
+// ---------- Categories ----------
+
+/**
+ * The Magento category for a POS category name, under the store's root
+ * category: found by name, or created (visible in the menu). Remembered so
+ * each category is looked up once.
+ */
+export async function magentoCategoryId(
+  fetchImpl: Fetch,
+  baseUrl: string,
+  token: string,
+  db: Database,
+  org: string,
+  config: any,
+  name: unknown,
+): Promise<number | null> {
+  const label = String(name ?? "").trim();
+  if (!label) return null;
+  const key = `cat-${slug(label) || "x"}`;
+  const cached = await getRecord(db, org, "magentoCategory", key);
+  if (cached?.categoryId) return Number(cached.categoryId);
+  const root = Number(config.rootCategoryId || 2);
+  const q = new URLSearchParams({
+    "searchCriteria[filter_groups][0][filters][0][field]": "name",
+    "searchCriteria[filter_groups][0][filters][0][value]": label,
+    "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+    "searchCriteria[filter_groups][1][filters][0][field]": "parent_id",
+    "searchCriteria[filter_groups][1][filters][0][value]": String(root),
+    "searchCriteria[filter_groups][1][filters][0][condition_type]": "eq",
+  });
+  const found = await magentoRequest(fetchImpl, baseUrl, token, "GET", `/all/V1/categories/list?${q}`);
+  let id = Number(found?.items?.[0]?.id || 0);
+  if (!id) {
+    const created = await magentoRequest(fetchImpl, baseUrl, token, "POST", "/all/V1/categories", {
+      category: { parent_id: root, name: label, is_active: true, include_in_menu: true },
+    });
+    id = Number(created?.id || 0);
+  }
+  if (!id) throw new MagentoError(`Magento did not return a category for "${label}".`);
+  await putRecord(db, org, "magentoCategory", { id: key, name: label, categoryId: id });
+  return id;
+}
+
+/** Forgets remembered categories (for example after one was deleted in Magento). */
+async function forgetCategories(db: Database, org: string) {
+  await db.query("DELETE FROM records WHERE organization_id=$1 AND kind='magentoCategory'", [org]);
 }
 
 // ---------- Photos ----------
@@ -272,7 +323,16 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
         secret.token,
         "PUT",
         `/all/V1/products/${path}`,
-        magentoProduct(product, listing, prices, qty, config),
+        magentoProduct(
+          product,
+          listing,
+          prices,
+          qty,
+          config,
+          listing.published
+            ? await magentoCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config, product.category)
+            : null,
+        ),
       );
       // Photos: upload new ones, remove deleted ones, keep the main photo first.
       if (listing.published) {
@@ -286,6 +346,8 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
       sent++;
     } catch (e: any) {
       error = e instanceof MagentoError ? e.message : `Sync failed: ${e?.message || e}`;
+      // A category removed in Magento's admin: look it up again on the retry.
+      if (e instanceof MagentoError && /categor/i.test(e.message)) await forgetCategories(db, org);
       failed++;
     }
     await db.transaction(async (tx) => {
@@ -404,6 +466,7 @@ export function magentoRoutes(app: FastifyInstance, db: Database, post: Post, fe
     if (body.defaultBuffer !== undefined) next.defaultBuffer = integer(body.defaultBuffer, "Safety buffer", 0, 9999);
     if (body.attributeSetId !== undefined) next.attributeSetId = integer(body.attributeSetId, "Attribute set", 1, 1000000);
     if (body.websiteId !== undefined) next.websiteId = integer(body.websiteId, "Website", 1, 1000000);
+    if (body.rootCategoryId !== undefined) next.rootCategoryId = integer(body.rootCategoryId, "Root category", 1, 1000000);
     if (body.token !== undefined && String(body.token).trim()) {
       await putRecord(tx, actor.organizationId, "integrationSecret", {
         id: "magento",

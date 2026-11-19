@@ -534,6 +534,8 @@ Future<void> editMagento(BuildContext context) async {
           options: const [('on', 'On: keep Magento up to date'), ('off', 'Paused')]),
       FieldSpec('attributeSetId', 'Magento attribute set ID', kind: FieldKind.number, value: m['attributeSetId'] ?? 4, advanced: true),
       FieldSpec('websiteId', 'Magento website ID', kind: FieldKind.number, value: m['websiteId'] ?? 1, advanced: true),
+      FieldSpec('rootCategoryId', 'Magento root category ID', kind: FieldKind.number, value: m['rootCategoryId'] ?? 2, advanced: true,
+          help: 'Part categories are created under this one (2 = Default Category).'),
     ],
     onSubmit: (v) async {
       final token = '${v['token'] ?? ''}'.trim();
@@ -551,6 +553,7 @@ Future<void> editMagento(BuildContext context) async {
         'defaultBuffer': int.tryParse('${v['defaultBuffer']}') ?? 0,
         'attributeSetId': int.tryParse('${v['attributeSetId']}') ?? 4,
         'websiteId': int.tryParse('${v['websiteId']}') ?? 1,
+        'rootCategoryId': int.tryParse('${v['rootCategoryId']}') ?? 2,
         'enabled': v['enabled'] == 'on',
       }, v['enabled'] == 'on' ? 'Magento connected. Published parts are being sent.' : 'Magento settings saved. Sync is paused.');
     },

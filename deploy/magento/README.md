@@ -36,6 +36,12 @@ git clone https://github.com/alpesh15gb/Cartunez-POS.git /opt/cartunez-shop-sour
    `/etc/cartunez-shop/staging-login.txt`. `/rest/` stays open for the POS (Magento's API needs its
    own token).
 
+4. `bash /opt/cartunez-shop-source/deploy/magento/4-theme.sh` installs the **Cartunez theme**
+   (`storefront/app/design/frontend/Cartunez/default`: logo, colours, MRP struck through next to the
+   selling price, product cards, footer) and the **Cartunez_Storefront** module, which writes the home
+   page and the `cartunez-footer` block once. Both stay editable in the admin (Content › Pages ›
+   Home Page, Content › Blocks). Run it again after changing the theme; about 10 minutes.
+
 Each script stops with a clear message if something is not as expected, and can be run again.
 
 ## Connect the POS

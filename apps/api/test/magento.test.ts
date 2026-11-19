@@ -11,6 +11,7 @@ import { createServer } from "node:http";
 function fakeMagento() {
   const calls: { method: string; path: string; body: any }[] = [];
   const products = new Map<string, any>();
+  const categories = new Map<number, any>();
   let failNext = 0;
   const fetch = (async (url: string | URL, init: any = {}) => {
     const path = new URL(String(url)).pathname;
@@ -24,6 +25,18 @@ function fakeMagento() {
       failNext--;
       return reply(500, { message: "Internal error. Details are available in Magento log file." });
     }
+    // Categories under the root category (2), found by name or created.
+    if (path === "/rest/all/V1/categories/list") {
+      const u = new URL(String(url));
+      const name = u.searchParams.get("searchCriteria[filter_groups][0][filters][0][value]");
+      const items = [...categories.values()].filter((c) => c.name === name);
+      return reply(200, { items, total_count: items.length });
+    }
+    if (path === "/rest/all/V1/categories" && init.method === "POST") {
+      const c = { id: 100 + categories.size, ...body.category };
+      categories.set(c.id, c);
+      return reply(200, c);
+    }
     if (path === "/rest/V1/store/storeConfigs")
       return reply(200, [{ code: "default", base_currency_code: "INR", secure_base_url: "https://shop.example/" }]);
     const match = path.match(/^\/rest\/all\/V1\/products\/(.+)$/);
@@ -35,7 +48,7 @@ function fakeMagento() {
     }
     return reply(404, { message: "Request does not match any route." });
   }) as typeof globalThis.fetch;
-  return { fetch, calls, products, failNextRequests: (n: number) => (failNext = n) };
+  return { fetch, calls, products, categories, failNextRequests: (n: number) => (failNext = n) };
 }
 
 test("Magento: publish, price, stock follows POS sales, retries and permissions", async () => {
@@ -94,6 +107,11 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     assert.equal(product.status, 1);
     assert.equal(product.extension_attributes.stock_item.qty, 23); // 24 in Pune - 1 buffer
     assert.equal(product.extension_attributes.stock_item.is_in_stock, true);
+    // The POS category ("Parts") was created under the root category and linked.
+    const parts = [...magento.categories.values()].find((c) => c.name === "Parts");
+    assert.equal(parts.parent_id, 2);
+    assert.equal(parts.include_in_menu, true);
+    assert.deepEqual(product.extension_attributes.category_links, [{ position: 0, category_id: String(parts.id) }]);
     let saved = await getRecord(db, "demo", "onlineListing", "filter");
     assert.equal(saved!.sync.state, "synced");
     assert.equal(saved!.sync.magentoSku, "ML-FILTER-01");
@@ -121,6 +139,13 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     await runMagentoSync(db, { fetch: magento.fetch });
     assert.equal(magento.calls.length, before);
 
+    // Another part in the same category reuses it (looked up once, remembered).
+    await call("online-listings", { productIds: ["spark"], changes: { published: true } }, owner);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    assert.equal([...magento.categories.values()].filter((c) => c.name === "Parts").length, 1);
+    assert.equal(magento.calls.filter((c) => c.method === "POST" && c.path === "/rest/all/V1/categories").length, 1);
+    assert.equal(lastPut("ML-SPARK-01").extension_attributes.category_links[0].category_id, String(parts.id));
+
     // Magento down: the part shows the error, the job waits, and Retry sends it again.
     magento.failNextRequests(1);
     await call("online-listings", { productIds: ["filter"], changes: { availability: "order", leadDays: 10 } }, owner);
@@ -145,7 +170,7 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
 
     // Managers see listings; nobody receives the token.
     const boot = (await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { authorization: "Bearer " + manager } })).json();
-    assert.equal(boot.onlineListings.length, 2);
+    assert.equal(boot.onlineListings.length, 3);
     assert.equal(JSON.stringify(boot).includes("test-token"), false);
     const cashierBoot = (await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { authorization: "Bearer " + cashier } })).json();
     assert.deepEqual(cashierBoot.onlineListings, []);

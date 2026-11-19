@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <referenceBlock name="logo">
+            <arguments>
+                <argument name="logo_file" xsi:type="string">images/logo.svg</argument>
+                <argument name="logo_width" xsi:type="number">200</argument>
+                <argument name="logo_height" xsi:type="number">48</argument>
+                <argument name="logo_img_width" xsi:type="number">200</argument>
+                <argument name="logo_img_height" xsi:type="number">48</argument>
+                <argument name="logo_alt" xsi:type="string">Cartunez</argument>
+            </arguments>
+        </referenceBlock>
+
+        <!-- Shop details, help and trust points; edit in Content > Blocks > cartunez-footer. -->
+        <referenceContainer name="footer">
+            <block class="Magento\Cms\Block\Block" name="cartunez.footer" before="-">
+                <arguments>
+                    <argument name="block_id" xsi:type="string">cartunez-footer</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+
+        <!-- Less clutter for a parts shop. -->
+        <referenceBlock name="report.bugs" remove="true"/>
+        <referenceBlock name="catalog.compare.sidebar" remove="true"/>
+        <referenceBlock name="wishlist_sidebar" remove="true"/>
+    </body>
+</page>

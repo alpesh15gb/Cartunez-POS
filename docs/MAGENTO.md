@@ -18,6 +18,10 @@ prices and stock; Magento follows it.
   buffer. Every sale, return, receipt, adjustment, count, move and parked sale in that branch queues
   an update; editing a part updates its name and price.
 - **Unpublish** disables the product in Magento; it is never deleted, so order history stays.
+- **Categories:** each part's POS category (Parts, Brakes, Fluids…) is found or created in Magento
+  under the root category (2, "Default Category"; change under Connect Magento › More options) and
+  the part is linked to it, so it appears in the shop's top menu. Categories are looked up once and
+  remembered; one deleted in Magento's admin is created again on the next sync.
 
 ## Online orders (phase 2)
 
