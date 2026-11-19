@@ -7,26 +7,37 @@
 @cz-dark: #16191E;
 @cz-panel: #1E2228;
 @cz-line-dark: #2B3038;
-@cz-red: #E01E2B;
-@cz-red-dark: #B3121D;
+@cz-red: #E0141C;
+@cz-red-dark: #B50E15;
+@cz-blue: #00A6F5;
+@cz-blue-dark: #0086C8;
 @cz-ink: #15181C;
 @cz-muted: #6B7280;
 @cz-soft: #A7AEB8;
 @cz-line: #E5E7EB;
 @cz-canvas: #F4F5F7;
-@cz-font: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-@cz-display: 'Arial Narrow', 'Roboto Condensed', 'Segoe UI', Arial, sans-serif;
+@cz-font: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+@cz-display: 'Saira', 'Inter', 'Segoe UI', Arial, sans-serif;
 
-body { font-family: @cz-font; color: @cz-ink; background: #fff; }
-h1, h2, h3, .page-title {
+body {
+    font-family: @cz-font;
+    font-size: 15px;
+    line-height: 1.6;
+    color: @cz-ink;
+    background: #fff;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4, .page-title {
     font-family: @cz-display;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    line-height: 1.15;
     color: @cz-ink;
 }
-a, .alink { color: @cz-red; }
-a:hover, .alink:hover { color: @cz-red-dark; }
+.page-title-wrapper .page-title { font-size: 34px; }
+a, .alink { color: @cz-blue-dark; }
+a:hover, .alink:hover { color: @cz-blue; }
 .cz-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 // ---------- Offer bar ----------
@@ -34,27 +45,37 @@ a:hover, .alink:hover { color: @cz-red-dark; }
     background: @cz-black;
     color: #fff;
     text-align: center;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 10px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: 9px 16px;
+    border-bottom: 1px solid @cz-line-dark;
 }
 
 // ---------- Header ----------
 .page-header {
+    position: relative;
     background: @cz-dark;
-    border-bottom: 3px solid @cz-red;
+    border-bottom: 0;
     margin-bottom: 0;
+    &:after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: linear-gradient(90deg, @cz-blue 0%, @cz-blue 45%, @cz-red 55%, @cz-red 100%);
+    }
     .panel.wrapper { background: @cz-black; border-bottom: 1px solid @cz-line-dark; }
     .panel.header {
         .header.links > li, .header.links > li > a, .greet.welcome { color: @cz-soft; font-size: 12px; }
         .header.links > li > a:hover { color: #fff; }
     }
-    .header.content { padding-top: 18px; padding-bottom: 16px; }
+    .header.content { padding-top: 12px; padding-bottom: 12px; }
 }
-.logo { margin: 0 0 4px 0; }
-.logo img { width: 200px; height: 48px; }
+.logo { margin: 0; }
+.logo img { width: 120px; height: 103px; }
 .block-search {
     .input-text {
         background: @cz-panel;
@@ -79,16 +100,17 @@ a:hover, .alink:hover { color: @cz-red-dark; }
 .navigation {
     background: @cz-dark;
     font-family: @cz-display;
-    font-weight: 800;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
+    font-size: 14px;
     .level0 > .level-top {
         color: #fff;
-        &:hover, &.ui-state-focus { color: @cz-red; }
+        &:hover, &.ui-state-focus { color: @cz-blue; }
     }
-    .level0.active > .level-top, .level0.has-active > .level-top { border-color: @cz-red; color: @cz-red; }
+    .level0.active > .level-top, .level0.has-active > .level-top { border-color: @cz-blue; color: @cz-blue; }
     .level0 .submenu { background: @cz-panel; border-color: @cz-line-dark; }
-    .level0 .submenu a { color: #fff; &:hover { background: @cz-dark; color: @cz-red; } }
+    .level0 .submenu a { color: #fff; &:hover { background: @cz-dark; color: @cz-blue; } }
 }
 
 // ---------- Vehicle finder ----------
@@ -108,10 +130,10 @@ a:hover, .alink:hover { color: @cz-red-dark; }
         color: #fff;
         display: flex;
         flex-direction: column;
-        border-left: 4px solid @cz-red;
-        padding-left: 12px;
-        .cz-finder-kicker { color: @cz-soft; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
-        strong { font-family: @cz-display; font-size: 20px; text-transform: uppercase; letter-spacing: 0.04em; }
+        border-left: 3px solid @cz-blue;
+        padding-left: 14px;
+        .cz-finder-kicker { color: @cz-blue; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; }
+        strong { font-family: @cz-display; font-size: 20px; font-weight: 600; letter-spacing: 0.01em; }
     }
     .cz-finder-form {
         flex: 1 1 520px;
@@ -124,7 +146,11 @@ a:hover, .alink:hover { color: @cz-red-dark; }
             border-radius: 4px;
             border: 1px solid @cz-line-dark;
             background-color: #fff;
-            font-weight: 600;
+            font-family: @cz-font;
+            font-size: 15px;
+            font-weight: 500;
+            padding: 0 14px;
+            color: @cz-ink;
             &:disabled { opacity: 0.55; }
         }
         .cz-finder-go { flex: 0 0 auto; height: 46px; padding: 0 28px; }
@@ -137,9 +163,10 @@ a:hover, .alink:hover { color: @cz-red-dark; }
     border: 1px solid @cz-red;
     border-radius: 4px;
     color: #fff;
-    font-weight: 800;
+    font-family: @cz-display;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     &:hover, &:focus, &:active { background: @cz-red-dark; border-color: @cz-red-dark; color: #fff; }
 }
 .action.secondary, button.action.secondary { border-radius: 4px; }
@@ -147,10 +174,11 @@ a:hover, .alink:hover { color: @cz-red-dark; }
     display: inline-block;
     background: @cz-red;
     color: #fff;
-    font-weight: 800;
+    font-family: @cz-display;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 14px 28px;
+    letter-spacing: 0.1em;
+    padding: 14px 30px;
     border-radius: 4px;
     text-decoration: none;
     &:hover, &:visited:hover { background: @cz-red-dark; color: #fff; text-decoration: none; }
@@ -158,11 +186,11 @@ a:hover, .alink:hover { color: @cz-red-dark; }
 }
 .cz-kicker {
     display: inline-block;
-    color: @cz-red;
-    font-size: 13px;
-    font-weight: 800;
+    color: @cz-blue;
+    font-size: 12px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.16em;
     margin-bottom: 6px;
 }
 
@@ -257,7 +285,7 @@ a:hover, .alink:hover { color: @cz-red-dark; }
         max-width: 560px;
         padding: 90px 56px;
         color: #fff;
-        h2 { color: #fff; font-size: 52px; line-height: 1.02; margin: 0 0 14px; }
+        h2 { color: #fff; font-size: 54px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.01em; line-height: 1.02; margin: 0 0 16px; }
         p { color: #D1D5DB; font-size: 17px; margin: 0 0 26px; }
     }
     .cz-dots {
@@ -312,9 +340,9 @@ a:hover, .alink:hover { color: @cz-red-dark; }
         right: 22px;
         bottom: 20px;
         color: #fff;
-        strong { display: block; font-family: @cz-display; font-size: 24px; text-transform: uppercase; }
+        strong { display: block; font-family: @cz-display; font-size: 24px; font-weight: 700; }
         span { display: block; color: #D1D5DB; font-size: 14px; }
-        em { display: inline-block; margin-top: 8px; font-style: normal; font-weight: 800; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff; border-bottom: 2px solid @cz-red; }
+        em { display: inline-block; margin-top: 8px; font-style: normal; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #fff; border-bottom: 2px solid @cz-blue; }
     }
     &:hover { text-decoration: none; }
 }
@@ -322,8 +350,8 @@ a:hover, .alink:hover { color: @cz-red-dark; }
 .cz-section-head {
     text-align: center;
     margin: 0 0 22px;
-    h2 { font-size: 32px; margin: 0; }
-    h2:after { content: ''; display: block; width: 56px; height: 3px; background: @cz-red; margin: 12px auto 0; }
+    h2 { font-size: 34px; margin: 0; }
+    h2:after { content: ''; display: block; width: 64px; height: 3px; background: linear-gradient(90deg, @cz-blue 50%, @cz-red 50%); margin: 14px auto 0; }
 }
 
 .cz-cta {
@@ -333,7 +361,7 @@ a:hover, .alink:hover { color: @cz-red-dark; }
     justify-content: space-between;
     gap: 20px;
     background: @cz-dark;
-    border-left: 6px solid @cz-red;
+    border-left: 4px solid @cz-blue;
     border-radius: 6px;
     padding: 34px 40px;
     margin: 44px 0 28px;
@@ -353,9 +381,9 @@ a:hover, .alink:hover { color: @cz-red-dark; }
         margin: 0;
         padding: 18px 18px 18px 20px;
         background: @cz-canvas;
-        border-top: 3px solid @cz-red;
+        border-top: 3px solid @cz-blue;
         border-radius: 4px;
-        strong { display: block; font-family: @cz-display; text-transform: uppercase; font-size: 16px; letter-spacing: 0.04em; color: @cz-ink; }
+        strong { display: block; font-family: @cz-display; font-size: 17px; font-weight: 600; color: @cz-ink; }
         span { color: @cz-muted; font-size: 13px; }
     }
 }
@@ -363,7 +391,8 @@ a:hover, .alink:hover { color: @cz-red-dark; }
 // ---------- Footer ----------
 .page-wrapper .page-footer,
 .page-footer .footer.content { background: @cz-black; color: @cz-soft; }
-.page-footer { margin-top: 40px; border-top: 3px solid @cz-red; }
+.page-footer { margin-top: 40px; border-top: 0; position: relative; }
+.page-footer:before { content: ''; display: block; height: 3px; background: linear-gradient(90deg, @cz-blue 0%, @cz-blue 45%, @cz-red 55%, @cz-red 100%); }
 .footer.content {
     border-top: 0;
     padding-top: 36px;
@@ -377,8 +406,8 @@ a:hover, .alink:hover { color: @cz-red-dark; }
     gap: 28px;
     margin-bottom: 24px;
     > div { flex: 1 1 220px; }
-    h4 { color: #fff; font-family: @cz-display; text-transform: uppercase; letter-spacing: 0.08em; font-size: 16px; margin: 0 0 10px; }
-    h4:after { content: ''; display: block; width: 32px; height: 2px; background: @cz-red; margin-top: 8px; }
+    h4 { color: #fff; font-family: @cz-display; font-weight: 600; letter-spacing: 0.04em; font-size: 17px; margin: 0 0 10px; }
+    h4:after { content: ''; display: block; width: 32px; height: 2px; background: @cz-blue; margin-top: 8px; }
     p, li { color: @cz-soft; font-size: 13px; margin: 0 0 5px; }
     ul { list-style: none; padding: 0; margin: 0; }
 }
@@ -390,14 +419,18 @@ a:hover, .alink:hover { color: @cz-red-dark; }
     .cz-slider .cz-slide-content { padding: 48px 22px; h2 { font-size: 34px; } }
     .cz-slider .cz-dots { left: 22px; }
     .cz-promos, .cz-benefits { grid-template-columns: 1fr; }
+    .cz-finder .cz-finder-form { flex-basis: 100%; }
+    .cz-finder .cz-finder-form select { flex: 1 1 100%; }
+    .cz-finder .cz-finder-form .cz-finder-go { flex: 1 1 100%; }
+    .cz-slider .cz-slide-content h2 { font-size: 32px; overflow-wrap: anywhere; }
     .cz-cta { padding: 26px 22px; }
     .nav-sections, .nav-sections-item-content, .navigation { background: @cz-dark; }
-    .logo img { width: 160px; height: 38px; }
+    .logo img { width: 70px; height: 60px; }
 }
 
 // ---------- Desktop (Luma sets these again in its desktop styles) ----------
 .media-width(@extremum, @break) when (@extremum = 'min') and (@break = @screen__m) {
-    .page-header { background: @cz-dark; border-bottom: 3px solid @cz-red; }
+    .page-header { background: @cz-dark; border-bottom: 0; }
     .page-header .panel.wrapper { background-color: @cz-black; }
     .nav-sections, .navigation { background: @cz-dark; }
     .navigation .level0 > .level-top { color: #fff; }

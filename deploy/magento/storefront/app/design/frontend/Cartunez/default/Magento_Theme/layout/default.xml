@@ -3,12 +3,12 @@
     <body>
         <referenceBlock name="logo">
             <arguments>
-                <argument name="logo_file" xsi:type="string">images/logo.svg</argument>
-                <argument name="logo_width" xsi:type="number">200</argument>
-                <argument name="logo_height" xsi:type="number">48</argument>
-                <argument name="logo_img_width" xsi:type="number">200</argument>
-                <argument name="logo_img_height" xsi:type="number">48</argument>
-                <argument name="logo_alt" xsi:type="string">Cartunez</argument>
+                <argument name="logo_file" xsi:type="string">images/logo-dark.png</argument>
+                <argument name="logo_width" xsi:type="number">120</argument>
+                <argument name="logo_height" xsi:type="number">103</argument>
+                <argument name="logo_img_width" xsi:type="number">120</argument>
+                <argument name="logo_img_height" xsi:type="number">103</argument>
+                <argument name="logo_alt" xsi:type="string">Car Tunez</argument>
             </arguments>
         </referenceBlock>
 

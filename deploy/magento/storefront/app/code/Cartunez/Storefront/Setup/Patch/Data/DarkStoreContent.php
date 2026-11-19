@@ -42,7 +42,7 @@ class DarkStoreContent implements DataPatchInterface
         if (!$page->getId()) {
             $page->setIdentifier('home')->setStores([0])->setIsActive(1);
         }
-        $page->setTitle('Cartunez | Genuine auto parts')
+        $page->setTitle('Car Tunez | Genuine auto parts')
             ->setContentHeading('')
             ->setPageLayout('1column')
             ->setContent($this->home());
@@ -144,7 +144,7 @@ HTML;
         return <<<HTML
 <div class="cz-footer">
   <div>
-    <h4>Cartunez</h4>
+    <h4>Car Tunez</h4>
     <p>Genuine auto parts and accessories.</p>
     <p>Shop address, city, PIN</p>
     <p>GSTIN: add your GSTIN here</p>

@@ -37,10 +37,10 @@ echo "Cartunez theme id: $theme_id"
 mage config:set design/theme/theme_id "$theme_id" >/dev/null
 mage config:set --scope=websites --scope-code=base design/theme/theme_id "$theme_id" >/dev/null
 mage config:set --scope=stores --scope-code=default design/theme/theme_id "$theme_id" >/dev/null
-mage config:set design/header/welcome 'Genuine auto parts · GST invoice on every order' >/dev/null
-mage config:set design/head/default_title 'Cartunez' >/dev/null
-mage config:set design/head/title_suffix ' | Cartunez' >/dev/null
-mage config:set design/footer/copyright '© Cartunez. All prices include GST.' >/dev/null
+mage config:set design/header/welcome 'Get your car rolling in style' >/dev/null
+mage config:set design/head/default_title 'Car Tunez' >/dev/null
+mage config:set design/head/title_suffix ' | Car Tunez' >/dev/null
+mage config:set design/footer/copyright '© Car Tunez. All prices include GST.' >/dev/null
 
 echo '== Rebuilding code and theme files (5-10 minutes)'
 mage setup:di:compile
