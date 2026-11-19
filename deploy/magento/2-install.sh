@@ -11,6 +11,8 @@ VERSION="${MAGENTO_VERSION:-2.4.8}"
 cd "$ROOT"
 dc() { docker compose -p cartunezshop "$@"; }
 inphp() { dc exec -T php "$@"; }
+# Magento commands get a generous memory limit whatever the PHP defaults are.
+mage() { inphp php -d memory_limit=4G bin/magento "$@"; }
 
 [[ -s "$CONF/composer-auth.json" ]] || die 'Run 1-prepare.sh first.'
 
@@ -22,14 +24,25 @@ if ! inphp test -f bin/magento; then
       --repository-url=https://repo.magento.com/ "magento/project-community-edition=$VERSION" /var/www/magento
 fi
 
-if ! inphp test -f app/etc/env.php; then
+echo "== PHP settings: memory_limit $(inphp php -r 'echo ini_get("memory_limit");') (Magento commands run with 4G)"
+inphp php --ini | sed 's/^/   /'
+
+# Installed = settings file present and the database complete. A half-finished
+# install (for example one that ran out of memory) is redone from a clean database.
+installed=0
+if inphp test -f app/etc/env.php && mage setup:db:status >/dev/null 2>&1; then installed=1; fi
+if [[ $installed -eq 0 ]]; then
   echo '== Installing Magento'
+  if inphp test -f app/etc/env.php; then
+    echo 'A previous install did not finish; starting again with a clean database.'
+    inphp rm -f app/etc/env.php
+  fi
   read -r -p 'Admin email address: ' admin_email
   [[ "$admin_email" == *@*.* ]] || die 'Enter a valid email address.'
   admin_user="cartunez-$(openssl rand -hex 3)"
   admin_pass="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)A1!"
   admin_path="admin_$(openssl rand -hex 4)"
-  inphp php bin/magento setup:install \
+  mage setup:install --cleanup-database \
     --base-url=https://shop.cartunez.in/ --base-url-secure=https://shop.cartunez.in/ \
     --use-secure=1 --use-secure-admin=1 --use-rewrites=1 \
     --db-host=db --db-name=magento --db-user=magento --db-password="$(cat "$CONF/db_password")" \
@@ -60,17 +73,24 @@ for setting in \
   'web/seo/use_rewrites 1' \
   'cataloginventory/options/show_out_of_stock 1' ; do
   # shellcheck disable=SC2086
-  inphp php bin/magento config:set $setting >/dev/null
+  mage config:set $setting >/dev/null
 done
 
 # Admin two-factor sign-in needs outgoing email, which is not set up on staging.
 # Turn it back on (Google Authenticator) before going live.
-inphp php bin/magento module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth >/dev/null 2>&1 || true
+mage module:disable Magento_AdminAdobeImsTwoFactorAuth Magento_TwoFactorAuth >/dev/null 2>&1 || true
 
 echo '== Production mode (compiles code and static files; 5-15 minutes)'
-inphp php bin/magento deploy:mode:set production --no-interaction
-inphp php bin/magento indexer:set-mode schedule >/dev/null
-inphp php bin/magento cache:flush >/dev/null
+# Run the steps one by one (each with the memory limit) instead of letting
+# deploy:mode:set start its own PHP processes.
+mage maintenance:enable >/dev/null
+mage setup:upgrade --keep-generated >/dev/null
+mage setup:di:compile
+mage setup:static-content:deploy -f en_US en_IN --jobs 1
+mage deploy:mode:set production --skip-compilation --no-interaction
+mage maintenance:disable >/dev/null
+mage indexer:set-mode schedule >/dev/null
+mage cache:flush >/dev/null
 
 echo '== Starting cron and the web container on 127.0.0.1:18600'
 dc up -d cron web

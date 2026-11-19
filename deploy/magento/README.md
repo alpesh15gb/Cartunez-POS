@@ -11,8 +11,8 @@ An isolated Docker project (`cartunezshop`) on the shared VPS, next to the POS. 
 | Host Nginx | one new site `/etc/nginx/sites-available/cartunez-shop.conf` (+ link in `sites-enabled`) |
 | Certificate | Let's Encrypt for `shop.cartunez.in` only, webroot `/var/www/cartunez-shop-acme` |
 
-Memory is capped at about 5 GB in total (database 1 GB, search 1.2 GB, PHP 1.5 GB, cron 768 MB,
-cache and web the rest); in normal use it sits around 2.5-3 GB. Nothing else on the server is
+Memory is capped at about 6.5 GB in total (database 1 GB, search 1.2 GB, PHP 3 GB for compiling,
+cron 768 MB, cache and web the rest); in normal use it sits around 2.5-3 GB. Nothing else on the server is
 stopped, restarted, pruned or edited. Every Nginx change is tested with `nginx -t` and undone if the
 test fails.
 

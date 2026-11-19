@@ -59,13 +59,14 @@ services:
     restart: unless-stopped
     volumes: [code:/var/www/magento]
     networks: [internal]
-    mem_limit: 1500m
+    # Compiling Magento (setup:di:compile) needs 2-3 GB; normal use is far lower.
+    mem_limit: 3g
     logging: *logs
 
   cron:
     image: cartunezshop-php:8.3
     restart: unless-stopped
-    command: ["sh", "-c", "while true; do [ -f app/etc/env.php ] && php bin/magento cron:run >/dev/null 2>&1; sleep 60; done"]
+    command: ["sh", "-c", "while true; do [ -f app/etc/env.php ] && php -d memory_limit=2G bin/magento cron:run >/dev/null 2>&1; sleep 60; done"]
     volumes: [code:/var/www/magento]
     depends_on: [php]
     networks: [internal]
