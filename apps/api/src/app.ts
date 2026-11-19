@@ -38,6 +38,7 @@ import {
   invoiceProfile,
   gstProfile,
   documentNumber,
+  labelLayout,
 } from "./settings.js";
 
 const roles = ["owner", "manager", "cashier", "inventory"];
@@ -566,6 +567,9 @@ export async function createApp(db: Database) {
         features[key] = value;
       }
       settings.features = features;
+    }
+    if (body.labelLayout !== undefined) {
+      settings.labelLayout = labelLayout(body.labelLayout);
     }
     if (body.taxRates !== undefined) {
       if (

@@ -31,6 +31,9 @@ class AppState extends ChangeNotifier {
   Json cart = emptyCart();
   String? lastSync;
   String? sessionProblem;
+
+  /// This device's label printer (kept on the device, not the server).
+  Json labelPrinter = {};
   Timer? _timer;
   Timer? _cartTimer;
 
@@ -39,6 +42,12 @@ class AppState extends ChangeNotifier {
   void toast(String text) => messages.add(text);
 
   // ---------- lifecycle ----------
+  Future<void> saveLabelPrinter(Json value) async {
+    labelPrinter = value;
+    await _store.write('label-printer', value);
+    notifyListeners();
+  }
+
   /// On the web the app is served by the shop server itself, so it signs in to
   /// that same server. installation.json (written by the VPS release) adds the
   /// organization and branch codes.
@@ -66,6 +75,8 @@ class AppState extends ChangeNotifier {
     } else if (kIsWeb) {
       connection = await _installationDefaults();
     }
+    final printer = await _store.read('label-printer');
+    if (printer is Map) labelPrinter = Map<String, dynamic>.from(printer);
     session = Session.fromJson(await _store.read('session'));
     if (session != null) {
       final workspace = await _store.read(session!.scope);

@@ -848,3 +848,39 @@ test("a sale without a vehicle needs no fitment override, a mismatched vehicle s
     await db.close();
   }
 });
+
+test("the owner saves one label design for the shop; others cannot change it", async () => {
+  const db = await connectDatabase({ memory: true });
+  await migrate(db);
+  await seed(db);
+  const app = await createApp(db);
+  try {
+    const call = async (path: string, body: any, token?: string, status = 200) => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/" + path,
+        payload: body,
+        headers: token ? { authorization: "Bearer " + token } : {},
+      });
+      assert.equal(response.statusCode, status, `${path}: ${response.body}`);
+      return response.json();
+    };
+    const login = async (email: string) =>
+      (await call("auth/login", { email, password: "MotorlineDemo123!" })).token;
+    const owner = await login("owner@motorline.local");
+    const design = { widthMm: 38, heightMm: 25, columns: 2, brand: true, price: "mrp", extra: "Ph 98765" };
+    const saved = await call("settings", { labelLayout: design }, owner);
+    assert.deepEqual(saved.labelLayout, {
+      widthMm: 38, heightMm: 25, columns: 2, gapMm: 2, shopName: false, name: true, brand: true,
+      partNumber: false, sku: true, bin: false, digits: true, price: "mrp", nameSize: "medium",
+      priceSize: "medium", extra: "Ph 98765",
+    });
+    await call("settings", { labelLayout: { columns: 5 } }, owner, 400);
+    await call("settings", { labelLayout: { price: "free" } }, owner, 400);
+    await call("settings", { labelLayout: { logo: true } }, owner, 400);
+    await call("settings", { labelLayout: design }, await login("manager@motorline.local"), 403);
+  } finally {
+    await app.close();
+    await db.close();
+  }
+});

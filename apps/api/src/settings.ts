@@ -138,3 +138,52 @@ export function taxTotals(lines: { taxComponents?: TaxComponent[] }[]) {
       );
   return [...totals].map(([name, amount]) => ({ name, amount }));
 }
+
+/** Shop barcode label design (what prints on each label). */
+export function labelLayout(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    fail("Choose what to print on the label.");
+  const input = value as Record<string, unknown>;
+  const allowed = new Set([
+    "widthMm", "heightMm", "columns", "gapMm", "shopName", "name", "brand",
+    "partNumber", "sku", "bin", "digits", "price", "nameSize", "priceSize", "extra",
+  ]);
+  for (const key of Object.keys(input))
+    if (!allowed.has(key)) fail(`Unknown label setting ${key}.`);
+  const number = (key: string, min: number, max: number, fallback: number) => {
+    const raw = input[key] ?? fallback;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < min || raw > max)
+      fail(`Label ${key} must be between ${min} and ${max}.`);
+    return Math.round((raw as number) * 10) / 10;
+  };
+  const flag = (key: string, fallback: boolean) => {
+    const raw = input[key] ?? fallback;
+    if (typeof raw !== "boolean") fail(`Label ${key} must be on or off.`);
+    return raw as boolean;
+  };
+  const choice = (key: string, options: string[], fallback: string) => {
+    const raw = input[key] ?? fallback;
+    if (typeof raw !== "string" || !options.includes(raw))
+      fail(`Label ${key} must be one of ${options.join(", ")}.`);
+    return raw as string;
+  };
+  const columns = number("columns", 1, 3, 1);
+  if (!Number.isInteger(columns)) fail("Labels across the roll must be 1, 2 or 3.");
+  return {
+    widthMm: number("widthMm", 20, 110, 50),
+    heightMm: number("heightMm", 10, 150, 25),
+    columns,
+    gapMm: number("gapMm", 0, 10, 2),
+    shopName: flag("shopName", false),
+    name: flag("name", true),
+    brand: flag("brand", false),
+    partNumber: flag("partNumber", false),
+    sku: flag("sku", true),
+    bin: flag("bin", false),
+    digits: flag("digits", true),
+    price: choice("price", ["price", "mrp", "both", "none"], "price"),
+    nameSize: choice("nameSize", ["small", "medium", "large"], "medium"),
+    priceSize: choice("priceSize", ["small", "medium", "large"], "medium"),
+    extra: text(input.extra ?? "", "label extra text", false, 60),
+  };
+}

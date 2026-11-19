@@ -5,6 +5,7 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'labels.dart';
 
 const _featureLabels = {
   'fitment': 'Vehicle fitment',
@@ -55,6 +56,16 @@ class SettingsScreen extends StatelessWidget {
             icon: const Icon(Icons.logout, size: 18),
             label: const Text('Sign out'),
           ),
+        ]),
+      ]),
+      _Card(title: 'Barcode labels', children: [
+        Text(labelPrinterSummary(app), style: const TextStyle(fontWeight: FontWeight.w700)),
+        Text('Shows ${labelDesignSummary(app)}.', style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton(onPressed: () => editLabelDesign(context), child: Text(app.isOwner ? 'Design label' : 'View design')),
+          OutlinedButton(onPressed: () => editLabelPrinter(context), child: const Text('Printer')),
+          OutlinedButton.icon(onPressed: () => printTestLabel(context), icon: const Icon(Icons.qr_code_2, size: 18), label: const Text('Print test label')),
         ]),
       ]),
     ];

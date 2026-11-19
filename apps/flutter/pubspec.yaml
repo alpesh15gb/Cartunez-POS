@@ -43,6 +43,7 @@ dependencies:
   intl: ^0.20.3
   barcode: ^2.2.9
   web: ^1.1.2
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

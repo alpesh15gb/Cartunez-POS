@@ -1,5 +1,4 @@
 
-import 'package:barcode/barcode.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -11,6 +10,8 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
+
+export 'labels.dart';
 
 /// Facts shown on a receipt or credit note, taken from the issued document so
 /// later setting changes never alter a reprint.
@@ -182,62 +183,3 @@ Future<void> printReceipt(AppState app, Json doc) async {
   await Printing.layoutPdf(name: '${doc['number'] ?? 'receipt'}', onLayout: (_) => pdf.save());
 }
 
-class LabelItem {
-  const LabelItem(this.name, this.code, {this.sku, this.price});
-  final String name;
-  final String code;
-  final String? sku;
-  final int? price;
-}
-
-Barcode _symbology(String code) => switch (barcodeFormat(code)) {
-      'EAN13' => Barcode.ean13(),
-      'UPC' => Barcode.upcA(),
-      'EAN8' => Barcode.ean8(),
-      _ => Barcode.code128(),
-    };
-
-/// One 50 × 30 mm label per page, the usual size for thermal label printers.
-Future<void> printLabels(BuildContext context, List<LabelItem> items) async {
-  final app = context.appRead;
-  if (items.isEmpty) return app.toast('Nothing to print.');
-  for (final item in items) {
-    if (!_symbology(item.code).isValid(item.code)) {
-      return app.toast('The barcode on ${item.name} cannot be printed. Use a printable barcode or SKU.');
-    }
-  }
-  final copies = await showFormDialog<int>(
-    context,
-    title: items.length == 1 ? 'Label · ${items.first.name}' : '${items.length} labels',
-    submit: 'Print labels',
-    fields: const [FieldSpec('copies', 'Copies of each label', kind: FieldKind.number, value: 1, required: true)],
-    onSubmit: (v) async {
-      final n = int.tryParse('${v['copies']}') ?? 0;
-      if (n < 1 || n > 100) throw FormProblem('Print between 1 and 100 copies.');
-      return n;
-    },
-  );
-  if (copies == null) return;
-  final pdf = pw.Document(theme: await pdfTheme());
-  const format = PdfPageFormat(50 * PdfPageFormat.mm, 30 * PdfPageFormat.mm, marginAll: 2 * PdfPageFormat.mm);
-  for (final item in items) {
-    for (var i = 0; i < copies; i++) {
-      pdf.addPage(pw.Page(
-        pageFormat: format,
-        build: (_) => pw.Column(children: [
-          pw.Text(item.name, maxLines: 1, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 1),
-          pw.Expanded(child: pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(horizontal: 2 * PdfPageFormat.mm),
-            child: pw.BarcodeWidget(barcode: _symbology(item.code), data: item.code, textStyle: const pw.TextStyle(fontSize: 6)),
-          )),
-          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-            pw.Text(item.sku ?? '', style: const pw.TextStyle(fontSize: 5.5)),
-            if (item.price != null) pw.Text(app.money(item.price), style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
-          ]),
-        ]),
-      ));
-    }
-  }
-  await Printing.layoutPdf(name: 'labels', onLayout: (_) => pdf.save());
-}

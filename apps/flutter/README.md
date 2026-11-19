@@ -30,6 +30,33 @@ Not in the app yet: enrolled offline counters with their own invoice ranges, and
   recorded invoices, change and refunds. Compare Card and UPI with the provider statement separately.
   CSV amounts are integer minor units, such as paise for INR.
 
+## Label design
+
+Settings › Barcode labels › **Design label** (owner only) sets one design for the whole shop, saved on
+the server so every counter prints the same label: label size (presets or a custom width × height),
+1-3 labels across the roll and the gap between them, which lines print (shop name, part name, brand,
+part number, SKU, bin location, digits under the barcode), price (selling price, MRP including tax,
+both, or none), part name and price text size, and an optional extra line. A live preview uses a real
+part from the catalog and warns when the barcode would be too short to scan. `lib/core/label_layout.dart`
+places everything in millimetres; the Zebra (ZPL), PDF and preview renderers all draw from that plan.
+
+## Zebra label printers
+
+Settings › Barcode labels › **Printer** (saved per device) chooses where barcode labels go:
+
+- **Zebra on this PC (USB), Windows app:** labels are sent as ZPL straight to the installed Zebra driver
+  ("ZDesigner …"), with no print dialog. Install Zebra's Windows driver first. On the first label print
+  the app picks a Zebra driver automatically if one is installed.
+- **Zebra on the network, Windows and Android apps:** ZPL is sent to the printer's IP on port 9100.
+- **Print dialog:** a PDF sized to the label, for any printer. This is the only option in the browser,
+  because browsers cannot send raw data to a printer.
+
+Labels print at 203 or 300 dpi. The printer draws the
+barcode itself (EAN-13, UPC-A, EAN-8, or Code 128 for SKUs and in-store codes), so bars align to the
+print head and scan reliably. Prices print as "Rs." because Zebra's built-in fonts have no ₹ sign. Use
+**Print test label** after setup to check size and darkness. `lib/core/zpl.dart` builds the labels;
+`visual/labels_test.dart` drives the setup against a fake network Zebra.
+
 ## Build
 
 Requirements: Flutter 3.50+, Visual Studio 2022 C++ build tools (Windows), Android SDK 36 with NDK

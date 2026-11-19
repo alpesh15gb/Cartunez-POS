@@ -32,7 +32,7 @@ class PartsScreen extends StatelessWidget {
               OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
               OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'count'), child: const Text('Stock count')),
               OutlinedButton.icon(
-                onPressed: rows.isEmpty ? null : () => printLabels(context, [for (final p in rows) _label(p)]),
+                onPressed: rows.isEmpty ? null : () => printLabels(context, [for (final p in rows) productLabel(context.appRead, p)]),
                 icon: const Icon(Icons.qr_code_2, size: 18),
                 label: Text(q.isEmpty ? 'Print all labels' : 'Print ${rows.length} labels'),
               ),
@@ -64,7 +64,7 @@ class PartsScreen extends StatelessWidget {
             actionWidth: 52,
             actions: app.canStock
                 ? (p) => [
-                      IconButton(tooltip: 'Print label', onPressed: () => printLabels(context, [_label(p)]), icon: const Icon(Icons.qr_code_2)),
+                      IconButton(tooltip: 'Print label', onPressed: () => printLabels(context, [productLabel(context.appRead, p)]), icon: const Icon(Icons.qr_code_2)),
                     ]
                 : null,
           ),
@@ -73,8 +73,6 @@ class PartsScreen extends StatelessWidget {
     );
   }
 
-  LabelItem _label(Json p) => LabelItem('${p['name']}', '${(p['barcodes'] as List? ?? []).firstOrNull ?? p['sku']}',
-      sku: '${p['sku']}', price: p['type'] == 'service' ? null : p['retailPrice'] as int?);
 }
 
 Future<void> editProduct(BuildContext context, Json product) async {
