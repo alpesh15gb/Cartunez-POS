@@ -86,7 +86,7 @@ echo '== Production mode (compiles code and static files; 5-15 minutes)'
 mage maintenance:enable >/dev/null
 mage setup:upgrade --keep-generated >/dev/null
 mage setup:di:compile
-mage setup:static-content:deploy -f en_US en_IN --jobs 1
+mage setup:static-content:deploy -f en_US --jobs 1
 mage deploy:mode:set production --skip-compilation --no-interaction
 mage maintenance:disable >/dev/null
 mage indexer:set-mode schedule >/dev/null
