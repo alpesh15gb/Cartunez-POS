@@ -37,10 +37,15 @@ git clone https://github.com/alpesh15gb/Cartunez-POS.git /opt/cartunez-shop-sour
    own token).
 
 4. `bash /opt/cartunez-shop-source/deploy/magento/4-theme.sh` installs the **Cartunez theme**
-   (`storefront/app/design/frontend/Cartunez/default`: logo, colours, MRP struck through next to the
-   selling price, product cards, footer) and the **Cartunez_Storefront** module, which writes the home
-   page and the `cartunez-footer` block once. Both stay editable in the admin (Content › Pages ›
-   Home Page, Content › Blocks). Run it again after changing the theme; about 10 minutes.
+   (dark with red accents, `storefront/app/design/frontend/Cartunez/default`) and the
+   **Cartunez_Storefront** module: offer bar, hero slider, promo tiles, featured parts with "-X%"
+   badges, help panel, benefits, footer, and the **Make / Model / Year finder**. The finder lists the
+   vehicles from the fitment the POS sends with each published part (product attribute `cz_fitment`);
+   it stays hidden until at least one published part has fitment. Edit the content in the admin:
+   Content › Pages › Home Page and Content › Blocks (`cartunez-hero`, `cartunez-announcement`,
+   `cartunez-footer`). The hero and promo photos are free Unsplash images (unsplash.com/license),
+   loaded from Unsplash until you replace them with your own. Run the script again after changing
+   the theme; about 10 minutes.
 
 Each script stops with a clear message if something is not as expected, and can be run again.
 

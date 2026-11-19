@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { connectDatabase, migrate, getRecord, putRecord } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
-import { runMagentoSync, magentoRequest, MagentoError } from "../src/magento.js";
+import { runMagentoSync, magentoRequest, MagentoError, fitmentText } from "../src/magento.js";
 import { createServer } from "node:http";
 
 /** A stand-in for Magento's REST API that records every request. */
@@ -107,6 +107,12 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     assert.equal(product.status, 1);
     assert.equal(product.extension_attributes.stock_item.qty, 23); // 24 in Pune - 1 buffer
     assert.equal(product.extension_attributes.stock_item.is_in_stock, true);
+    // Vehicle fitment for the shop's finder: one line per rule and a search word per year.
+    const fit = product.custom_attributes.find((a: any) => a.attribute_code === "cz_fitment").value;
+    assert.match(fit, /^V:Maruti Suzuki\|Swift\|2018\|2025$/m);
+    assert.match(fit, /\bmarutisuzukiswift2018\b/);
+    assert.match(fit, /\bmarutisuzukiswift2025\b/);
+    assert.doesNotMatch(fit, /2017/);
     // The POS category ("Parts") was created under the root category and linked.
     const parts = [...magento.categories.values()].find((c) => c.name === "Parts");
     assert.equal(parts.parent_id, 2);
@@ -253,4 +259,21 @@ test("Magento: requests go over real HTTP with the token, and errors read clearl
   } finally {
     server.close();
   }
+});
+
+test("Magento: fitment text for the vehicle finder", () => {
+  const now = new Date("2026-06-01");
+  assert.equal(fitmentText({ universal: true }, now), "universal");
+  assert.equal(fitmentText({ fitments: [] }, now), "");
+  const text = fitmentText(
+    { fitments: [{ make: "Land Rover", model: "Range-Rover Evoque", yearFrom: 2024 }, { make: "Tata", model: "Nexon EV", yearFrom: 2023, yearTo: 2024 }] },
+    now,
+  );
+  assert.deepEqual(text.split("\n"), [
+    "V:Land Rover|Range-Rover Evoque|2024|2026",
+    "V:Tata|Nexon EV|2023|2024",
+    "landroverrangeroverevoque2024 landroverrangeroverevoque2025 landroverrangeroverevoque2026 tatanexonev2023 tatanexonev2024",
+  ]);
+  // Bad or reversed years are skipped rather than exploding into thousands of words.
+  assert.equal(fitmentText({ fitments: [{ make: "A", model: "B", yearFrom: 2030, yearTo: 2020 }] }, now), "");
 });

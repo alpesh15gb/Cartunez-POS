@@ -1,0 +1,70 @@
+<?php
+/** @var \Cartunez\Storefront\Block\VehicleFinder $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$vehicles = $block->getVehicles();
+if (!$vehicles) {
+    return; // No fitment published yet: no finder.
+}
+?>
+<div class="cz-finder">
+    <div class="cz-finder-inner">
+        <div class="cz-finder-title">
+            <span class="cz-finder-kicker"><?= $escaper->escapeHtml(__('Find parts that fit')) ?></span>
+            <strong><?= $escaper->escapeHtml(__('Search by make, model, year')) ?></strong>
+        </div>
+        <form class="cz-finder-form" action="<?= $escaper->escapeUrl($block->getUrl('catalogsearch/result')) ?>" method="get">
+            <label class="cz-visually-hidden" for="cz-make"><?= $escaper->escapeHtml(__('Make')) ?></label>
+            <select id="cz-make" required>
+                <option value=""><?= $escaper->escapeHtml(__('Select make')) ?></option>
+            </select>
+            <label class="cz-visually-hidden" for="cz-model"><?= $escaper->escapeHtml(__('Model')) ?></label>
+            <select id="cz-model" required disabled>
+                <option value=""><?= $escaper->escapeHtml(__('Select model')) ?></option>
+            </select>
+            <label class="cz-visually-hidden" for="cz-year"><?= $escaper->escapeHtml(__('Year')) ?></label>
+            <select id="cz-year" required disabled>
+                <option value=""><?= $escaper->escapeHtml(__('Select year')) ?></option>
+            </select>
+            <input type="hidden" name="q" value="">
+            <button type="submit" class="action primary cz-finder-go"><?= $escaper->escapeHtml(__('Find parts')) ?></button>
+        </form>
+    </div>
+    <script type="application/json" id="cz-vehicles"><?= /* @noEscape */ $block->getVehiclesJson() ?></script>
+    <script>
+    (function () {
+        var data = JSON.parse(document.getElementById('cz-vehicles').textContent || '{}');
+        var make = document.getElementById('cz-make');
+        var model = document.getElementById('cz-model');
+        var year = document.getElementById('cz-year');
+        var form = make.form;
+        function fill(select, values, placeholder) {
+            select.innerHTML = '';
+            var first = document.createElement('option');
+            first.value = '';
+            first.textContent = placeholder;
+            select.appendChild(first);
+            values.forEach(function (v) {
+                var o = document.createElement('option');
+                o.value = o.textContent = v;
+                select.appendChild(o);
+            });
+            select.disabled = values.length === 0;
+        }
+        // Same search word the POS writes: lowercase letters and digits only.
+        function word(v) { return String(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+        fill(make, Object.keys(data), make.options[0].textContent);
+        make.addEventListener('change', function () {
+            fill(model, make.value ? Object.keys(data[make.value]) : [], model.options[0].textContent);
+            fill(year, [], year.options[0].textContent);
+        });
+        model.addEventListener('change', function () {
+            fill(year, model.value ? data[make.value][model.value].map(String) : [], year.options[0].textContent);
+        });
+        form.addEventListener('submit', function (e) {
+            if (!make.value || !model.value || !year.value) { e.preventDefault(); return; }
+            form.q.value = word(make.value) + word(model.value) + year.value;
+            try { sessionStorage.setItem('cz-vehicle', make.value + ' ' + model.value + ' ' + year.value); } catch (x) {}
+        });
+    })();
+    </script>
+</div>

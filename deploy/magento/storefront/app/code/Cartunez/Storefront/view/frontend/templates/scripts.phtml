@@ -1,0 +1,77 @@
+<?php
+/** @var \Magento\Framework\View\Element\Template $block */
+// Small storefront behaviours, no libraries: hero slider, "-X%" badges on
+// discounted parts, and a readable heading for vehicle-finder results.
+?>
+<script>
+(function () {
+    // ---------- Hero slider ----------
+    function slider(root) {
+        var slides = root.querySelectorAll('.cz-slide');
+        if (slides.length < 2) { if (slides[0]) slides[0].classList.add('is-active'); return; }
+        var dots = document.createElement('div');
+        dots.className = 'cz-dots';
+        var index = 0, timer = null;
+        function show(i) {
+            index = (i + slides.length) % slides.length;
+            slides.forEach(function (s, n) { s.classList.toggle('is-active', n === index); });
+            dots.querySelectorAll('button').forEach(function (d, n) { d.classList.toggle('is-active', n === index); });
+        }
+        slides.forEach(function (_, n) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('aria-label', 'Slide ' + (n + 1));
+            b.addEventListener('click', function () { show(n); restart(); });
+            dots.appendChild(b);
+        });
+        root.appendChild(dots);
+        function restart() { clearInterval(timer); timer = setInterval(function () { show(index + 1); }, 6000); }
+        root.addEventListener('mouseenter', function () { clearInterval(timer); });
+        root.addEventListener('mouseleave', restart);
+        show(0);
+        restart();
+    }
+
+    // ---------- "-X%" badges ----------
+    function amount(el) {
+        return el ? parseFloat(String(el.textContent).replace(/[^0-9.]/g, '')) || 0 : 0;
+    }
+    function badges(scope) {
+        (scope || document).querySelectorAll('.price-box').forEach(function (box) {
+            if (box.dataset.czBadge) return;
+            var now = amount(box.querySelector('.special-price .price'));
+            var was = amount(box.querySelector('.old-price .price'));
+            if (!(now > 0 && was > now)) return;
+            box.dataset.czBadge = '1';
+            var off = Math.round((was - now) * 100 / was);
+            if (off < 1) return;
+            var holder = box.closest('.product-item-info') || document.querySelector('.product.media');
+            if (!holder || holder.querySelector('.cz-badge')) return;
+            var badge = document.createElement('span');
+            badge.className = 'cz-badge';
+            badge.textContent = '-' + off + '%';
+            holder.appendChild(badge);
+        });
+    }
+
+    // ---------- Vehicle finder results: a readable heading ----------
+    function vehicleHeading() {
+        if (!document.body.classList.contains('catalogsearch-result-index')) return;
+        var vehicle = null;
+        try { vehicle = sessionStorage.getItem('cz-vehicle'); } catch (x) {}
+        var q = new URLSearchParams(location.search).get('q') || '';
+        if (!vehicle || !/^[a-z0-9]+\d{4}$/.test(q)) return;
+        var title = document.querySelector('.page-title .base');
+        if (title) title.textContent = 'Parts for ' + vehicle;
+    }
+
+    function ready() {
+        document.querySelectorAll('.cz-slider').forEach(slider);
+        badges();
+        vehicleHeading();
+        // Product lists that load later (widgets, ajax) get badges too.
+        new MutationObserver(function () { badges(); }).observe(document.body, { childList: true, subtree: true });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready); else ready();
+})();
+</script>

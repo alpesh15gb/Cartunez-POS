@@ -22,6 +22,10 @@ prices and stock; Magento follows it.
   under the root category (2, "Default Category"; change under Connect Magento › More options) and
   the part is linked to it, so it appears in the shop's top menu. Categories are looked up once and
   remembered; one deleted in Magento's admin is created again on the next sync.
+- **Vehicle fitment:** the part's fitment rules go to the Magento attribute `cz_fitment`
+  ("V:Make|Model|from|to" lines plus one search word per year, e.g. `marutisuzukiswift2020`). The
+  shop's Make / Model / Year finder is built from these and searches for that word. Turn on
+  Settings › Modules › Vehicle fitment in the POS to enter fitment, then publish again.
 
 ## Online orders (phase 2)
 

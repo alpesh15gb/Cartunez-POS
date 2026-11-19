@@ -72,6 +72,31 @@ const slug = (value: string) =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 
+const token = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/**
+ * Vehicle fitment for the shop's Make/Model/Year finder (Magento attribute
+ * cz_fitment, added by the Cartunez_Storefront module). One line per rule,
+ * "V:Make|Model|from|to", plus one search word per year ("marutisuzukiswift2020")
+ * so a finder search matches exactly. Universal parts say "universal".
+ */
+export function fitmentText(product: any, now = new Date()) {
+  const lines: string[] = [];
+  if (product.universal) lines.push("universal");
+  const words = new Set<string>();
+  for (const rule of product.fitments || []) {
+    if (!rule?.make || !rule?.model) continue;
+    const thisYear = now.getFullYear();
+    const to = Math.min(Number(rule.yearTo || thisYear), thisYear + 1);
+    const from = Math.max(Number(rule.yearFrom || to), to - 60);
+    if (!(from <= to)) continue;
+    lines.push(`V:${String(rule.make).replace(/[|\n]/g, " ")}|${String(rule.model).replace(/[|\n]/g, " ")}|${from}|${to}`);
+    for (let year = from; year <= to; year++) words.add(`${token(rule.make)}${token(rule.model)}${year}`);
+  }
+  if (words.size) lines.push([...words].join(" "));
+  return lines.join("\n");
+}
+
 /** The product as Magento's REST API expects it (prices in rupees). */
 export function magentoProduct(
   product: any,
@@ -89,6 +114,7 @@ export function magentoProduct(
     // Special price equal to the price shows a single price (no strike-through).
     { attribute_code: "special_price", value: (prices.selling / 100).toFixed(2) },
     { attribute_code: "url_key", value: slug(`${product.name}-${product.sku}`) },
+    { attribute_code: "cz_fitment", value: fitmentText(product) },
   ];
   if (listing.description) custom.push({ attribute_code: "description", value: listing.description });
   if (onOrder)
