@@ -6,14 +6,28 @@
 <script>
 (function () {
     // ---------- Hero slider ----------
+    // Slides after the first keep their photo in data-* so it does not compete
+    // with the first one; it is loaded after the page, or when a slide is shown.
+    function hydrate(slide) {
+        var img = slide && slide.querySelector('img[data-src]');
+        if (!img) return;
+        if (img.dataset.sizes) img.sizes = img.dataset.sizes;
+        if (img.dataset.srcset) img.srcset = img.dataset.srcset;
+        img.src = img.dataset.src;
+        img.removeAttribute('data-src');
+    }
     function slider(root) {
         var slides = root.querySelectorAll('.cz-slide');
         if (slides.length < 2) { if (slides[0]) slides[0].classList.add('is-active'); return; }
         var dots = document.createElement('div');
         dots.className = 'cz-dots';
         var index = 0, timer = null;
+        var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        function preload() { slides.forEach(hydrate); }
+        if (document.readyState === 'complete') setTimeout(preload, 300); else window.addEventListener('load', function () { setTimeout(preload, 300); });
         function show(i) {
             index = (i + slides.length) % slides.length;
+            hydrate(slides[index]);
             slides.forEach(function (s, n) { s.classList.toggle('is-active', n === index); });
             dots.querySelectorAll('button').forEach(function (d, n) { d.classList.toggle('is-active', n === index); });
         }
@@ -26,7 +40,12 @@
         });
         root.appendChild(dots);
         root.classList.add('cz-ready');
-        function restart() { clearInterval(timer); timer = setInterval(function () { show(index + 1); }, 6000); }
+        function restart() {
+            clearInterval(timer);
+            if (reduced || document.hidden) return; // no automatic movement when motion is reduced
+            timer = setInterval(function () { show(index + 1); }, 6500);
+        }
+        document.addEventListener('visibilitychange', restart);
         root.addEventListener('mouseenter', function () { clearInterval(timer); });
         root.addEventListener('mouseleave', restart);
         show(0);

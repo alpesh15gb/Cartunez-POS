@@ -1,55 +1,97 @@
-// Cartunez storefront: dark, bold motorsport look with red accents.
-// Plain overrides on top of Luma (its own variables are left alone), so
-// Magento upgrades keep working. Desktop-only Luma rules are repeated at the
-// bottom inside the min-width block.
+// Cartunez storefront: a premium dark "studio" look with the logo's red and
+// blue, on top of Luma (its own variables are left alone, so Magento upgrades
+// keep working). Everything here is plain CSS: no extra scripts, no web fonts
+// from other sites. Desktop-only Luma rules are repeated at the bottom inside
+// the min-width block.
 
-@cz-black: #0F1114;
-@cz-dark: #16191E;
-@cz-panel: #1E2228;
-@cz-line-dark: #2B3038;
-@cz-red: #E0141C;
-@cz-red-dark: #B50E15;
-@cz-blue: #00A6F5;
-@cz-blue-dark: #0086C8;
-@cz-ink: #15181C;
-@cz-muted: #6B7280;
-@cz-soft: #A7AEB8;
-@cz-line: #E5E7EB;
-@cz-canvas: #F4F5F7;
-@cz-font: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-@cz-display: 'Saira', 'Inter', 'Segoe UI', Arial, sans-serif;
+// ---------- Tokens ----------
+@cz-black: #0A0B0E;
+@cz-dark: #111318;
+@cz-panel: #171A20;
+@cz-raise: #1E222A;
+@cz-line-dark: #262B33;
+@cz-red: #E3141B;
+@cz-red-dark: #C20F15;
+@cz-blue: #1AA0F0;
+@cz-blue-dark: #0B7FC4;
+@cz-ink: #0F1115;
+@cz-text: #2A2F37;
+@cz-muted: #646B76;
+@cz-soft: #A3AAB5;
+@cz-line: #E6E8EC;
+@cz-canvas: #F5F6F8;
+@cz-radius: 14px;
+@cz-radius-s: 10px;
+@cz-shadow: 0 1px 2px rgba(15, 17, 21, 0.06), 0 14px 34px -14px rgba(15, 17, 21, 0.22);
+@cz-shadow-dark: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+@cz-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+@cz-font: 'Inter Variable', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+@cz-display: 'Saira Variable', 'Inter Variable', 'Segoe UI', Arial, sans-serif;
+@cz-stripe: linear-gradient(90deg, @cz-blue 0%, @cz-blue 46%, @cz-red 54%, @cz-red 100%);
 
+// Two self-hosted variable fonts (Latin, SIL Open Font License) replace
+// Google Fonts and Luma's four Open Sans files. Preloaded in default_head_blocks.xml.
+// The rupee sign is outside the Latin set and comes from the system font.
+@font-face {
+    font-family: 'Inter Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('../fonts/inter-var-latin.woff2') format('woff2-variations'), url('../fonts/inter-var-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: 'Saira Variable';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 100 900;
+    src: url('../fonts/saira-var-latin.woff2') format('woff2-variations'), url('../fonts/saira-var-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+// ---------- Base ----------
 body {
     font-family: @cz-font;
     font-size: 15px;
     line-height: 1.6;
-    color: @cz-ink;
-    background: #fff;
+    color: @cz-text;
+    background: @cz-canvas;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
 }
+// Luma names Open Sans on form controls; inheriting keeps its font files from loading.
+// Luma's input rules are more specific, hence !important; icons live on ::before and keep their font.
+button, input, select, textarea { font-family: inherit !important; }
+.action, .field .label, .fieldset > .legend { font-family: inherit; }
+.page-wrapper { background: @cz-canvas; }
 h1, h2, h3, h4, .page-title {
     font-family: @cz-display;
     font-weight: 700;
-    letter-spacing: -0.005em;
-    line-height: 1.15;
+    letter-spacing: -0.01em;
+    line-height: 1.12;
     color: @cz-ink;
 }
-.page-title-wrapper .page-title { font-size: 34px; }
-a, .alink { color: @cz-blue-dark; }
+.page-title-wrapper .page-title { font-size: 36px; letter-spacing: -0.02em; }
+a, .alink { color: @cz-blue-dark; transition: color 0.15s ease; }
 a:hover, .alink:hover { color: @cz-blue; }
+::selection { background: @cz-red; color: #fff; }
+:focus-visible { outline: 2px solid @cz-blue; outline-offset: 2px; }
 .cz-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.breadcrumbs { font-size: 12px; letter-spacing: 0.02em; .item a { color: @cz-muted; } }
 
 // ---------- Offer bar ----------
 .cz-announcement {
     background: @cz-black;
-    color: #fff;
+    color: @cz-soft;
     text-align: center;
     font-size: 12px;
     font-weight: 500;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     padding: 9px 16px;
     border-bottom: 1px solid @cz-line-dark;
+    a { color: #fff; font-weight: 600; text-decoration: none; border-bottom: 1px solid @cz-red; }
+    a:hover { color: #fff; border-color: #fff; }
 }
 
 // ---------- Header ----------
@@ -64,15 +106,15 @@ a:hover, .alink:hover { color: @cz-blue; }
         left: 0;
         right: 0;
         bottom: 0;
-        height: 3px;
-        background: linear-gradient(90deg, @cz-blue 0%, @cz-blue 45%, @cz-red 55%, @cz-red 100%);
+        height: 2px;
+        background: @cz-stripe;
     }
     .panel.wrapper { background: @cz-black; border-bottom: 1px solid @cz-line-dark; }
     .panel.header {
-        .header.links > li, .header.links > li > a, .greet.welcome { color: @cz-soft; font-size: 12px; }
+        .header.links > li, .header.links > li > a, .greet.welcome { color: @cz-soft; font-size: 12px; letter-spacing: 0.02em; }
         .header.links > li > a:hover { color: #fff; }
     }
-    .header.content { padding-top: 12px; padding-bottom: 12px; }
+    .header.content { padding-top: 14px; padding-bottom: 14px; }
 }
 .logo { margin: 0; }
 .logo img { width: 120px; height: 103px; }
@@ -80,18 +122,20 @@ a:hover, .alink:hover { color: @cz-blue; }
     .input-text {
         background: @cz-panel;
         border: 1px solid @cz-line-dark;
-        border-radius: 4px;
+        border-radius: 999px;
         color: #fff;
-        height: 42px;
-        padding-left: 14px;
+        height: 44px;
+        padding-left: 18px;
+        padding-right: 44px;
+        transition: border-color 0.15s ease, background 0.15s ease;
         &::placeholder { color: @cz-soft; }
-        &:focus { border-color: @cz-red; box-shadow: none; }
+        &:focus { border-color: @cz-blue; background: @cz-raise; box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.18); }
     }
     .action.search:before { color: @cz-soft; }
 }
 .minicart-wrapper .action.showcart {
     &:before, &.active:before { color: #fff; }
-    .counter.qty { background: @cz-red; color: #fff; font-weight: 800; border-radius: 50%; }
+    .counter.qty { background: @cz-red; color: #fff; font-weight: 800; border-radius: 999px; }
 }
 .nav-toggle:before { color: #fff; }
 
@@ -102,38 +146,39 @@ a:hover, .alink:hover { color: @cz-blue; }
     font-family: @cz-display;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-size: 14px;
+    letter-spacing: 0.1em;
+    font-size: 13px;
     .level0 > .level-top {
-        color: #fff;
-        &:hover, &.ui-state-focus { color: @cz-blue; }
+        color: #E9ECF1;
+        transition: color 0.15s ease;
+        &:hover, &.ui-state-focus { color: #fff; }
     }
-    .level0.active > .level-top, .level0.has-active > .level-top { border-color: @cz-blue; color: @cz-blue; }
-    .level0 .submenu { background: @cz-panel; border-color: @cz-line-dark; }
-    .level0 .submenu a { color: #fff; &:hover { background: @cz-dark; color: @cz-blue; } }
+    .level0.active > .level-top, .level0.has-active > .level-top { border-color: @cz-red; color: #fff; }
+    .level0 .submenu { background: @cz-panel; border-color: @cz-line-dark; border-radius: 0 0 @cz-radius-s @cz-radius-s; box-shadow: @cz-shadow-dark; }
+    .level0 .submenu a { color: #E9ECF1; &:hover { background: @cz-raise; color: #fff; } }
 }
 
 // ---------- Vehicle finder ----------
 .cz-finder {
-    background: @cz-panel;
+    background: radial-gradient(120% 140% at 0% 0%, #1D2330 0%, @cz-panel 55%);
     border-bottom: 1px solid @cz-line-dark;
     .cz-finder-inner {
         max-width: 1280px;
         margin: 0 auto;
-        padding: 18px 20px;
+        padding: 20px;
         display: flex;
         flex-wrap: wrap;
-        gap: 14px 24px;
+        gap: 14px 28px;
         align-items: center;
     }
     .cz-finder-title {
         color: #fff;
         display: flex;
         flex-direction: column;
-        border-left: 3px solid @cz-blue;
+        border-left: 3px solid @cz-red;
         padding-left: 14px;
-        .cz-finder-kicker { color: @cz-blue; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.14em; }
-        strong { font-family: @cz-display; font-size: 20px; font-weight: 600; letter-spacing: 0.01em; }
+        .cz-finder-kicker { color: @cz-blue; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em; }
+        strong { font-family: @cz-display; font-size: 20px; font-weight: 600; }
     }
     .cz-finder-form {
         flex: 1 1 520px;
@@ -142,18 +187,18 @@ a:hover, .alink:hover { color: @cz-blue; }
         gap: 10px;
         select {
             flex: 1 1 150px;
-            height: 46px;
-            border-radius: 4px;
+            height: 48px;
+            border-radius: @cz-radius-s;
             border: 1px solid @cz-line-dark;
-            background-color: #fff;
-            font-family: @cz-font;
+            background-color: @cz-raise;
+            color: #fff;
             font-size: 15px;
             font-weight: 500;
             padding: 0 14px;
-            color: @cz-ink;
-            &:disabled { opacity: 0.55; }
+            &:disabled { opacity: 0.5; }
+            &:focus { border-color: @cz-blue; box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.18); }
         }
-        .cz-finder-go { flex: 0 0 auto; height: 46px; padding: 0 28px; }
+        .cz-finder-go { flex: 0 0 auto; height: 48px; padding: 0 30px; }
     }
 }
 
@@ -161,104 +206,144 @@ a:hover, .alink:hover { color: @cz-blue; }
 .action.primary, button.action.primary, .action.tocart.primary, .action.checkout {
     background: @cz-red;
     border: 1px solid @cz-red;
-    border-radius: 4px;
+    border-radius: @cz-radius-s;
     color: #fff;
     font-family: @cz-display;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.09em;
+    box-shadow: 0 8px 20px -10px rgba(227, 20, 27, 0.7);
+    transition: background 0.15s ease, transform 0.15s @cz-ease, box-shadow 0.15s ease;
     &:hover, &:focus, &:active { background: @cz-red-dark; border-color: @cz-red-dark; color: #fff; }
+    &:hover { transform: translateY(-1px); box-shadow: 0 12px 24px -10px rgba(227, 20, 27, 0.8); }
 }
-.action.secondary, button.action.secondary { border-radius: 4px; }
+.action.secondary, button.action.secondary { border-radius: @cz-radius-s; }
 .cz-button {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
     background: @cz-red;
+    border: 1px solid @cz-red;
     color: #fff;
     font-family: @cz-display;
     font-weight: 600;
+    font-size: 14px;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 14px 30px;
-    border-radius: 4px;
+    letter-spacing: 0.12em;
+    padding: 14px 28px;
+    border-radius: 999px;
     text-decoration: none;
-    &:hover, &:visited:hover { background: @cz-red-dark; color: #fff; text-decoration: none; }
+    box-shadow: 0 12px 28px -12px rgba(227, 20, 27, 0.85);
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s @cz-ease;
+    &:after { content: '\2192'; font-family: @cz-font; transition: transform 0.2s @cz-ease; }
+    &:hover, &:visited:hover { background: @cz-red-dark; border-color: @cz-red-dark; color: #fff; text-decoration: none; transform: translateY(-1px); }
+    &:hover:after { transform: translateX(3px); }
     &:visited { color: #fff; }
 }
+.cz-button--ghost {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: none;
+    &:hover, &:visited:hover { background: rgba(255, 255, 255, 0.14); border-color: #fff; }
+    &:after { content: none; }
+}
 .cz-kicker {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     color: @cz-blue;
     font-size: 12px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.16em;
-    margin-bottom: 6px;
+    letter-spacing: 0.18em;
+    margin-bottom: 8px;
+    &:before { content: ''; width: 18px; height: 2px; background: @cz-red; }
 }
 
 // ---------- Prices: selling price first, MRP struck through ----------
 .price-box {
-    .price { color: @cz-red; font-weight: 800; }
+    .price { color: @cz-ink; font-weight: 800; font-feature-settings: 'tnum'; }
+    .special-price .price { color: @cz-red; }
     .special-price .price-label, .old-price .price-label { display: none; }
     .old-price {
         .price-wrapper .price, .price { color: @cz-muted; font-weight: 500; font-size: 0.85em; text-decoration: line-through; }
     }
     .old-price:before { content: 'MRP '; color: @cz-muted; font-size: 0.85em; }
 }
-.product-info-main .price-box .price-wrapper .price { font-size: 30px; }
+.product-info-main .price-box .price-wrapper .price { font-size: 32px; letter-spacing: -0.01em; }
 .product-info-main .price-box:after { content: 'Inclusive of all taxes'; display: block; color: @cz-muted; font-size: 12px; margin-top: 2px; }
 
 // ---------- Product cards ----------
 .products-grid .product-item {
     .product-item-info {
         position: relative;
+        height: 100%;
+        box-sizing: border-box;
         border: 1px solid @cz-line;
-        border-radius: 6px;
-        padding: 12px;
+        border-radius: @cz-radius;
+        padding: 12px 12px 16px;
         background: #fff;
-        transition: box-shadow 0.15s ease, border-color 0.15s ease;
+        box-shadow: 0 1px 2px rgba(15, 17, 21, 0.04);
+        transition: box-shadow 0.25s @cz-ease, transform 0.25s @cz-ease, border-color 0.25s ease;
         &:hover {
-            border-color: @cz-red;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+            border-color: transparent;
+            box-shadow: @cz-shadow;
+            transform: translateY(-3px);
             margin: 0;
-            padding: 12px;
+            padding: 12px 12px 16px;
         }
     }
-    .product-item-name a { color: @cz-ink; font-weight: 700; }
+    .product-image-container { display: block; border-radius: @cz-radius-s; overflow: hidden; background: @cz-canvas; }
+    .product-image-photo { transition: transform 0.5s @cz-ease; }
+    .product-item-info:hover .product-image-photo { transform: scale(1.04); }
+    .product-item-name { margin: 12px 0 6px; }
+    .product-item-name a { color: @cz-ink; font-weight: 600; line-height: 1.35; }
     .product-item-actions .action.tocart { width: 100%; }
+    .product-item-inner { margin: 0; padding: 0; border: 0; box-shadow: none; }
 }
 .cz-badge {
     position: absolute;
-    top: 12px;
-    left: 12px;
+    top: 20px;
+    left: 20px;
     z-index: 2;
     background: @cz-red;
     color: #fff;
-    font-weight: 800;
+    font-family: @cz-display;
+    font-weight: 700;
     font-size: 13px;
-    padding: 4px 8px;
-    border-radius: 3px;
+    letter-spacing: 0.04em;
+    padding: 4px 10px;
+    border-radius: 999px;
+    box-shadow: 0 6px 16px -6px rgba(227, 20, 27, 0.8);
 }
 .product.media { position: relative; }
+.product.media .cz-badge { top: 14px; left: 14px; }
 .stock.available span { color: #15803D; font-weight: 700; }
 .stock.unavailable span { color: @cz-red; font-weight: 700; }
 .product.attribute.overview {
     background: #FEF2F2;
     border-left: 4px solid @cz-red;
-    border-radius: 4px;
-    padding: 10px 14px;
+    border-radius: @cz-radius-s;
+    padding: 12px 16px;
     color: @cz-ink;
     font-weight: 600;
 }
+.product-info-main .page-title-wrapper .page-title { font-size: 32px; }
 
 // ---------- Home page ----------
 .cms-index-index .column.main { padding-bottom: 0; }
 
+// Hero slider: real <img> elements so the browser finds the first photo at
+// once; the other photos load only after the page has finished loading.
 .cz-slider {
     position: relative;
-    height: 520px;
-    margin: 0 0 28px;
+    height: 560px;
+    margin: 0 0 18px;
     background: @cz-black;
-    border-radius: 6px;
+    border-radius: 20px;
     overflow: hidden;
+    isolation: isolate;
+    box-shadow: @cz-shadow-dark;
     .cz-slide {
         position: absolute;
         top: 0;
@@ -268,7 +353,7 @@ a:hover, .alink:hover { color: @cz-blue; }
         background-size: cover;
         background-position: center;
         opacity: 0;
-        transition: opacity 0.8s ease;
+        transition: opacity 0.9s ease;
         &.is-active { opacity: 1; z-index: 1; }
         // The first slide shows even if the slider script does not run.
         &:first-child { opacity: 1; z-index: 1; }
@@ -279,53 +364,107 @@ a:hover, .alink:hover { color: @cz-blue; }
             right: 0;
             bottom: 0;
             left: 0;
-            background: linear-gradient(90deg, rgba(10, 11, 13, 0.92) 0%, rgba(10, 11, 13, 0.6) 45%, rgba(10, 11, 13, 0.1) 100%);
+            z-index: 1;
+            background:
+                linear-gradient(90deg, rgba(8, 9, 12, 0.94) 0%, rgba(8, 9, 12, 0.7) 38%, rgba(8, 9, 12, 0.15) 75%),
+                linear-gradient(0deg, rgba(8, 9, 12, 0.7) 0%, rgba(8, 9, 12, 0) 40%);
         }
     }
+    .cz-slide-img {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scale(1.06);
+        transition: transform 7s ease-out;
+    }
+    .cz-slide.is-active .cz-slide-img { transform: scale(1); }
+    &:not(.cz-ready) .cz-slide:first-child .cz-slide-img { transform: none; }
     &.cz-ready .cz-slide:first-child:not(.is-active) { opacity: 0; z-index: 0; }
     .cz-slide-content {
         position: relative;
-        max-width: 560px;
-        padding: 90px 56px;
+        z-index: 2;
+        max-width: 600px;
+        padding: 100px 64px;
         color: #fff;
-        h2 { color: #fff; font-size: 54px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.01em; line-height: 1.02; margin: 0 0 16px; }
-        p { color: #D1D5DB; font-size: 17px; margin: 0 0 26px; }
+        h1, h2 { color: #fff; font-family: @cz-display; font-size: 60px; font-weight: 700; text-transform: uppercase; letter-spacing: -0.01em; line-height: 0.98; margin: 0 0 18px; }
+        p { color: #CDD2DA; font-size: 17px; line-height: 1.6; margin: 0 0 30px; max-width: 480px; }
     }
+    .cz-slide-actions { display: flex; flex-wrap: wrap; gap: 12px; }
     .cz-dots {
         position: absolute;
-        z-index: 2;
-        left: 56px;
-        bottom: 28px;
+        z-index: 3;
+        left: 64px;
+        bottom: 34px;
         display: flex;
-        gap: 10px;
+        gap: 8px;
         button {
-            width: 12px;
-            height: 12px;
+            width: 26px;
+            height: 4px;
+            min-height: 0;
             padding: 0;
-            border: 2px solid #fff;
-            background: transparent;
-            transform: rotate(45deg);
+            border: 0;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.35);
             box-shadow: none;
-            &.is-active { background: @cz-red; border-color: @cz-red; }
+            transition: width 0.3s @cz-ease, background 0.3s ease;
+            &.is-active { width: 46px; background: @cz-red; }
         }
     }
 }
 
+// Trust strip under the hero.
+.cz-trust {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    margin: 0 0 56px;
+    padding: 0;
+    list-style: none;
+    background: @cz-line;
+    border: 1px solid @cz-line;
+    border-radius: @cz-radius;
+    overflow: hidden;
+    li {
+        margin: 0;
+        padding: 18px 20px;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        strong { font-family: @cz-display; font-size: 17px; font-weight: 600; color: @cz-ink; letter-spacing: 0.01em; }
+        span { color: @cz-muted; font-size: 13px; }
+    }
+}
+
+.cz-section-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    margin: 0 0 26px;
+    h2 { font-size: 38px; letter-spacing: -0.02em; margin: 0; }
+    p { color: @cz-muted; max-width: 620px; margin: 10px 0 0; }
+}
+
+// Category tiles.
 .cz-promos {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 16px;
-    margin: 0 0 40px;
+    margin: 0 0 64px;
 }
 .cz-promo {
     position: relative;
     display: block;
-    height: 220px;
-    border-radius: 6px;
+    height: 260px;
+    border-radius: @cz-radius;
     overflow: hidden;
-    background-size: cover;
-    background-position: center;
+    background: @cz-panel center / cover no-repeat;
     text-decoration: none;
+    isolation: isolate;
+    img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; transition: transform 0.6s @cz-ease; }
     &:before {
         content: '';
         position: absolute;
@@ -333,37 +472,30 @@ a:hover, .alink:hover { color: @cz-blue; }
         right: 0;
         bottom: 0;
         left: 0;
-        background: linear-gradient(0deg, rgba(10, 11, 13, 0.9) 0%, rgba(10, 11, 13, 0.25) 70%);
-        transition: background 0.2s ease;
+        background: linear-gradient(0deg, rgba(8, 9, 12, 0.92) 0%, rgba(8, 9, 12, 0.2) 70%);
     }
-    &:hover:before { background: linear-gradient(0deg, rgba(179, 18, 29, 0.85) 0%, rgba(10, 11, 13, 0.25) 75%); }
+    &:hover img { transform: scale(1.06); }
     .cz-promo-text {
         position: absolute;
-        left: 22px;
-        right: 22px;
-        bottom: 20px;
+        left: 24px;
+        right: 24px;
+        bottom: 22px;
         color: #fff;
-        strong { display: block; font-family: @cz-display; font-size: 24px; font-weight: 700; }
-        span { display: block; color: #D1D5DB; font-size: 14px; }
-        em { display: inline-block; margin-top: 8px; font-style: normal; font-weight: 600; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #fff; border-bottom: 2px solid @cz-blue; }
+        strong { display: block; font-family: @cz-display; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+        span { display: block; color: #CDD2DA; font-size: 14px; }
+        em { display: inline-block; margin-top: 10px; font-style: normal; font-weight: 600; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #fff; border-bottom: 2px solid @cz-red; padding-bottom: 2px; }
     }
     &:hover { text-decoration: none; }
 }
 
-.cz-section-head {
-    text-align: center;
-    margin: 0 0 22px;
-    h2 { font-size: 34px; margin: 0; }
-    h2:after { content: ''; display: block; width: 64px; height: 3px; background: linear-gradient(90deg, @cz-blue 50%, @cz-red 50%); margin: 14px auto 0; }
-}
-
+// Brands.
 .cz-brands {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
     gap: 14px;
     list-style: none;
     padding: 0;
-    margin: 0 0 44px;
+    margin: 0 0 64px;
     > li { margin: 0; }
 }
 .cz-brand {
@@ -372,22 +504,18 @@ a:hover, .alink:hover { color: @cz-blue; }
     align-items: center;
     gap: 6px;
     height: 100%;
-    padding: 20px 14px 16px;
+    box-sizing: border-box;
+    padding: 22px 14px 18px;
     background: #fff;
-    border: 1px solid #E5E7EB;
-    border-radius: 6px;
+    border: 1px solid @cz-line;
+    border-radius: @cz-radius;
     text-align: center;
     text-decoration: none;
-    color: @cz-black;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-    strong { font-family: @cz-display; font-size: 17px; font-weight: 600; line-height: 1.2; color: @cz-black; }
-    .cz-brand-count { font-size: 12px; color: #6B7280; }
-    &:hover, &:focus {
-        text-decoration: none;
-        border-color: @cz-blue;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-        transform: translateY(-2px);
-    }
+    color: @cz-ink;
+    transition: border-color 0.2s ease, box-shadow 0.25s @cz-ease, transform 0.25s @cz-ease;
+    strong { font-family: @cz-display; font-size: 17px; font-weight: 600; line-height: 1.2; color: @cz-ink; }
+    .cz-brand-count { font-size: 12px; color: @cz-muted; }
+    &:hover, &:focus { text-decoration: none; border-color: transparent; box-shadow: @cz-shadow; transform: translateY(-3px); }
 }
 .cz-brand-logo {
     display: flex;
@@ -396,8 +524,9 @@ a:hover, .alink:hover { color: @cz-blue; }
     width: 100%;
     height: 72px;
     margin-bottom: 6px;
-    img { max-width: 100%; max-height: 72px; object-fit: contain; }
+    img { max-width: 100%; max-height: 72px; object-fit: contain; filter: grayscale(1); opacity: 0.85; transition: filter 0.2s ease, opacity 0.2s ease; }
 }
+.cz-brand:hover .cz-brand-logo img { filter: none; opacity: 1; }
 .cz-brand-initials {
     display: flex;
     align-items: center;
@@ -405,36 +534,106 @@ a:hover, .alink:hover { color: @cz-blue; }
     width: 64px;
     height: 64px;
     border-radius: 50%;
-    background: @cz-black;
+    background: radial-gradient(circle at 30% 25%, #2A303A, @cz-black);
     color: #fff;
     font-family: @cz-display;
     font-size: 22px;
     font-weight: 700;
     letter-spacing: 0.04em;
-    border-bottom: 3px solid @cz-red;
+    box-shadow: inset 0 -3px 0 @cz-red;
 }
+
+// Featured products widget on the home page.
+.cms-index-index .block.widget.block-products-list { margin-bottom: 64px; }
+.cms-index-index .block-products-list .products-grid .product-items { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 0; }
+// Luma sizes each card as a percentage of the row; inside the grid each card fills its cell.
+.cms-index-index .block.widget.block-products-list .products-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
+.cms-index-index .page-wrapper { overflow-x: clip; }
+
+// Studio services: a dark band across the full page width.
+.cz-studio {
+    position: relative;
+    left: 50%;
+    width: 100vw;
+    margin: 0 0 64px -50vw;
+    padding: 72px 20px;
+    box-sizing: border-box;
+    background: radial-gradient(70% 90% at 15% 0%, #1B2130 0%, @cz-black 60%);
+    color: #fff;
+    .cz-section-head { h2 { color: #fff; } p { color: @cz-soft; } }
+}
+.cz-services {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0;
+    list-style: none;
+    > li { margin: 0; }
+}
+.cz-service {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    border-radius: @cz-radius;
+    overflow: hidden;
+    background: @cz-panel;
+    border: 1px solid @cz-line-dark;
+    color: #fff;
+    text-decoration: none;
+    transition: transform 0.3s @cz-ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    .cz-service-photo { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: @cz-raise; }
+    img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s @cz-ease; }
+    .cz-service-body { display: block; padding: 18px 20px 22px; }
+    strong { display: block; font-family: @cz-display; font-size: 21px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .cz-service-body > span { display: block; color: @cz-soft; font-size: 14px; }
+    &:hover, &:focus, &:visited:hover {
+        color: #fff;
+        text-decoration: none;
+        transform: translateY(-4px);
+        border-color: rgba(227, 20, 27, 0.6);
+        box-shadow: @cz-shadow-dark;
+        img { transform: scale(1.06); }
+    }
+}
+.cz-studio-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 34px; }
 
 .cz-policy {
     max-width: 820px;
     h2 { font-size: 22px; margin: 28px 0 10px; }
     p, li { font-size: 15px; color: #374151; }
     ul { padding-left: 20px; }
-    a { color: @cz-blue; }
+    a { color: @cz-blue-dark; }
 }
 
 .cz-cta {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
-    background: @cz-dark;
-    border-left: 4px solid @cz-blue;
-    border-radius: 6px;
-    padding: 34px 40px;
-    margin: 44px 0 28px;
+    gap: 24px;
+    background: linear-gradient(120deg, @cz-dark 0%, #1A1F29 100%);
+    border-radius: 20px;
+    padding: 40px 44px;
+    margin: 0 0 24px;
     color: #fff;
-    h2 { color: #fff; font-size: 30px; margin: 0 0 8px; }
+    overflow: hidden;
+    &:after {
+        content: '';
+        position: absolute;
+        right: -80px;
+        top: -80px;
+        width: 260px;
+        height: 260px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(227, 20, 27, 0.35), transparent 70%);
+        pointer-events: none;
+    }
+    > * { position: relative; z-index: 1; }
+    h2 { color: #fff; font-size: 32px; letter-spacing: -0.02em; margin: 0 0 8px; }
     p { color: @cz-soft; margin: 0; max-width: 640px; }
 }
 
@@ -442,62 +641,133 @@ a:hover, .alink:hover { color: @cz-blue; }
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 14px;
-    margin: 0 0 20px;
+    margin: 0 0 24px;
     padding: 0;
     list-style: none;
     li {
         margin: 0;
-        padding: 18px 18px 18px 20px;
-        background: @cz-canvas;
-        border-top: 3px solid @cz-blue;
-        border-radius: 4px;
+        padding: 20px;
+        background: #fff;
+        border: 1px solid @cz-line;
+        border-radius: @cz-radius;
         strong { display: block; font-family: @cz-display; font-size: 17px; font-weight: 600; color: @cz-ink; }
         span { color: @cz-muted; font-size: 13px; }
     }
 }
 
+// Visit the studio.
+.cz-visit {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    margin: 0 0 24px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid @cz-line;
+    .cz-visit-photo { position: relative; min-height: 340px; background: @cz-panel; }
+    .cz-visit-photo img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+    .cz-visit-body { padding: 40px 44px; }
+    h2 { font-size: 32px; letter-spacing: -0.02em; margin: 0 0 16px; }
+    dl { margin: 0 0 26px; display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; }
+    dt { color: @cz-muted; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; padding-top: 3px; }
+    dd { margin: 0; color: @cz-ink; font-weight: 500; }
+    dd a { color: @cz-ink; font-weight: 600; }
+    .cz-visit-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .cz-button--ghost, .cz-button--ghost:visited { color: @cz-ink; background: transparent; border-color: #CDD2DA; }
+    .cz-button--ghost:hover, .cz-button--ghost:visited:hover { color: @cz-ink; border-color: @cz-ink; background: @cz-canvas; }
+}
+
 // ---------- Footer ----------
 .page-wrapper .page-footer,
 .page-footer .footer.content { background: @cz-black; color: @cz-soft; }
-.page-footer { margin-top: 40px; border-top: 0; position: relative; }
-.page-footer:before { content: ''; display: block; height: 3px; background: linear-gradient(90deg, @cz-blue 0%, @cz-blue 45%, @cz-red 55%, @cz-red 100%); }
+.page-footer { margin-top: 56px; border-top: 0; position: relative; }
+.page-footer:before { content: ''; display: block; height: 2px; background: @cz-stripe; }
 .footer.content {
     border-top: 0;
-    padding-top: 36px;
+    padding-top: 44px;
     a, .links a { color: #fff; }
     a:hover { color: @cz-red; }
     .block.newsletter .title { color: #fff; }
+    .block.newsletter input { background: @cz-panel; border-color: @cz-line-dark; color: #fff; }
 }
 .cz-footer {
     display: flex;
     flex-wrap: wrap;
-    gap: 28px;
-    margin-bottom: 24px;
+    gap: 32px;
+    margin-bottom: 28px;
     > div { flex: 1 1 220px; }
-    h4 { color: #fff; font-family: @cz-display; font-weight: 600; letter-spacing: 0.04em; font-size: 17px; margin: 0 0 10px; }
-    h4:after { content: ''; display: block; width: 32px; height: 2px; background: @cz-blue; margin-top: 8px; }
-    p, li { color: @cz-soft; font-size: 13px; margin: 0 0 5px; }
+    h4 { color: #fff; font-family: @cz-display; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 14px; margin: 0 0 12px; }
+    h4:after { content: ''; display: block; width: 28px; height: 2px; background: @cz-red; margin-top: 10px; }
+    p, li { color: @cz-soft; font-size: 13px; line-height: 1.7; margin: 0 0 5px; }
     ul { list-style: none; padding: 0; margin: 0; }
-    a { color: #fff; text-decoration: none; border-bottom: 1px solid @cz-blue; }
-    a:hover { color: @cz-blue; }
+    a { color: #fff; text-decoration: none; border-bottom: 1px solid rgba(255, 255, 255, 0.25); }
+    a:hover { color: #fff; border-color: @cz-red; }
 }
-.cz-announcement a { color: #fff; font-weight: 600; text-decoration: none; }
-.copyright { background: #08090B; color: #6B7280; }
+.copyright { background: #060708; color: #6B7280; letter-spacing: 0.04em; }
+
+// ---------- Cart, checkout, account ----------
+.cart-summary, .opc-block-summary { background: #fff; border: 1px solid @cz-line; border-radius: @cz-radius; }
+.fieldset > .field:not(.choice) > .control input[type="text"], .fieldset > .field:not(.choice) > .control input[type="email"],
+.fieldset > .field:not(.choice) > .control input[type="password"], .fieldset > .field:not(.choice) > .control input[type="tel"],
+.fieldset > .field:not(.choice) > .control select, .fieldset > .field:not(.choice) > .control textarea {
+    border-radius: @cz-radius-s;
+    border-color: #D5D9E0;
+    &:focus { border-color: @cz-blue; box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.15); }
+}
+.message.success, .message.error, .message.info, .message.warning { border-radius: @cz-radius-s; }
+
+// Respect "reduce motion": no zooms, lifts or cross-fades.
+@media (prefers-reduced-motion: reduce) {
+    *, *:before, *:after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    .cz-slider .cz-slide-img { transform: none !important; }
+}
+
+// ---------- Tablets ----------
+@media (max-width: 1023px) {
+    .cz-services { grid-template-columns: repeat(2, 1fr); }
+    .cz-trust { grid-template-columns: repeat(2, 1fr); }
+    .cms-index-index .block-products-list .products-grid .product-items { grid-template-columns: repeat(3, 1fr); }
+    .cz-visit { grid-template-columns: 1fr; }
+    .cz-slider .cz-slide-content h1, .cz-slider .cz-slide-content h2 { font-size: 48px; }
+}
 
 // ---------- Phones ----------
 .media-width(@extremum, @break) when (@extremum = 'max') and (@break = @screen__m) {
-    .cz-slider { height: 420px; border-radius: 0; margin-left: -15px; margin-right: -15px; }
-    .cz-slider .cz-slide-content { padding: 48px 22px; h2 { font-size: 34px; } }
-    .cz-slider .cz-dots { left: 22px; }
+    .cz-slider { height: 500px; border-radius: 0; margin-left: -15px; margin-right: -15px; box-shadow: none; }
+    .cz-slider .cz-slide:before { background: linear-gradient(0deg, rgba(8, 9, 12, 0.96) 0%, rgba(8, 9, 12, 0.6) 55%, rgba(8, 9, 12, 0.2) 100%); }
+    .cz-slider .cz-slide-content { position: absolute; left: 0; right: 0; bottom: 60px; padding: 0 22px; }
+    .cz-slider .cz-slide-content h1, .cz-slider .cz-slide-content h2 { font-size: 36px; overflow-wrap: anywhere; }
+    .cz-slider .cz-slide-content p { font-size: 15px; margin-bottom: 20px; }
+    .cz-slider .cz-dots { left: 22px; bottom: 26px; }
+    .cz-trust { margin-bottom: 40px; li { padding: 14px 16px; } }
+    .cz-section-head h2 { font-size: 30px; }
     .cz-promos, .cz-benefits { grid-template-columns: 1fr; }
+    // Services become a swipeable row on phones instead of six tall cards.
+    .cz-services {
+        display: flex;
+        gap: 12px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        margin-right: -15px;
+        padding-right: 15px;
+        scrollbar-width: none;
+        &::-webkit-scrollbar { display: none; }
+        > li { flex: 0 0 80%; scroll-snap-align: start; }
+    }
+    .cz-promos { margin-bottom: 44px; }
+    .cz-promo { height: 200px; }
     .cz-brands { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .cms-index-index .block-products-list .products-grid .product-items { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .cz-studio { padding: 48px 15px; }
     .cz-finder .cz-finder-form { flex-basis: 100%; }
     .cz-finder .cz-finder-form select { flex: 1 1 100%; }
     .cz-finder .cz-finder-form .cz-finder-go { flex: 1 1 100%; }
-    .cz-slider .cz-slide-content h2 { font-size: 32px; overflow-wrap: anywhere; }
-    .cz-cta { padding: 26px 22px; }
+    .cz-cta { padding: 28px 22px; border-radius: @cz-radius; h2 { font-size: 26px; } }
+    .cz-visit .cz-visit-body { padding: 28px 22px; }
+    .cz-visit .cz-visit-photo { min-height: 220px; }
     .nav-sections, .nav-sections-item-content, .navigation { background: @cz-dark; }
     .logo img { width: 70px; height: 60px; }
+    .page-title-wrapper .page-title { font-size: 28px; }
 }
 
 // ---------- Desktop (Luma sets these again in its desktop styles) ----------
@@ -505,7 +775,7 @@ a:hover, .alink:hover { color: @cz-blue; }
     .page-header { background: @cz-dark; border-bottom: 0; }
     .page-header .panel.wrapper { background-color: @cz-black; }
     .nav-sections, .navigation { background: @cz-dark; }
-    .navigation .level0 > .level-top { color: #fff; }
+    .navigation .level0 > .level-top { color: #E9ECF1; }
     .page-wrapper .page-footer,
     .page-footer .footer.content { background: @cz-black; color: @cz-soft; }
     .footer.content {

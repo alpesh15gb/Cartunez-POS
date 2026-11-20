@@ -47,6 +47,20 @@ git clone https://github.com/alpesh15gb/Cartunez-POS.git /opt/cartunez-shop-sour
    loaded from Unsplash until you replace them with your own. Run the script again after changing
    the theme; about 10 minutes.
 
+6. `bash /opt/cartunez-shop-source/deploy/magento/6-speed.sh` makes the shop faster: host Nginx
+   compresses CSS, JavaScript, fonts and SVG (it compressed only HTML before), Magento minifies CSS,
+   JavaScript and HTML and moves scripts to the end of the page, and the full-page cache is switched
+   on. Run `4-theme.sh` afterwards so the shop's files are rebuilt with these settings.
+
+**Premium design (November 2026).** The theme uses two self-hosted variable fonts (Inter and Saira,
+SIL Open Font License, `web/fonts`) instead of Google Fonts and Luma's Open Sans. The next
+`4-theme.sh` run applies the `PremiumStoreContent` data patch once. It rewrites the home page and the
+`cartunez-hero` block, with a hero slider, trust strip, category tiles, brands, featured products,
+studio services and a "visit us" panel, after saving the previous versions as the disabled blocks
+`cartunez-home-backup` and `cartunez-hero-backup`. It leaves the footer and offer bar alone. Only the
+first hero photo loads up front; the others load once the page has finished. Every photo is sized
+for the screen and lazy-loaded.
+
 Each script stops with a clear message if something is not as expected, and can be run again.
 
 ## Connect the POS

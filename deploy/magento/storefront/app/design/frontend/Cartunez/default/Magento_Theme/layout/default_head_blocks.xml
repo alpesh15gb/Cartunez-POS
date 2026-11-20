@@ -1,8 +1,16 @@
 <?xml version="1.0"?>
 <page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
     <head>
-        <!-- Saira for headings, Inter for text. -->
-        <css src="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Saira:wght@500;600;700&amp;display=swap" src_type="url"/>
+        <!-- Self-hosted variable fonts (Inter for text, Saira for headings), preloaded.
+             They replace Google Fonts and Luma's four Open Sans files, which the theme never shows. -->
+        <font src="fonts/inter-var-latin.woff2"/>
+        <font src="fonts/saira-var-latin.woff2"/>
+        <remove src="fonts/opensans/light/opensans-300.woff2"/>
+        <remove src="fonts/opensans/regular/opensans-400.woff2"/>
+        <remove src="fonts/opensans/semibold/opensans-600.woff2"/>
+        <remove src="fonts/opensans/bold/opensans-700.woff2"/>
+        <!-- The hero photos come from Unsplash until the shop has its own. -->
+        <link src="https://images.unsplash.com" rel="preconnect" src_type="url"/>
         <!-- Finished CSS built from styles/cartunez.less (build-css.sh); loads after Luma. -->
         <css src="css/cartunez.css" media="all"/>
     </head>
