@@ -588,6 +588,24 @@ button.action.secondary {
   letter-spacing: 0.04em;
   border-bottom: 3px solid #E0141C;
 }
+.cz-policy {
+  max-width: 820px;
+}
+.cz-policy h2 {
+  font-size: 22px;
+  margin: 28px 0 10px;
+}
+.cz-policy p,
+.cz-policy li {
+  font-size: 15px;
+  color: #374151;
+}
+.cz-policy ul {
+  padding-left: 20px;
+}
+.cz-policy a {
+  color: #00A6F5;
+}
 .cz-cta {
   display: flex;
   flex-wrap: wrap;

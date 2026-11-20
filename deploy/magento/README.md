@@ -65,13 +65,17 @@ docker stats --no-stream $(docker ps -q -f name=cartunezshop)   # memory
 docker compose -p cartunezshop exec php php bin/magento cache:flush
 ```
 
-## Going live (later)
+## Going live: `5-launch.sh`
 
-Remove the three staging lines (X-Robots-Tag, auth_basic, auth_basic_user_file) from the site,
-`nginx -t && systemctl reload nginx`; turn admin two-factor sign-in back on
-(`bin/magento module:enable Magento_TwoFactorAuth Magento_AdminAdobeImsTwoFactorAuth`) after setting
-up outgoing email; add a payment method and shipping rates; and add Magento's database and media to
-the backup routine.
+`bash 5-launch.sh` (as root, after Stage 4) asks for the UPI ID, shop phone, and the Gmail address
+and app password, then sets: cash on delivery / pay at pickup and "Pay now by UPI" (no gateway);
+free store pickup plus home delivery across India (Rs 99, free from Rs 1,999; change with
+`DELIVERY_FEE=… FREE_ABOVE=… bash 5-launch.sh`); order, invoice and contact emails through Gmail;
+search engines allowed; a nightly backup (`/usr/local/sbin/cartunez-shop-backup`, 02:30, 14 days in
+`/var/backups/cartunez-shop`; copy it off the server). Last, typing `LIVE` removes the staging password
+(the old site is kept in `/etc/cartunez-shop/nginx-staging.conf.bak`). The policy pages (shipping,
+returns, terms, privacy) come from Stage 4. Later: Razorpay, and admin two-factor sign-in
+(`bin/magento module:enable Magento_TwoFactorAuth Magento_AdminAdobeImsTwoFactorAuth`).
 
 ## Remove everything (if ever needed)
 
