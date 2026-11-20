@@ -631,6 +631,19 @@ button.action.secondary {
   padding: 0;
   margin: 0;
 }
+.cz-footer a {
+  color: #fff;
+  text-decoration: none;
+  border-bottom: 1px solid #00A6F5;
+}
+.cz-footer a:hover {
+  color: #00A6F5;
+}
+.cz-announcement a {
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
 .copyright {
   background: #08090B;
   color: #6B7280;

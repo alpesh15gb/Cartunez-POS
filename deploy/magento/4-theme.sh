@@ -42,6 +42,15 @@ mage config:set --scope=stores --scope-code=default design/theme/theme_id "$them
 mage config:set design/header/welcome 'Get your car rolling in style' >/dev/null
 mage config:set design/head/default_title 'Car Tunez' >/dev/null
 mage config:set design/head/title_suffix ' | Car Tunez' >/dev/null
+si() { mage config:set "general/store_information/$1" "$2" >/dev/null; }
+si name 'Car Tunez'
+si phone '+91 99496 95030'
+si hours 'Mon-Sat 11 am - 10 pm, Sun 11:30 am - 6 pm'
+si country_id IN
+si city 'Hyderabad'
+si postcode 500003
+si street_line1 'Shop No. 12 & 13, Veer Hanuman Temple'
+si street_line2 'S.P. Road, Secunderabad'
 mage config:set design/footer/copyright '© Car Tunez. All prices include GST.' >/dev/null
 
 echo '== Rebuilding code and theme files (5-10 minutes)'
