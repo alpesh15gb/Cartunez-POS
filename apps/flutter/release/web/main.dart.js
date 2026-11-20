@@ -63610,9 +63610,9 @@ r=a.h(0,p)
 if(J.mw(r==null?0:r,0))s.push(A.c(a.h(0,p))+" reserved")
 r=a.h(0,o)
 if(J.mw(r==null?0:r,0))s.push(A.c(a.h(0,o))+" taken from stock")
-r=a.h(0,n)
-if(J.mw(r==null?0:r,0))s.push(A.c(a.h(0,n))+" waiting for stock")
-r=a.h(0,m)
+if(J.d(a.h(0,"serialPickRequired"),!0))s.push("Serial selection required. Resolve this order with the branch manager.")
+else{r=a.h(0,n)
+if(J.mw(r==null?0:r,0))s.push(A.c(a.h(0,n))+" waiting for stock")}r=a.h(0,m)
 if(J.mw(r==null?0:r,0))s.push(A.c(a.h(0,m))+" cancelled")
 r=a.h(0,l)
 if(J.mw(r==null?0:r,0))s.push(A.c(a.h(0,l))+" refunded")
@@ -63658,7 +63658,7 @@ k.push(new A.da(B.pH,a,a,A.M("Total "+a1.bx(A.d_(a3.h(0,"total"))),a,a,a,B.Rs,a,
 a2=a2.a(a3.h(0,a0))
 if(J.f_(a2==null?[]:a2))k.push(new A.aG(B.qY,A.M("Purchase order(s) created: "+J.yy(t.j.a(a3.h(0,a0)),", "),a,a,a,p,a,a,a),a))
 k.push(B.d8)
-k.push(A.M("Invoices, shipping and refunds are done in Magento; the POS follows them within a minute.",a,a,a,p,a,a,a))
+k.push(A.M("Issue invoices and refunds in Magento. When an item comes back, inspect it and record its bin in Inventory with the online order number.",a,a,a,p,a,a,a))
 a2=A.dq(A.BC(A.bb(k,B.az,B.K,B.Q),a,B.aV),a,620)
 r=A.b([],r)
 if(n)r.push(A.jd(B.a1L,B.baA,b.d?a:new A.aPE(b,a3)))
@@ -63675,8 +63675,10 @@ A.aPB.prototype={
 $1(a){return J.d(a.h(0,"id"),this.a.a.c)},
 $S:4}
 A.aPC.prototype={
-$1(a){var s=A.d_(a.h(0,"awaiting"))
-return(s==null?0:s)>0},
+$1(a){var s
+if(!J.d(a.h(0,"serialPickRequired"),!0)){s=A.d_(a.h(0,"awaiting"))
+s=(s==null?0:s)>0}else s=!1
+return s},
 $S:102}
 A.aPD.prototype={
 $1(a){return A.c(a==null?"":a).length!==0},

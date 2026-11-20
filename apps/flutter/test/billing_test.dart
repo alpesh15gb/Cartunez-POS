@@ -2,6 +2,22 @@ import 'package:cartunez_pos/core/billing.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('checkout accepts only representable minor-unit amounts', () {
+    expect(parsePaymentAmount('100.05'), 10005);
+    expect(parsePaymentAmount('0'), 0);
+    for (final value in ['NaN', 'Infinity', '1.2.5', '-0.01', '0.001', '1000000001']) {
+      expect(parsePaymentAmount(value), isNull, reason: value);
+    }
+  });
+
+  test('a matching vehicle exclusion prevents a compatible result', () {
+    final result = fitment({
+      'fitments': [{'make': 'Demo', 'model': 'One', 'yearFrom': 2020, 'yearTo': 2025,
+        'exclusions': [{'trim': 'Sport'}]}]
+    }, {'make': 'Demo', 'model': 'One', 'year': 2023, 'trim': 'Sport'});
+    expect(result.status, 'incompatible');
+  });
+
   final products = <Json>[
     {'id': 'part', 'retailPrice': 10000, 'wholesalePrice': 9000, 'taxRate': 1800, 'coreCharge': 0},
     {'id': 'battery', 'retailPrice': 549900, 'wholesalePrice': 494900, 'taxRate': 1800, 'coreCharge': 50000},

@@ -195,7 +195,8 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
     final parts = [
       if ((l['reserved'] ?? 0) > 0) '${l['reserved']} reserved',
       if ((l['deducted'] ?? 0) > 0) '${l['deducted']} taken from stock',
-      if ((l['awaiting'] ?? 0) > 0) '${l['awaiting']} waiting for stock',
+      if (l['serialPickRequired'] == true) 'Serial selection required. Resolve this order with the branch manager.'
+      else if ((l['awaiting'] ?? 0) > 0) '${l['awaiting']} waiting for stock',
       if ((l['canceled'] ?? 0) > 0) '${l['canceled']} cancelled',
       if ((l['refunded'] ?? 0) > 0) '${l['refunded']} refunded',
       // Units already invoiced but not in stock are "waiting"; "short" is for orders not yet invoiced.
@@ -212,7 +213,7 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
     final c = (o['customer'] as Map?) ?? {};
     final lines = (o['lines'] as List? ?? []).cast<Map>();
     final small = Theme.of(context).textTheme.bodySmall;
-    final awaiting = lines.any((l) => ((l['awaiting'] as num?) ?? 0) > 0);
+    final awaiting = lines.any((l) => l['serialPickRequired'] != true && ((l['awaiting'] as num?) ?? 0) > 0);
     final short = _short(o);
     final contact = [c['name'], c['phone'], c['email']].where((v) => '${v ?? ''}'.isNotEmpty).join(' · ');
     return AlertDialog(
@@ -254,7 +255,7 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
                 child: Text('Purchase order(s) created: ${(o['purchaseOrderIds'] as List).join(', ')}', style: small),
               ),
             const SizedBox(height: 8),
-            Text('Invoices, shipping and refunds are done in Magento; the POS follows them within a minute.', style: small),
+            Text('Issue invoices and refunds in Magento. When an item comes back, inspect it and record its bin in Inventory with the online order number.', style: small),
           ]),
         ),
       ),

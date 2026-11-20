@@ -1,6 +1,6 @@
 // Magento orders → POS. Orders are read from Magento every minute. Each item's
 // stock is reserved in the online branch, taken out of the bins when Magento
-// invoices it, released when it is cancelled and put back when it is refunded.
+// invoices it and released when it is cancelled. Staff inspect physical returns.
 // Everything is worked out from Magento's per-item quantities, so reading the
 // same order again never counts it twice.
 import type { FastifyInstance } from "fastify";
@@ -26,18 +26,28 @@ function systemActor(organizationId: string, branchId: string): Actor {
 }
 
 /** What a Magento order item asks of the POS: units to hold, and units sold. */
-export function itemTargets(item: any) {
+export function itemTargets(item: any, previous: any = {}) {
   const ordered = Number(item.qty_ordered || 0);
   const invoiced = Number(item.qty_invoiced || 0);
   const canceled = Number(item.qty_canceled || 0);
   const refunded = Number(item.qty_refunded || 0);
+  // Older registers already put refunded units back. Preserve that historical
+  // movement when the same order is first read after an upgrade.
+  const priorReturnCredit = previous.priorReturnCredit ?? Math.max(0, Number(previous.invoiced || 0) - Number(previous.sold || 0));
   return {
+    priorReturnCredit,
     ordered,
     invoiced,
     canceled,
     refunded,
     reserve: Math.max(0, ordered - invoiced - canceled),
-    sold: Math.max(0, invoiced - refunded),
+    // A refund releases outstanding demand. A part already taken from a bin
+    // stays out until staff inspect it and record its physical return.
+    sold: Math.max(
+      Number(previous.deducted || 0),
+      Number(previous.sold || 0) + invoiced - Number(previous.invoiced || 0) - refunded + Number(previous.refunded || 0),
+      Math.max(0, Number(item.qty_shipped || 0) - priorReturnCredit),
+    ),
   };
 }
 
@@ -94,7 +104,9 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
     }
     const want = Number(line.sold || 0);
     // Invoiced: take the units out of the bins with the most stock.
-    if (want > line.deducted) {
+    const product = await getRecord(db, order.organizationId, "product", line.productId);
+    line.serialPickRequired = !!product?.serialTracked && want > line.deducted;
+    if (want > line.deducted && !line.serialPickRequired) {
       let need = want - line.deducted;
       for (const bin of await binStock(db, actor, line.productId)) {
         if (need <= 0) break;
@@ -103,19 +115,6 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
         line.moves.push({ binId: bin.binId, qty: take });
         line.deducted += take;
         need -= take;
-      }
-    }
-    // Refunded: put the units back where they came from.
-    if (want < line.deducted) {
-      let back = line.deducted - want;
-      while (back > 0 && line.moves.length) {
-        const last = line.moves[line.moves.length - 1];
-        const qty = Math.min(back, last.qty);
-        await adjust(db, actor, line.productId, last.binId, qty, `Online refund #${order.number}`, order.id);
-        last.qty -= qty;
-        if (last.qty === 0) line.moves.pop();
-        line.deducted -= qty;
-        back -= qty;
       }
     }
     line.awaiting = Math.max(0, want - line.deducted);
@@ -143,7 +142,7 @@ export function orderState(order: any) {
   const canceled = lines.reduce((s: number, l: any) => s + l.canceled, 0);
   const refunded = lines.reduce((s: number, l: any) => s + l.refunded, 0);
   if (ordered > 0 && canceled >= ordered) return "cancelled";
-  if (refunded > 0 && lines.every((l: any) => l.deducted === 0)) return "refunded";
+  if (refunded > 0 && lines.every((l: any) => l.refunded + l.canceled >= l.ordered)) return "refunded";
   if (!lines.length) return "unmatched";
   return "sold";
 }
@@ -187,7 +186,7 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
       lines: items.map((item: any) => {
         const before = (existing?.lines || []).find((l: any) => l.itemId === item.item_id) || {};
         const product = products.find((p) => p.sku === item.sku);
-        const t = itemTargets(item);
+        const t = itemTargets(item, before);
         return {
           ...before,
           itemId: item.item_id,
@@ -201,6 +200,7 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
           refunded: t.refunded,
           reserve: t.reserve,
           sold: t.sold,
+          priorReturnCredit: t.priorReturnCredit,
         };
       }),
     };

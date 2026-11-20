@@ -38,7 +38,7 @@ void main() {
     final state = AppState();
     await tester.runAsync(state.init);
     await tester.runAsync(() => state.login(
-        api: 'http://127.0.0.1:4100/api/v1', organizationId: 'demo', branchId: 'pune',
+        api: const String.fromEnvironment('API', defaultValue: 'http://127.0.0.1:4100/api/v1'), organizationId: 'demo', branchId: 'pune',
         email: 'owner@motorline.local', password: 'MotorlineDemo123!'));
     // Start from the default design (the demo database keeps earlier runs).
     await tester.runAsync(() => state.mutate('/settings', {'labelLayout': <String, dynamic>{}}));

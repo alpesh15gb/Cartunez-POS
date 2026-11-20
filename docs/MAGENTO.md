@@ -38,8 +38,11 @@ prices and stock; Magento follows it.
 - **Awaiting stock:** units invoiced but not in the shop wait; they are taken automatically once
   stock arrives (or with **Fulfil from stock**). **Order missing parts** creates an open purchase
   order per supplier for the shortage, noted "For online order #…".
-- **Cancelled / refunded:** cancelled units release their hold; refunded units go back to the bins
-  they came from ("Online refund #…").
+- Cancelled units release their hold. A refund releases outstanding demand and records the financial credit.
+  When an item physically returns, inspect it and record one inventory adjustment in the correct bin,
+  with the online order number as its reason. Review any older automatic “Online refund” ledger entries before adjusting.
+- Sell serial-tracked items at the counter. New online publication is blocked. Existing external orders
+  that need a serial are held for branch review and cannot automatically deduct unidentified units.
 - Everything is derived from Magento's per-item ordered / invoiced / cancelled / refunded
   quantities, so re-reading an order never counts it twice, and partial invoices and refunds work.
 - Items whose SKU is not in the POS are shown as "Unknown parts" and are not guessed.

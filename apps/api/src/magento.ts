@@ -110,7 +110,7 @@ export function magentoProduct(
   categoryIds: number | null | (number | null)[] = null,
 ) {
   const links = (Array.isArray(categoryIds) ? categoryIds : [categoryIds]).filter((c): c is number => !!c);
-  const published = !!listing.published;
+  const published = !!listing.published && !product.serialTracked && product.type !== "service";
   const onOrder = listing.availability === "order";
   const inStock = qty > 0 || onOrder;
   const hide = listing.availability === "hidden" && qty <= 0;
@@ -582,6 +582,7 @@ export function magentoRoutes(app: FastifyInstance, db: Database, post: Post, fe
       const product = await getRecord(tx, actor.organizationId, "product", productId);
       if (!product) fail("A selected part no longer exists.", 404);
       if (product!.type === "service" && changes.published) fail(`${product!.name} is a service and cannot be sold online.`);
+      if (product!.serialTracked && changes.published) fail("This part needs a serial number at checkout. Sell it at the counter.");
       const existing = (await getRecord(tx, actor.organizationId, "onlineListing", productId)) || {
         id: productId,
         productId,

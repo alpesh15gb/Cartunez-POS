@@ -49,10 +49,8 @@ android {
 
     buildTypes {
         release {
-            // Falls back to the debug key only when no release key is set up,
-            // so a fresh checkout can still run `flutter run --release`.
-            signingConfig = if (keystorePropertiesFile.exists())
-                signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            // The release signing validation task fails if the shop key is missing.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

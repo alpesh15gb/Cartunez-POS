@@ -122,6 +122,6 @@ storeFile=C:/Users/<you>/.cartunez-keys/cartunez-pos-release.jks
 
 Keep the `.jks` file and its passwords backed up somewhere safe and private. Android only installs an
 update if it is signed with the same key, so losing it means every phone must uninstall and reinstall.
-Without `key.properties` the build falls back to the debug key.
+A release build requires the configured signing key. Use a debug build for local development.
 
 App icons come from `assets/icon/icon.png`; regenerate them with `dart run flutter_launcher_icons`.

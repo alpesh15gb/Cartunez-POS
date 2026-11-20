@@ -4,7 +4,17 @@ import { randomUUID } from "node:crypto";
 import { connectDatabase, migrate, getRecord, records } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
-import { pollMagentoOrders } from "../src/magento-orders.js";
+import { itemTargets, pollMagentoOrders } from "../src/magento-orders.js";
+
+test("financial refunds release outstanding demand and preserve physical deductions across upgrades", () => {
+  const item = { qty_ordered: 5, qty_invoiced: 5, qty_refunded: 2, qty_shipped: 0 };
+  const previous = { invoiced: 5, refunded: 0, sold: 5, deducted: 3 };
+  assert.equal(itemTargets(item, previous).sold, 3);
+  assert.equal(itemTargets(item, { ...previous, deducted: 5 }).sold, 5);
+  const legacy = { invoiced: 5, refunded: 2, sold: 3, deducted: 3 };
+  assert.equal(itemTargets({ ...item, qty_shipped: 5 }, legacy).sold, 3);
+  assert.equal(itemTargets({ ...item, qty_shipped: 5 }).sold, 5);
+});
 
 /** Magento with an editable list of orders, as GET /V1/orders returns them. */
 function fakeMagento() {
@@ -27,7 +37,7 @@ function fakeMagento() {
     return reply(404, { message: "Not found" });
   }) as typeof globalThis.fetch;
   let clock = Date.now();
-  const stamp = () => new Date((clock += 1000)).toISOString().slice(0, 19).replace("T", " ");
+  const stamp = () => new Date(clock = Math.max(Date.now(), clock + 1000)).toISOString().slice(0, 19).replace("T", " ");
   const order = (n: number, items: [string, number][], extra: any = {}) => {
     const o = {
       entity_id: n,
@@ -120,12 +130,14 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     await poll();
     assert.equal(await onHand("filter"), 21);
 
-    // 3. One unit refunded: it goes back to the bin it came from.
+    // 3. A money-only refund cannot create sellable stock, even on a replay.
     magento.update(o1, (i) => (i.qty_refunded = 1), "processing");
     await poll();
     rec = await online(1);
-    assert.equal(rec!.lines[0].deducted, 2);
-    assert.equal(await onHand("filter"), 22);
+    assert.equal(rec!.lines[0].deducted, 3);
+    assert.equal(rec!.lines[0].refunded, 1);
+    await poll();
+    assert.equal(await onHand("filter"), 21);
 
     // 4. More batteries sold online than the shop has: it waits for stock.
     assert.equal(await onHand("battery"), 21);
@@ -179,7 +191,7 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     assert.equal((await call("integrations/magento/orders/poll", {}, owner)).imported >= 0, true);
 
     const hold = await call("holds", {
-      cart: { lines: [{ productId: "filter", binId: "bin-a1", qty: 17 }] },
+      cart: { lines: [{ productId: "filter", binId: "bin-a1", qty: 16 }] },
     }, owner);
     magento.order(5, [["ML-FILTER-01", 4]]);
     await poll();
@@ -191,12 +203,24 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     await poll();
     assert.equal((await records(db, "demo", "onlineOrder")).length, 67);
 
+    const serialPart = await call("products", { sku: "TRACKED-ONLINE", name: "Serialized test item", brand: "Fixture", category: "Parts", unit: "Each", serialTracked: true, retailPrice: 10000 }, owner);
+    await call("online-listings", { productIds: [serialPart.id], changes: { published: true } }, owner, 400);
+    await call("inventory/adjust", { productId: serialPart.id, binId: "bin-a1", quantity: 1, serials: ["PICK-1"], reason: "Test stock" }, owner);
+    const external = magento.order(68, [["TRACKED-ONLINE", 1]]);
+    magento.update(external, i => (i.qty_invoiced = 1), "processing");
+    await poll();
+    const tracked = (await online(68))!.lines[0];
+    assert.equal(tracked.serialPickRequired, true);
+    assert.equal(tracked.awaiting, 1);
+    assert.equal(tracked.deducted, 0);
+    assert.equal(await onHand(serialPart.id), 1);
+
     // A revoked token is reported on "Check now" and kept for the screen.
     magento.setToken("rotated");
     const bad = await call("integrations/magento/orders/poll", {}, owner, 502);
     assert.match(bad.error, /isn't authorized/);
     assert.match((await boot(owner)).onlineOrdersCheck.error, /isn't authorized/);
-    assert.equal((await records(db, "demo", "onlineOrder")).length, 67);
+    assert.equal((await records(db, "demo", "onlineOrder")).length, 68);
   } finally {
     await app.close();
     await db.close();

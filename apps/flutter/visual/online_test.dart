@@ -38,6 +38,7 @@ void main() {
     // Fake Magento: answers the connection test and records product saves.
     final saves = <Map<String, dynamic>>[];
     final media = <String>[];
+    final categories = <Map<String, dynamic>>[];
     final orders = <Map<String, dynamic>>[];
     // Unique order numbers per run, so a failed earlier run cannot collide.
     final run = DateTime.now().millisecondsSinceEpoch ~/ 1000 % 10000000 * 10;
@@ -70,6 +71,17 @@ void main() {
         req.response.write(jsonEncode({'message': 'The consumer isn\'t authorized.'}));
       } else if (req.uri.path == '/rest/V1/store/storeConfigs') {
         req.response.write(jsonEncode([{'code': 'default', 'base_currency_code': 'INR', 'base_url': 'http://127.0.0.1/'}]));
+      } else if (req.uri.path == '/rest/all/V1/categories/list') {
+        final params = req.uri.queryParameters;
+        final name = params['searchCriteria[filter_groups][0][filters][0][value]'];
+        final parent = params['searchCriteria[filter_groups][1][filters][0][value]'];
+        final found = categories.where((c) => c['name'] == name && '${c['parent_id']}' == parent).toList();
+        req.response.write(jsonEncode({'items': found, 'total_count': found.length}));
+      } else if (req.method == 'POST' && req.uri.path == '/rest/all/V1/categories') {
+        final category = Map<String, dynamic>.from(jsonDecode(body)['category'] as Map);
+        category['id'] = 10 + categories.length;
+        categories.add(category);
+        req.response.write(jsonEncode(category));
       } else if (req.uri.path == '/rest/all/V1/orders') {
         req.response.write(jsonEncode({'items': orders, 'total_count': orders.length}));
       } else if (req.method == 'POST' && req.uri.path.endsWith('/media')) {
@@ -92,7 +104,7 @@ void main() {
     final state = AppState();
     await tester.runAsync(state.init);
     await tester.runAsync(() => state.login(
-        api: 'http://127.0.0.1:4100/api/v1', organizationId: 'demo', branchId: 'pune',
+        api: const String.fromEnvironment('API', defaultValue: 'http://127.0.0.1:4100/api/v1'), organizationId: 'demo', branchId: 'pune',
         email: 'owner@motorline.local', password: 'MotorlineDemo123!'));
     // Switch the module on (as Settings › Modules does).
     await tester.runAsync(() => state.mutate('/settings', {'features': {'onlineStore': true}}));
@@ -235,8 +247,7 @@ void main() {
         await state.api('/products/$id/images/${p['id']}', method: 'DELETE');
       }
     });
-    // Leave the demo database as it was: unpublish, disconnect, module off.
-    // Refund both orders in Magento so their stock returns to the demo shop.
+    // Refund both orders. Only an inspected physical return replenishes a bin.
     for (var i = 0; i < orders.length; i++) {
       final item = (orders[i]['items'] as List).first as Map;
       orders[i] = {...orders[i], 'updated_at': stamp(), 'state': 'closed',
@@ -246,6 +257,10 @@ void main() {
       await state.api('/integrations/magento/orders/poll', body: {});
       await state.sync();
     });
+    expect(state.available(firstId), 0);
+    await tester.runAsync(() => state.mutate('/inventory/adjust', {
+      'productId': firstId, 'binId': 'bin-a1', 'quantity': before, 'reason': 'Inspected test order returns',
+    }));
     expect(state.available(firstId), before);
     await tester.runAsync(() async {
       final ids = [for (final l in state.list('onlineListings')) l['productId']];

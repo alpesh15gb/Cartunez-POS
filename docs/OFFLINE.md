@@ -1,10 +1,16 @@
-# Offline operation
+# Register connectivity
 
-> **Note.** Enrolled offline counters with their own invoice ranges were a feature of the retired
-> Next.js/Electron/Capacitor clients and are not in the Flutter app yet. The Flutter app saves every
-> sale on the device before sending it and resends it with the same transaction ID when the server is
-> reachable again, so a sale is never lost or billed twice, but it does not issue invoice numbers
-> while the server is unreachable. Keep the Offline counters module switched off.
+## Flutter counter
+
+The Flutter counter saves the cart on the device. Checkout requires a current signed-in session, an open shift and a connection to the shop API. If the counter already shows Offline, retain the cart and reconnect before taking payment.
+
+If the connection drops during submission, the counter keeps the original transaction and retries with the same ID. Check Settings → Sync & audit before taking payment again. A confirmed invoice appears in Sales. A business rejection appears with its reason. Card and UPI confirmations come from the external provider. Enter each payment reference in Sync & audit for a waiting payment. Resolve local pending payments before closing their shift.
+
+The web counter stores the cart and pending payments together in IndexedDB. The first read migrates saved data from earlier releases. In browsers with Web Locks, a second POS tab waits until the active register tab closes. Windows holds a single running instance per desktop session. Signing back into the same account and branch restores its saved workspace. Server backups exclude pending device records.
+
+## Legacy enrolled counters
+
+The following sections describe the enrollment and invoice-range protocol supported by the API for the retired clients.
 
 ## Shop LAN
 

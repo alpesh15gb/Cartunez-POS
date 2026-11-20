@@ -248,7 +248,8 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       tok,
     );
     assert.equal(returned.total + returned2.total, sale.total);
-    const margins = await call("GET", "reports/margin?sku=" + part.sku, undefined, tok);
+    await call("POST", "products", { id: part.id, category: "Reclassified" }, tok);
+    const margins = await call("GET", "reports/margin?category=Filters&sku=" + part.sku, undefined, tok);
     assert.equal(margins.rows.length, 3);
     assert.equal(margins.rows.reduce((sum: number, row: any) => sum + row.margin, 0), margins.totals.margin);
     assert.equal(margins.totals.margin, 0);

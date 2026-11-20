@@ -57,6 +57,15 @@ void main() {
       await tester.pumpAndSettle();
       await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/$name-02-billing.png'));
 
+      // Exact SKU lookup must show the match even when catalog rows were copied.
+      final search = tester.widgetList<TextField>(find.byType(TextField))
+          .firstWhere((field) => field.controller != null).controller!;
+      search.text = 'ML-FILTER-01';
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Add Spin-On Oil Filter'), findsOneWidget);
+      search.clear();
+      await tester.pumpAndSettle();
+
       // Put two parts in the sale and open checkout.
       await tester.tap(find.byTooltip('Add Engine Air Filter'));
       await tester.pumpAndSettle();

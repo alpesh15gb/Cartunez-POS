@@ -195,8 +195,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       branchId: claims.branchId,
     } satisfies Actor;
   });
-  app.get("/api/v1/bootstrap", async (request: any) => {
-    const actor: Actor = request.actor;
+  const readBootstrap = async (db: Database, actor: Actor) => {
     const data: any = {
       lastSync: now(),
       organization: await getRecord(
@@ -292,23 +291,19 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         }),
       )
       .digest("hex");
-    if (
-      !(
-        await db.query(
-          "SELECT 1 FROM records WHERE organization_id=$1 AND kind='catalogSnapshot' AND id=$2",
-          [actor.organizationId, data.catalogRevision],
-        )
-      ).rows.length
-    )
-      await putRecord(db, actor.organizationId, "catalogSnapshot", {
-        id: data.catalogRevision,
-        products: data.products,
-        customers: data.customers,
-        settings: { ...data.settings },
-        branch: data.branch,
-        branchId: actor.branchId,
-        issuedAt: now(),
-      });
+    const cached = await db.query(
+      "SELECT 1 FROM records WHERE organization_id=$1 AND kind='catalogSnapshot' AND id=$2",
+      [actor.organizationId, data.catalogRevision],
+    );
+    const catalog = cached.rows.length ? null : {
+      id: data.catalogRevision,
+      products: data.products,
+      customers: data.customers,
+      settings: { ...data.settings },
+      branch: data.branch,
+      branchId: actor.branchId,
+      issuedAt: now(),
+    };
     if (actor.role === "cashier") {
       data.products = data.products.map(({ cost, ...product }: any) => product);
       data.invoices = data.invoices.map(({ cost, ...invoice }: any) => ({
@@ -322,6 +317,17 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       );
       data.coreReturns = data.coreReturns.filter(
         (entry: any) => entry.userId === actor.id || ownInvoices.has(entry.invoiceId),
+      );
+    }
+    return { data, catalog };
+  };
+  app.get("/api/v1/bootstrap", async (request: any) => {
+    const actor: Actor = request.actor;
+    const { data, catalog } = await db.readSnapshot((snapshot) => readBootstrap(snapshot, actor));
+    if (catalog) {
+      await db.query(
+        "INSERT INTO records(id,organization_id,kind,data) VALUES($1,$2,'catalogSnapshot',$3) ON CONFLICT DO NOTHING",
+        [catalog.id, actor.organizationId, JSON.stringify(catalog)],
       );
     }
     return data;
@@ -680,6 +686,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       (existing.serialTracked !== product.serialTracked ||
         existing.type !== product.type)
     ) {
+      if ((product.serialTracked || product.type === "service") && (await getRecord(tx, actor.organizationId, "onlineListing", product.id))?.published)
+        fail("Unpublish this part from the online store before changing its tracking or item type.", 409);
       const stocked = await tx.query(
         "SELECT 1 FROM stock WHERE organization_id=$1 AND product_id=$2 AND quantity<>0 LIMIT 1",
         [actor.organizationId, product.id],
