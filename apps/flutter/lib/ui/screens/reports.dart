@@ -76,7 +76,16 @@ String reportCsv(List<Map> rows, {required String currency}) {
 }
 
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key});
+  const ReportsScreen({super.key, this.initial, this.onNameChanged});
+
+  /// Report to open first (from the /reports/:name link).
+  final String? initial;
+
+  /// Called when the user picks another report, so the address can follow.
+  final ValueChanged<String>? onNameChanged;
+
+  /// Every report name, in menu order.
+  static const names = _reports;
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
@@ -98,9 +107,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   void initState() {
     super.initState();
+    if (_reports.contains(widget.initial)) name = widget.initial!;
     final now = context.appRead.businessTime(DateTime.now());
     final end = DateTime(now.year, now.month, now.day);
     range = DateTimeRange(start: DateTime(now.year, now.month, now.day - 29), end: end);
+  }
+
+  @override
+  void didUpdateWidget(ReportsScreen old) {
+    super.didUpdateWidget(old);
+    final next = widget.initial;
+    if (next != old.initial && next != null && next != name && _reports.contains(next)) changeFilter(() => name = next);
   }
 
   String columnLabel(String key) {
@@ -246,10 +263,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
         SizedBox(
           width: 240,
           child: DropdownButtonFormField<String>(
+            key: ValueKey(name),
+            isExpanded: true,
             initialValue: name,
             decoration: const InputDecoration(labelText: 'Report'),
-            items: [for (final n in names) DropdownMenuItem(value: n, child: Text(humanize(n)))],
-            onChanged: busy ? null : (v) => changeFilter(() => name = v ?? name),
+            items: [for (final n in names) DropdownMenuItem(value: n, child: Text(humanize(n), overflow: TextOverflow.ellipsis))],
+            onChanged: busy ? null : (v) {
+              changeFilter(() => name = v ?? name);
+              widget.onNameChanged?.call(name);
+            },
           ),
         ),
         if (!_snapshotReports.contains(name)) OutlinedButton.icon(

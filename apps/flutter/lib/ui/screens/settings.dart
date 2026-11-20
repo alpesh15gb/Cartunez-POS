@@ -106,17 +106,6 @@ class SettingsScreen extends StatelessWidget {
             : Column(children: [for (final card in cards) Padding(padding: const EdgeInsets.only(bottom: 14), child: card)]);
       }),
       if (app.isOwner) ...[
-        SectionTitle('Staff', trailing: OutlinedButton.icon(onPressed: () => editUser(context, const {}), icon: const Icon(Icons.add), label: const Text('Add staff'))),
-        DataList(
-          rows: app.list('users'),
-          onTap: (u) => editUser(context, u),
-          columns: [
-            Col('Name', (u) => Text('${u['name']}', style: const TextStyle(fontWeight: FontWeight.w700))),
-            Col('Email', (u) => Text('${u['email']}'), flex: 2),
-            Col('Role', (u) => Text(titleCase('${u['role']}'))),
-            Col('Status', (u) => StatusChip(u['active'] == true ? 'Active' : 'Disabled')),
-          ],
-        ),
         SectionTitle('Branches', trailing: OutlinedButton.icon(onPressed: () => editBranch(context, const {}), icon: const Icon(Icons.add), label: const Text('Add branch'))),
         DataList(
           rows: app.list('branches'),
@@ -128,6 +117,32 @@ class SettingsScreen extends StatelessWidget {
           ],
         ),
       ],
+    ]);
+  }
+}
+
+/// Staff accounts (People & Vehicles › Staff). Owners only.
+class StaffScreen extends StatelessWidget {
+  const StaffScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Toolbar([
+        FilledButton.icon(onPressed: () => editUser(context, const {}), icon: const Icon(Icons.add), label: const Text('Add staff')),
+      ]),
+      DataList(
+        rows: app.list('users'),
+        empty: 'No staff yet.',
+        onTap: (u) => editUser(context, u),
+        columns: [
+          Col('Name', (u) => Text('${u['name']}', style: const TextStyle(fontWeight: FontWeight.w700))),
+          Col('Email', (u) => Text('${u['email']}'), flex: 2),
+          Col('Role', (u) => Text(titleCase('${u['role']}'))),
+          Col('Status', (u) => StatusChip(u['active'] == true ? 'Active' : 'Disabled')),
+        ],
+      ),
     ]);
   }
 }

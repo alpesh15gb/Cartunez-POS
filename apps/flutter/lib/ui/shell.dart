@@ -2,11 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
+import '../core/billing.dart';
 import '../main.dart';
 import '../state/app_state.dart';
 import 'barcode_scan.dart';
 import 'login.dart';
+import 'prefs.dart';
 import 'screens/billing.dart';
 import 'screens/bills.dart';
 import 'screens/dashboard.dart';
@@ -15,9 +18,11 @@ import 'screens/online.dart';
 import 'screens/online_orders.dart';
 import 'screens/people.dart';
 import 'screens/purchasing.dart';
+import 'screens/receipt.dart';
 import 'screens/reports.dart';
 import 'screens/sales.dart';
 import 'screens/settings.dart';
+import 'screens/tools.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -25,80 +30,249 @@ const _sellers = ['owner', 'manager', 'cashier'];
 const _stock = ['owner', 'manager', 'inventory'];
 const _everyone = ['owner', 'manager', 'cashier', 'inventory'];
 const _managers = ['owner', 'manager'];
+const _owners = ['owner'];
 
+/// Opens the record named in a detail link (for example an invoice receipt).
+/// Returns null when the record is not on this device (yet).
+typedef DetailOpener = Future<void>? Function(BuildContext context, String id);
+
+/// One sub-tab of a workspace, with its own address.
 class TabDef {
-  const TabDef(this.id, this.label, this.roles, this.help, this.build, {this.feature});
+  const TabDef(this.id, this.label, this.roles, this.help, this.build,
+      {required this.path, this.feature, this.detail, this.takesArg = false});
+
+  /// Stable id used by [ShellController.open] (kept from the old navigation).
   final String id;
   final String label;
   final List<String> roles;
   final String help;
-  final Widget Function() build;
+
+  /// Builds the screen. [arg] is the trailing path segment for tabs that
+  /// [takesArg] (for example /reports/:name); null otherwise.
+  final Widget Function(BuildContext context, String? arg) build;
+
+  /// Address of this tab, for example /orders/invoices.
+  final String path;
   final String? feature;
+
+  /// When set, `path/:id` opens that record over the list.
+  final DetailOpener? detail;
+  final bool takesArg;
+
+  bool get hasArg => takesArg || detail != null;
+  bool visibleTo(AppState app) => roles.contains(app.role) && (feature == null || app.feature(feature!));
 }
 
-class Area {
-  const Area(this.label, this.icon, this.tabs);
+/// A top-level workspace: a nav destination holding one or more sub-tabs.
+class Workspace {
+  const Workspace(this.root, this.label, this.short, this.icon, this.tabs);
+
+  /// Address of the workspace itself; opens its first tab you may use.
+  final String root;
   final String label;
+
+  /// Label for the phone bottom bar and the narrow rail.
+  final String short;
   final IconData icon;
   final List<TabDef> tabs;
+
+  List<TabDef> visibleTabs(AppState app) => [for (final t in tabs) if (t.visibleTo(app)) t];
 }
 
-final areas = <Area>[
-  Area('Billing', Icons.point_of_sale_outlined, [
-    TabDef('billing', 'Billing', _sellers, 'Scan or pick parts, then take payment.', () => const BillingScreen()),
+Json? _find(List<Json> rows, String id, [List<String> alsoBy = const []]) {
+  for (final row in rows) {
+    if ('${row['id']}' == id) return row;
+  }
+  for (final key in alsoBy) {
+    for (final row in rows) {
+      if ('${row[key]}' == id) return row;
+    }
+  }
+  return null;
+}
+
+Future<void>? _openInvoice(BuildContext context, String id) {
+  final app = context.appRead;
+  final doc = _find([...app.list('invoices'), ...app.list('returns')], id, ['number']);
+  return doc == null ? null : showReceipt(context, doc);
+}
+
+Future<void>? _openOnlineOrder(BuildContext context, String id) {
+  final order = _find(context.appRead.list('onlineOrders'), id, ['incrementId', 'number']);
+  return order == null ? null : showOnlineOrder(context, order);
+}
+
+Future<void>? _openBill(BuildContext context, String id) {
+  final bill = _find(context.appRead.list('purchaseBills'), id, ['billNumber']);
+  return bill == null ? null : showBill(context, bill);
+}
+
+DetailOpener _openLedger(String kind) => (context, id) {
+      final party = _find(context.appRead.list(kind), id);
+      return party == null ? null : showLedger(context, kind, party);
+    };
+
+final workspaces = <Workspace>[
+  Workspace('/counter', 'Counter', 'Counter', Icons.point_of_sale_outlined, [
+    TabDef('billing', 'Billing', _sellers, 'Scan or pick parts, then take payment.', (_, _) => const BillingScreen(),
+        path: '/counter'),
   ]),
-  Area('Sales', Icons.receipt_long_outlined, [
-    TabDef('invoices', 'Invoices', _sellers, 'Reprint receipts, take returns and void invoices.', () => const InvoicesScreen()),
-    TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', () => const ShiftsScreen()),
+  Workspace('/orders', 'Orders & bills', 'Orders', Icons.receipt_long_outlined, [
+    TabDef('invoices', 'Invoices & returns', _sellers, 'Reprint receipts, take returns, void invoices and see credit notes.',
+        (_, _) => const InvoicesScreen(),
+        path: '/orders/invoices', detail: _openInvoice),
+    TabDef('online-orders', 'Online orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
+        (_, _) => const OnlineOrdersScreen(),
+        path: '/orders/online', feature: 'onlineStore', detail: _openOnlineOrder),
   ]),
-  Area('Customers', Icons.people_outline, [
-    TabDef('customers', 'Customers', _sellers, 'Customers, credit (udhaar) balances and payments received.',
-        () => const ContactsScreen(kind: 'customers')),
-  ]),
-  Area('Inventory', Icons.inventory_2_outlined, [
-    TabDef('parts', 'Parts', _everyone, 'Parts, prices, stock and labels.', () => const PartsScreen()),
-    TabDef('bins', 'Bins', _stock, 'Racks and bins where stock is kept.', () => const BinsScreen()),
-    TabDef('fitment', 'Fitment', _stock, 'Which vehicles each part fits.', () => const FitmentScreen(), feature: 'fitment'),
-    TabDef('transfers', 'Transfers', _stock, 'Stock sent between branches.', () => const TransfersScreen(),
-        feature: 'transfers'),
+  Workspace('/catalog', 'Catalog & stock', 'Stock', Icons.inventory_2_outlined, [
+    TabDef('parts', 'Parts', _everyone, 'Parts, prices, stock and labels.', (_, _) => const PartsScreen(), path: '/catalog/parts'),
+    TabDef('bins', 'Bins', _stock, 'Racks and bins where stock is kept.', (_, _) => const BinsScreen(), path: '/catalog/bins'),
+    TabDef('fitment', 'Fitment', _stock, 'Which vehicles each part fits.', (_, _) => const FitmentScreen(),
+        path: '/catalog/fitment', feature: 'fitment'),
+    TabDef('transfers', 'Transfers', _stock, 'Stock sent between branches.', (_, _) => const TransfersScreen(),
+        path: '/catalog/transfers', feature: 'transfers'),
     TabDef('warranty', 'Warranty & cores', _stock, 'Supplier warranty claims and core deposit refunds.',
-        () => const WarrantyScreen(), feature: 'warranty'),
+        (_, _) => const WarrantyScreen(),
+        path: '/catalog/warranty', feature: 'warranty'),
+    TabDef('counts', 'Stock counts', _stock, 'Count a bin and review the difference before stock changes.',
+        (_, _) => const StockCountsPage(),
+        path: '/catalog/counts'),
+    TabDef('import', 'Import', _stock, 'Add or update many parts from a CSV file.', (_, _) => const CatalogImportPage(),
+        path: '/catalog/import'),
+    TabDef('labels', 'Labels', _everyone, 'Barcode labels for parts and bins.', (_, _) => const LabelsPage(), path: '/catalog/labels'),
+    TabDef('online', 'Online products', _managers, 'Publish parts to your Magento store and set online prices and availability.',
+        (_, _) => const OnlineStoreScreen(),
+        path: '/catalog/online', feature: 'onlineStore'),
   ]),
-  Area('Online store', Icons.storefront_outlined, [
-    TabDef('online', 'Products', _managers, 'Publish parts to your Magento store and set online prices and availability.',
-        () => const OnlineStoreScreen(), feature: 'onlineStore'),
-    TabDef('online-orders', 'Orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
-        () => const OnlineOrdersScreen(), feature: 'onlineStore'),
+  Workspace('/purchasing', 'Purchasing', 'Purchasing', Icons.local_shipping_outlined, [
+    TabDef('bills', 'Supplier bills', _stock,
+        'Enter what suppliers deliver: items, cost, photo of their note. Adds stock and the supplier balance.',
+        (_, _) => const BillsScreen(),
+        path: '/purchasing/bills', detail: _openBill),
+    TabDef('orders', 'Purchase orders', _stock, 'Order from suppliers; enter the bill when the goods arrive.',
+        (_, _) => const OrdersScreen(),
+        path: '/purchasing/orders'),
+    TabDef('suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
+        (_, _) => const ContactsScreen(kind: 'suppliers'),
+        path: '/purchasing/suppliers', detail: _openLedger('suppliers')),
   ]),
-  Area('Purchasing', Icons.local_shipping_outlined, [
-    TabDef('bills', 'Supplier bills', _stock, 'Enter what suppliers deliver: items, cost, photo of their note. Adds stock and the supplier balance.',
-        () => const BillsScreen()),
-    TabDef('orders', 'Purchase orders', _stock, 'Order from suppliers; enter the bill when the goods arrive.', () => const OrdersScreen()),
-    TabDef('suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.', () => const ContactsScreen(kind: 'suppliers')),
+  Workspace('/people', 'People & vehicles', 'People', Icons.people_outline, [
+    TabDef('customers', 'Customers', _sellers, 'Customers, credit (udhaar) balances and payments received.',
+        (_, _) => const ContactsScreen(kind: 'customers'),
+        path: '/people/customers', detail: _openLedger('customers')),
+    TabDef('people-suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
+        (_, _) => const ContactsScreen(kind: 'suppliers'),
+        path: '/people/suppliers', detail: _openLedger('suppliers')),
+    TabDef('staff', 'Staff', _owners, 'Staff accounts, roles and who can sign in.', (_, _) => const StaffScreen(),
+        path: '/people/staff'),
   ]),
-  Area('Dashboard', Icons.insights_outlined, [
-    TabDef('dashboard', 'Dashboard', _everyone, 'Today at a glance.', () => const DashboardScreen()),
-  ]),
-  Area('Reports', Icons.bar_chart_outlined, [
-    TabDef('reports', 'Reports', _stock, 'Sales, stock and tax reports with CSV export.', () => const ReportsScreen()),
-  ]),
-  Area('Settings', Icons.tune_outlined, [
-    TabDef('settings', 'Settings', _everyone, 'Business details, staff and this counter.', () => const SettingsScreen()),
-    TabDef('sync', 'Sync & audit', _sellers, 'Sales waiting to send and the audit trail.', () => const SyncScreen()),
+  Workspace('/shift', 'Shift, reports & settings', 'Shift', Icons.insights_outlined, [
+    TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', (_, _) => const ShiftsScreen(), path: '/shift'),
+    TabDef('tender', 'Tender check', _managers, 'Compare card and UPI takings with your statement.',
+        (_, _) => const TenderComparisonPage(),
+        path: '/shift/tender'),
+    TabDef('dashboard', 'Dashboard', _everyone, 'Today at a glance.', (_, _) => const DashboardScreen(), path: '/dashboard'),
+    TabDef('reports', 'Reports', _stock, 'Sales, stock and tax reports with CSV export.',
+        (context, name) => ReportsScreen(initial: name, onNameChanged: (next) => context.go('/reports/$next')),
+        path: '/reports', takesArg: true),
+    TabDef('settings', 'Settings', _everyone, 'Business details, branches, labels and this counter.',
+        (_, _) => const SettingsScreen(),
+        path: '/settings'),
+    TabDef('sync', 'Sync & audit', _sellers, 'Sales waiting to send and the audit trail.', (_, _) => const SyncScreen(),
+        path: '/settings/sync'),
   ]),
 ];
 
+/// Old section ids that are not a tab id any more.
+const _aliases = {'credit-notes': 'invoices', 'returns': 'invoices', 'products': 'parts', 'tender-comparison': 'tender'};
+
+TabDef? tabById(String id) {
+  final key = _aliases[id] ?? id;
+  for (final ws in workspaces) {
+    for (final tab in ws.tabs) {
+      if (tab.id == key) return tab;
+    }
+  }
+  return null;
+}
+
+/// The address for a tab id such as 'suppliers' (null when unknown).
+String? pathForId(String id) => tabById(id)?.path;
+
+Workspace workspaceOf(TabDef tab) => workspaces.firstWhere((ws) => ws.tabs.contains(tab));
+
+/// The tab (and trailing argument) shown at [path], or null.
+({TabDef tab, String? arg})? matchPath(String path) {
+  final clean = path.length > 1 && path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+  for (final ws in workspaces) {
+    for (final tab in ws.tabs) {
+      if (clean == tab.path) return (tab: tab, arg: null);
+    }
+  }
+  for (final ws in workspaces) {
+    for (final tab in ws.tabs) {
+      if (!tab.hasArg || !clean.startsWith('${tab.path}/')) continue;
+      final rest = clean.substring(tab.path.length + 1);
+      if (rest.isNotEmpty && !rest.contains('/')) return (tab: tab, arg: Uri.decodeComponent(rest));
+    }
+  }
+  return null;
+}
+
+List<Workspace> visibleWorkspaces(AppState app) => [for (final ws in workspaces) if (ws.visibleTabs(app).isNotEmpty) ws];
+
+/// Where a signed-in user lands: the first tab their role may use.
+String homePath(AppState app) {
+  for (final ws in workspaces) {
+    final tabs = ws.visibleTabs(app);
+    if (tabs.isNotEmpty) return tabs.first.path;
+  }
+  return '/settings';
+}
+
 /// Navigation and the shared search box.
 class ShellController extends ChangeNotifier {
+  ShellController({this.navigate});
+
+  /// Id of the tab on screen (for example 'billing' or 'parts').
   String section = '';
   final search = TextEditingController();
   final searchFocus = FocusNode();
 
+  /// Set by the app shell: moves the router to an address. Without it (single
+  /// screen widget tests) [open] only switches [section].
+  void Function(String path)? navigate;
+
+  /// Opens a tab by id ('suppliers', 'bins', ...) or by address ('/orders/invoices/42').
   void open(String id) {
+    final path = id.startsWith('/') ? id : pathForId(id);
+    if (navigate != null && path != null) {
+      navigate!(path);
+      return;
+    }
     if (section == id) return;
     section = id;
     search.clear();
     notifyListeners();
+  }
+
+  /// The router moved to another tab (link, back button or [open]).
+  void arrived(String id) {
+    if (section == id) return;
+    section = id;
+    // Clear after this frame: the search box listeners are being built now.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      search.clear();
+      notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    searchFocus.dispose();
+    super.dispose();
   }
 }
 
@@ -107,14 +281,39 @@ class ShellScope extends InheritedNotifier<ShellController> {
   static ShellController of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<ShellScope>()!.notifier!;
 }
 
+/// Layout classes. Desktop: full rail and dense content. Tablet / small web:
+/// collapsible rail. Phone: bottom navigation bar with a More sheet.
+enum DeviceLayout {
+  phone,
+  tablet,
+  desktop;
+
+  static DeviceLayout of(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    if (width >= 1200) return desktop;
+    if (width >= 600) return tablet;
+    return phone;
+  }
+}
+
+/// The frame around every workspace: navigation, the top bar and the routed page.
 class Shell extends StatefulWidget {
-  const Shell({super.key});
+  const Shell({super.key, required this.location, required this.child});
+
+  /// Current address path, for example /orders/invoices.
+  final String location;
+
+  /// The routed workspace page.
+  final Widget child;
+
   @override
   State<Shell> createState() => _ShellState();
 }
 
 class _ShellState extends State<Shell> {
-  final controller = ShellController();
+  late final controller = ShellController(navigate: (path) {
+    if (mounted) GoRouter.of(context).go(path);
+  });
   StreamSubscription<String>? _messages;
   final _buffer = StringBuffer();
   DateTime _last = DateTime.fromMillisecondsSinceEpoch(0);
@@ -122,6 +321,7 @@ class _ShellState extends State<Shell> {
   @override
   void initState() {
     super.initState();
+    controller.section = matchPath(widget.location)?.tab.id ?? '';
     _messages = context.appRead.messages.stream.listen((text) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -129,6 +329,13 @@ class _ShellState extends State<Shell> {
         ..showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 5)));
     });
     HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  @override
+  void didUpdateWidget(Shell old) {
+    super.didUpdateWidget(old);
+    final id = matchPath(widget.location)?.tab.id;
+    if (id != null) controller.arrived(id);
   }
 
   @override
@@ -189,99 +396,180 @@ class _ShellState extends State<Shell> {
     return false;
   }
 
-  List<Area> _areasFor(AppState app) => [
-        for (final area in areas)
-          if (_tabsFor(area, app).isNotEmpty) area,
-      ];
+  void _go(String path) => GoRouter.of(context).go(path);
 
-  List<TabDef> _tabsFor(Area area, AppState app) => [
-        for (final tab in area.tabs)
-          if (tab.roles.contains(app.role) && (tab.feature == null || app.feature(tab.feature!))) tab,
-      ];
+  void _openWorkspace(Workspace ws, AppState app) {
+    final tabs = ws.visibleTabs(app);
+    if (tabs.isNotEmpty) _go(tabs.first.path);
+  }
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    final visible = _areasFor(app);
-    final allTabs = [for (final a in visible) ..._tabsFor(a, app)];
-    if (!allTabs.any((t) => t.id == controller.section)) {
-      controller.section = allTabs.isEmpty ? 'settings' : allTabs.first.id;
+    final visible = visibleWorkspaces(app);
+    final tab = matchPath(widget.location)?.tab;
+    final active = tab == null ? null : workspaceOf(tab);
+    if (tab != null && controller.section.isEmpty) controller.section = tab.id;
+    final layout = DeviceLayout.of(context);
+    final prefs = UiPrefsScope.maybeOf(context);
+    final theme = Theme.of(context);
+
+    if (layout == DeviceLayout.phone) {
+      return ShellScope(
+        controller: controller,
+        child: Scaffold(
+          body: SafeArea(
+            bottom: false,
+            child: Column(children: [
+              _TopBar(controller: controller, layout: layout),
+              Expanded(child: widget.child),
+            ]),
+          ),
+          bottomNavigationBar: _PhoneNav(
+            visible: visible,
+            active: active,
+            onOpen: (ws) => _openWorkspace(ws, app),
+            onScan: () async {
+              final code = await requestBarcode(context);
+              if (code != null && context.mounted) handleScan(context, controller, code);
+            },
+            onMore: () => _moreSheet(context, visible, app),
+          ),
+        ),
+      );
     }
+
+    final desktop = layout == DeviceLayout.desktop;
+    final expanded = desktop || (prefs?.railExpanded ?? false);
+    final content = desktop
+        ? Theme(data: theme.copyWith(visualDensity: VisualDensity.compact), child: widget.child)
+        : widget.child;
     return ShellScope(
       controller: controller,
-      child: ListenableBuilder(
-        listenable: controller,
-        builder: (context, _) {
-          final area = visible.firstWhere((a) => a.tabs.any((t) => t.id == controller.section), orElse: () => visible.first);
-          final tabs = _tabsFor(area, app);
-          final tab = tabs.firstWhere((t) => t.id == controller.section, orElse: () => tabs.first);
-          final width = MediaQuery.sizeOf(context).width;
-          final content = _Content(area: area, tabs: tabs, tab: tab, controller: controller);
-          if (width >= 720) {
-            return Scaffold(
-              body: Row(children: [
-                _Sidebar(areas: visible, active: area, compact: width < 1100, onOpen: (a) => controller.open(_tabsFor(a, app).first.id)),
-                Expanded(child: content),
-              ]),
-            );
-          }
-          final primary = visible.take(4).toList();
-          final selected = primary.indexOf(area);
-          return Scaffold(
-            body: SafeArea(bottom: false, child: content),
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: selected < 0 ? primary.length : selected,
-              onDestinationSelected: (index) {
-                if (index < primary.length) {
-                  controller.open(_tabsFor(primary[index], app).first.id);
-                } else {
-                  _moreSheet(context, visible.skip(4).toList(), app);
-                }
-              },
-              destinations: [
-                for (final a in primary) NavigationDestination(icon: Icon(a.icon), label: a.label),
-                if (visible.length > 4) const NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
-              ],
-            ),
-          );
-        },
+      child: Scaffold(
+        body: Row(children: [
+          _Rail(
+            workspaces: visible,
+            active: active,
+            expanded: expanded,
+            onToggle: desktop || prefs == null ? null : prefs.toggleRail,
+            onOpen: (ws) => _openWorkspace(ws, app),
+          ),
+          Expanded(
+            child: Column(children: [
+              _TopBar(controller: controller, layout: layout),
+              Expanded(child: content),
+            ]),
+          ),
+        ]),
       ),
     );
   }
 
-  void _moreSheet(BuildContext context, List<Area> rest, AppState app) {
+  void _moreSheet(BuildContext context, List<Workspace> visible, AppState app) {
+    final prefs = UiPrefsScope.maybeOf(context);
+    final entries = <(IconData, String, String)>[
+      for (final ws in visible)
+        if (!_phoneRoots.contains(ws.root)) (ws.icon, ws.label, ws.visibleTabs(app).first.path),
+      for (final id in const ['import', 'labels', 'counts', 'reports', 'dashboard', 'settings', 'sync'])
+        if (tabById(id)!.visibleTo(app)) (_moreIcons[id]!, tabById(id)!.label, tabById(id)!.path),
+    ];
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheet) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final a in rest)
-            ListTile(
-              leading: Icon(a.icon),
-              title: Text(a.label),
-              onTap: () {
-                Navigator.pop(sheet);
-                controller.open(_tabsFor(a, app).first.id);
-              },
-            ),
-        ]),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
+          child: ListView(shrinkWrap: true, children: [
+            for (final (icon, label, path) in entries)
+              ListTile(
+                leading: Icon(icon),
+                title: Text(label),
+                selected: widget.location == path,
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _go(path);
+                },
+              ),
+            if (prefs != null) ...[
+              const Divider(),
+              ListTile(
+                leading: Icon(prefs.appearance.icon),
+                title: const Text('Appearance'),
+                trailing: Text(prefs.appearance.label),
+                onTap: () => prefs.setAppearance(prefs.appearance.next),
+              ),
+            ],
+          ]),
+        ),
       ),
     );
   }
 }
 
-class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.areas, required this.active, required this.compact, required this.onOpen});
-  final List<Area> areas;
-  final Area active;
-  final bool compact;
-  final void Function(Area) onOpen;
+/// Workspaces on the phone bottom bar; the rest live under More.
+const _phoneRoots = ['/counter', '/orders', '/catalog', '/shift'];
+
+const _moreIcons = {
+  'import': Icons.upload_file,
+  'labels': Icons.qr_code_2,
+  'counts': Icons.fact_check_outlined,
+  'reports': Icons.bar_chart_outlined,
+  'dashboard': Icons.insights_outlined,
+  'settings': Icons.tune_outlined,
+  'sync': Icons.sync,
+};
+
+class _PhoneNav extends StatelessWidget {
+  const _PhoneNav({required this.visible, required this.active, required this.onOpen, required this.onScan, required this.onMore});
+  final List<Workspace> visible;
+  final Workspace? active;
+  final void Function(Workspace) onOpen;
+  final VoidCallback onScan;
+  final VoidCallback onMore;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = [for (final root in _phoneRoots) ...visible.where((ws) => ws.root == root)];
+    final index = active == null ? -1 : primary.indexOf(active!);
+    return NavigationBar(
+      selectedIndex: index < 0 ? primary.length : index,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      onDestinationSelected: (i) {
+        if (i >= primary.length) return onMore();
+        // Tapping Stock again opens the camera scanner.
+        if (i == index && primary[i].root == '/catalog' && supportsBarcodeCamera) return onScan();
+        onOpen(primary[i]);
+      },
+      destinations: [
+        for (final ws in primary)
+          NavigationDestination(
+            icon: Icon(ws.root == '/catalog' ? Icons.qr_code_scanner : ws.icon),
+            label: ws.short,
+            tooltip: ws.root == '/catalog' ? 'Stock (tap again to scan)' : ws.label,
+          ),
+        const NavigationDestination(icon: Icon(Icons.more_horiz), label: 'More'),
+      ],
+    );
+  }
+}
+
+class _Rail extends StatelessWidget {
+  const _Rail({required this.workspaces, required this.active, required this.expanded, required this.onToggle, required this.onOpen});
+  final List<Workspace> workspaces;
+  final Workspace? active;
+  final bool expanded;
+  final VoidCallback? onToggle;
+  final void Function(Workspace) onOpen;
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final attention = app.pending.isNotEmpty || app.list('conflicts').any((c) => c['status'] == 'pending');
-    return Container(
+    final compact = !expanded;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
       width: compact ? 76 : 228,
       color: Brand.sidebar,
       child: SafeArea(
@@ -306,55 +594,66 @@ class _Sidebar extends StatelessWidget {
               ],
             ]),
           ),
-          for (final area in areas)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-              child: Tooltip(
-                message: compact ? area.label : '',
-                waitDuration: const Duration(milliseconds: 400),
-                child: Material(
-                  color: area == active ? const Color(0xFF2A3D32) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    hoverColor: const Color(0xFF23342E),
-                    onTap: () => onOpen(area),
-                    child: SizedBox(
-                      height: 44,
-                      child: Row(
-                        mainAxisAlignment: compact ? MainAxisAlignment.center : MainAxisAlignment.start,
-                        children: [
-                          if (!compact) const SizedBox(width: 12),
-                          Badge(
-                            isLabelVisible: area.label == 'Settings' && attention,
-                            backgroundColor: const Color(0xFFF0A43A),
-                            smallSize: 8,
-                            child: Icon(area.icon,
-                                size: 20, color: area == active ? Brand.lime : const Color(0xFFC6D0CA)),
+          Expanded(
+            child: ListView(padding: EdgeInsets.zero, children: [
+              for (final ws in workspaces)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  child: Tooltip(
+                    message: compact ? ws.label : '',
+                    waitDuration: const Duration(milliseconds: 400),
+                    child: Material(
+                      color: ws == active ? const Color(0xFF2A3D32) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        hoverColor: const Color(0xFF23342E),
+                        onTap: () => onOpen(ws),
+                        child: SizedBox(
+                          height: 44,
+                          child: Row(
+                            mainAxisAlignment: compact ? MainAxisAlignment.center : MainAxisAlignment.start,
+                            children: [
+                              if (!compact) const SizedBox(width: 12),
+                              Badge(
+                                isLabelVisible: ws.root == '/shift' && attention,
+                                backgroundColor: const Color(0xFFF0A43A),
+                                smallSize: 8,
+                                child: Icon(ws.icon, size: 20, color: ws == active ? Brand.lime : const Color(0xFFC6D0CA)),
+                              ),
+                              if (!compact) ...[
+                                const SizedBox(width: 13),
+                                Expanded(
+                                  child: Text(ws.label,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: ws == active ? const Color(0xFFD8F6AE) : const Color(0xFFC6D0CA),
+                                        fontWeight: ws == active ? FontWeight.w700 : FontWeight.w500,
+                                      )),
+                                ),
+                              ],
+                            ],
                           ),
-                          if (!compact) ...[
-                            const SizedBox(width: 13),
-                            Text(area.label,
-                                style: TextStyle(
-                                  color: area == active ? const Color(0xFFD8F6AE) : const Color(0xFFC6D0CA),
-                                  fontWeight: area == active ? FontWeight.w700 : FontWeight.w500,
-                                )),
-                          ],
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+            ]),
+          ),
+          if (onToggle != null)
+            IconButton(
+              tooltip: compact ? 'Show labels' : 'Hide labels',
+              onPressed: onToggle,
+              icon: Icon(compact ? Icons.chevron_right : Icons.chevron_left, color: const Color(0xFFC6D0CA)),
             ),
-          const Spacer(),
           const Divider(color: Color(0xFF37463F)),
           Padding(
             padding: EdgeInsets.all(compact ? 12 : 16),
             child: compact
                 ? const Icon(Icons.storefront_outlined, color: Color(0xFFA7B6AC))
                 : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('${app.snapshot['branch']?['name'] ?? app.session?.branchId}',
+                    Text('${app.snapshot['branch']?['name'] ?? app.session?.branchId ?? ''}',
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 3),
                     Text('${app.session?.user['name'] ?? ''} · ${titleCase(app.role)}',
@@ -367,63 +666,105 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-class _Content extends StatelessWidget {
-  const _Content({required this.area, required this.tabs, required this.tab, required this.controller});
-  final Area area;
-  final List<TabDef> tabs;
+/// A routed workspace page: heading, sub-tabs and the tab's screen. Detail
+/// links (path/:id) open the record over the list, then return to the list.
+class WorkspacePage extends StatefulWidget {
+  const WorkspacePage({super.key, required this.tab, this.arg});
   final TabDef tab;
-  final ShellController controller;
+  final String? arg;
 
   @override
-  Widget build(BuildContext context) {
-    final narrow = MediaQuery.sizeOf(context).width < 720;
-    return Column(children: [
-      _TopBar(controller: controller, narrow: narrow),
-      Expanded(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          switchInCurve: Curves.easeOut,
-          child: KeyedSubtree(
-            key: ValueKey(tab.id),
-            child: tab.id == 'billing'
-                ? tab.build()
-                : ListView(
-                    padding: EdgeInsets.fromLTRB(narrow ? 16 : 32, 24, narrow ? 16 : 32, 40),
-                    children: [
-                      Text(area.label, style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(height: 4),
-                      Text(tab.help, style: Theme.of(context).textTheme.bodySmall),
-                      const SizedBox(height: 14),
-                      if (tabs.length > 1) ...[
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: SegmentedButton<String>(
-                            showSelectedIcon: false,
-                            segments: [for (final t in tabs) ButtonSegment(value: t.id, label: Text(t.label))],
-                            selected: {tab.id},
-                            onSelectionChanged: (value) => controller.open(value.first),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                      ],
-                      tab.build(),
-                    ],
-                  ),
-          ),
-        ),
-      ),
-    ]);
-  }
+  State<WorkspacePage> createState() => _WorkspacePageState();
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.controller, required this.narrow});
-  final ShellController controller;
-  final bool narrow;
+class _WorkspacePageState extends State<WorkspacePage> {
+  String? _opening;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _maybeOpenDetail();
+  }
+
+  @override
+  void didUpdateWidget(WorkspacePage old) {
+    super.didUpdateWidget(old);
+    if (old.arg != widget.arg) _opening = null;
+    _maybeOpenDetail();
+  }
+
+  void _maybeOpenDetail() {
+    final id = widget.arg;
+    final opener = widget.tab.detail;
+    if (id == null || opener == null || _opening == id) return;
+    _opening = id;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || widget.arg != id) return;
+      final app = context.appRead;
+      final shown = opener(context, id);
+      if (shown == null) {
+        // Not on this device yet: wait for the first sync before giving up.
+        if (app.lastSync == null) {
+          _opening = null;
+          return;
+        }
+        app.toast('${widget.tab.label}: "$id" was not found on this register.');
+        if (mounted && widget.arg == id) context.go(widget.tab.path);
+        return;
+      }
+      await shown;
+      if (mounted && widget.arg == id) context.go(widget.tab.path);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
+    if (widget.arg != null && _opening == null) _maybeOpenDetail();
+    final tab = widget.tab;
+    final body = tab.build(context, tab.takesArg ? widget.arg : null);
+    if (tab.id == 'billing') return body;
+    final ws = workspaceOf(tab);
+    final tabs = ws.visibleTabs(app);
+    final layout = DeviceLayout.of(context);
+    final pad = switch (layout) { DeviceLayout.phone => 16.0, DeviceLayout.tablet => 28.0, DeviceLayout.desktop => 24.0 };
+    final textTheme = Theme.of(context).textTheme;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(pad, layout == DeviceLayout.desktop ? 18 : 24, pad, 40),
+      children: [
+        Text(ws.label, style: layout == DeviceLayout.desktop ? textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800) : textTheme.headlineMedium),
+        const SizedBox(height: 4),
+        Text(tab.help, style: textTheme.bodySmall),
+        const SizedBox(height: 14),
+        if (tabs.length > 1) ...[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<String>(
+              showSelectedIcon: false,
+              segments: [for (final t in tabs) ButtonSegment(value: t.path, label: Text(t.label))],
+              selected: {tab.path},
+              onSelectionChanged: (value) => context.go(value.first),
+            ),
+          ),
+          SizedBox(height: layout == DeviceLayout.desktop ? 14 : 18),
+        ],
+        body,
+      ],
+    );
+  }
+}
+
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.controller, required this.layout});
+  final ShellController controller;
+  final DeviceLayout layout;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    final narrow = layout == DeviceLayout.phone;
+    final scheme = Theme.of(context).colorScheme;
+    final prefs = UiPrefsScope.maybeOf(context);
     final status = Tooltip(
       message: app.online ? 'Connected. Tap to refresh.' : 'Offline. Tap to retry.',
       child: InkWell(
@@ -440,16 +781,17 @@ class _TopBar extends StatelessWidget {
               narrow
                   ? (app.online ? 'Online' : 'Offline')
                   : '${app.online ? 'Online' : 'Offline'}${app.pending.isEmpty ? '' : ' · ${app.pending.length} waiting'}',
-              style: const TextStyle(fontSize: 12, color: Brand.muted),
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
             ),
           ]),
         ),
       ),
     );
+    final scans = {'billing', 'parts', 'bins'}.contains(controller.section);
     return Container(
-      height: 64,
-      padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 28),
-      decoration: const BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Brand.line))),
+      height: layout == DeviceLayout.desktop ? 56 : 64,
+      padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 24),
+      decoration: BoxDecoration(color: scheme.surface, border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor))),
       child: Row(children: [
         Expanded(
           child: ConstrainedBox(
@@ -469,13 +811,13 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
               onSubmitted: (value) {
-                if ({'billing', 'parts', 'bins'}.contains(controller.section) && value.trim().isNotEmpty) handleScan(context, controller, value);
+                if (scans && value.trim().isNotEmpty) handleScan(context, controller, value);
               },
             ),
           ),
         ),
         const SizedBox(width: 8),
-        if ({'billing', 'parts', 'bins'}.contains(controller.section))
+        if (scans)
           IconButton.filledTonal(
             tooltip: 'Scan barcode',
             onPressed: () async {
@@ -486,6 +828,12 @@ class _TopBar extends StatelessWidget {
           ),
         if (!narrow) const Spacer(),
         status,
+        if (!narrow && prefs != null)
+          IconButton(
+            tooltip: 'Appearance: ${prefs.appearance.label} (switch to ${prefs.appearance.next.label})',
+            onPressed: () => prefs.setAppearance(prefs.appearance.next),
+            icon: Icon(prefs.appearance.icon),
+          ),
         if (app.canSell) ...[
           const SizedBox(width: 6),
           Badge(
