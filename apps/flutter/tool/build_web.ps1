@@ -1,5 +1,6 @@
 # Builds the web app and refreshes apps/flutter/release/web, which the VPS
-# release copies as the site. Commit the result together with the source change.
+# release copies as the site. Commit it only while the VPS uses WEB_BUNDLE=committed;
+# CI (tool/build_web.sh) publishes the bundle for every commit on main.
 # Usage (from apps\flutter):  powershell -ExecutionPolicy Bypass -File tool\build_web.ps1
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..").ProviderPath
@@ -17,4 +18,4 @@ Remove-Item -Force -ErrorAction SilentlyContinue "$out\flutter_service_worker.js
 Get-ChildItem -Recurse -Force $out -Include '*.symbols', '.last_build_id' | Remove-Item -Force
 
 $size = (Get-ChildItem -Recurse $out | Measure-Object Length -Sum).Sum / 1MB
-Write-Host ("Web build ready at {0} ({1:N1} MB). Commit apps/flutter/release/web." -f $out, $size)
+Write-Host ("Web build ready at {0} ({1:N1} MB)." -f $out, $size)

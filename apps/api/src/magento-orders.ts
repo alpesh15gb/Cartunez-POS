@@ -9,12 +9,9 @@ import { getRecord, putRecord, records } from "./db.js";
 import { adjust, allow, fail, id, type Actor } from "./domain.js";
 import { magentoConfig } from "./online-queue.js";
 import { magentoRequest, MagentoError } from "./magento.js";
+import type { Post } from "./routes/types.js";
 
 type Fetch = typeof globalThis.fetch;
-type Post = (
-  path: string,
-  handler: (db: Database, actor: Actor, body: any, params: any) => Promise<any>,
-) => unknown;
 
 const paise = (v: unknown) => Math.round(Number(v || 0) * 100);
 const magentoDate = (iso: string) => iso.slice(0, 19).replace("T", " ");

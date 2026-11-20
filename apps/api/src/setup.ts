@@ -2,6 +2,7 @@ import type { Database } from "./db.js";
 import { getRecord, putRecord } from "./db.js";
 import { hashPassword } from "./domain.js";
 import { currencyCode, emailAddress } from "./settings.js";
+import { SERIES_DEFAULTS } from "./number-series.js";
 export async function bootstrapOwner(db: Database) {
   if (!process.env.BOOTSTRAP_OWNER_PASSWORD) return;
   const production = process.env.NODE_ENV === "production";
@@ -74,6 +75,7 @@ export async function bootstrapOwner(db: Database) {
       creditNotePrefix: "CR",
       nextCreditNote: 1,
       nextInvoice: 1,
+      ...SERIES_DEFAULTS,
       nextDeviceNumber: 100000,
       offlineHours: 24,
       offlineTenders: ["Cash"],

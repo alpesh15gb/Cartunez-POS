@@ -7,11 +7,8 @@ import { getRecord, putRecord, records } from "./db.js";
 import { allow, fail, integer, text, type Actor } from "./domain.js";
 import { magentoConfig, queueAllListings, queueMagentoSync } from "./online-queue.js";
 import { productImageData, productImages } from "./product-images.js";
+import type { Post } from "./routes/types.js";
 
-type Post = (
-  path: string,
-  handler: (db: Database, actor: Actor, body: any, params: any) => Promise<any>,
-) => unknown;
 type Fetch = typeof globalThis.fetch;
 
 export const availabilities = ["stock", "order", "hidden"] as const;

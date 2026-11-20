@@ -5,11 +5,8 @@ import type { Database } from "./db.js";
 import { getRecord, putRecord } from "./db.js";
 import { allow, fail, id, type Actor } from "./domain.js";
 import { queueMagentoSync } from "./online-queue.js";
+import type { Post } from "./routes/types.js";
 
-type Post = (
-  path: string,
-  handler: (db: Database, actor: Actor, body: any, params: any) => Promise<any>,
-) => unknown;
 
 const MAX_BYTES = 2_500_000;
 const MAX_PHOTOS = 8;

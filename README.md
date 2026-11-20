@@ -4,7 +4,7 @@ Automotive spare-parts POS. One Flutter app (`apps/flutter`) runs in the browser
 `pos.cartunez.in`, as a Windows program and as an Android app. All of them use the versioned
 TypeScript API (`apps/api`) with PostgreSQL as the single source of truth.
 
-Follow [the Git deployment guide](docs/CARTUNEZ-DEPLOYMENT.md) for first installation, updates, HTTPS, backups, and rollback. The API builds in Docker; the web app is the Flutter build committed at `apps/flutter/release/web`, so the VPS needs neither Node.js nor Flutter. The default deployment uses a dedicated source checkout at `/opt/cartunez-pos-source`, releases at `/opt/cartunez-pos`, Docker project `cartunezpos`, and API bound to `127.0.0.1:18400`.
+Follow [the Git deployment guide](docs/CARTUNEZ-DEPLOYMENT.md) for first installation, updates, HTTPS, backups, and rollback. The API builds in Docker; the web app is the Flutter build committed at `apps/flutter/release/web` or, once the owner switches the VPS over, the bundle CI builds for each commit on `main` (see the guide's *Web bundle from CI* section), so the VPS needs neither Node.js nor Flutter. The default deployment uses a dedicated source checkout at `/opt/cartunez-pos-source`, releases at `/opt/cartunez-pos`, Docker project `cartunezpos`, and API bound to `127.0.0.1:18400`.
 
 No application passwords, database files, or signing keys belong in this repository. The server setup generates credentials locally under `/etc/cartunez-pos`. Enter business identity, branch, tax, tender, and receipt preferences in the application Settings. Do not use the demonstration credentials below for production.
 
