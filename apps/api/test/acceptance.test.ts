@@ -207,6 +207,7 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       lines: [{ productId: part.id, qty: 2, binId: "bin-b1" }],
       tenders: [{ type: "Cash", amount: 50000, confirmed: true }],
     };
+    await call("POST", "invoices", { ...saleBody, expectedTotal: 47200 }, tok, 409);
     const sale = await call("POST", "invoices", saleBody, tok);
     assert.equal(sale.total, 47199);
     const repeat = await call("POST", "invoices", saleBody, tok);
@@ -247,6 +248,10 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       tok,
     );
     assert.equal(returned.total + returned2.total, sale.total);
+    const margins = await call("GET", "reports/margin?sku=" + part.sku, undefined, tok);
+    assert.equal(margins.rows.length, 3);
+    assert.equal(margins.rows.reduce((sum: number, row: any) => sum + row.margin, 0), margins.totals.margin);
+    assert.equal(margins.totals.margin, 0);
     await call(
       "POST",
       `invoices/${sale.id}/returns`,

@@ -19,7 +19,9 @@ function fakeMagento() {
     if (u.pathname === "/rest/all/V1/orders") {
       const since = u.searchParams.get("searchCriteria[filter_groups][0][filters][0][value]")!;
       const items = orders.filter((o) => o.updated_at >= since).sort((a, b) => a.updated_at.localeCompare(b.updated_at));
-      return reply(200, { items, total_count: items.length });
+      const page = Number(u.searchParams.get("searchCriteria[currentPage]"));
+      const size = Number(u.searchParams.get("searchCriteria[pageSize]"));
+      return reply(200, { items: items.slice((page - 1) * size, page * size), total_count: items.length });
     }
     if (u.pathname.startsWith("/rest/all/V1/products/")) return reply(200, { id: 1, sku: "x" });
     return reply(404, { message: "Not found" });
@@ -143,6 +145,7 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     assert.equal(po!.supplierId, "supplier-1");
     assert.deepEqual(po!.lines.map((l: any) => [l.productId, l.quantity]), [["battery", 4]]);
     assert.equal(po!.note, "For online order #000000002");
+    await call("online-orders/mg-2/purchase-order", {}, owner, 409);
 
     // Stock arrives: it is held for the order, and Fulfil takes it.
     await call("inventory/adjust", { productId: "battery", binId: "bin-a1", quantity: 4, reason: "Received", transactionId: randomUUID() }, owner);
@@ -175,12 +178,25 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     await call("integrations/magento/orders/poll", {}, cashier, 403);
     assert.equal((await call("integrations/magento/orders/poll", {}, owner)).imported >= 0, true);
 
+    const hold = await call("holds", {
+      cart: { lines: [{ productId: "filter", binId: "bin-a1", qty: 17 }] },
+    }, owner);
+    magento.order(5, [["ML-FILTER-01", 4]]);
+    await poll();
+    const filterStock = (await boot(owner)).stock.filter((row: any) => row.productId === "filter");
+    assert.ok(filterStock.every((row: any) => row.available >= 0));
+    assert.equal(filterStock.reduce((n: number, row: any) => n + row.available, 0), 1);
+    assert.ok(hold.id);
+    for (let n = 6; n < 68; n++) magento.order(n, [["UNMATCHED", 1]]);
+    await poll();
+    assert.equal((await records(db, "demo", "onlineOrder")).length, 67);
+
     // A revoked token is reported on "Check now" and kept for the screen.
     magento.setToken("rotated");
     const bad = await call("integrations/magento/orders/poll", {}, owner, 502);
     assert.match(bad.error, /isn't authorized/);
     assert.match((await boot(owner)).onlineOrdersCheck.error, /isn't authorized/);
-    assert.equal((await records(db, "demo", "onlineOrder")).length, 4);
+    assert.equal((await records(db, "demo", "onlineOrder")).length, 67);
   } finally {
     await app.close();
     await db.close();

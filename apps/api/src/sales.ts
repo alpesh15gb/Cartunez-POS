@@ -142,6 +142,8 @@ export async function finalizeSale(
           "India GST mode does not support refundable core deposits without a separately configured tax treatment.",
         );
     }
+    if ((!product.serialTracked || product.type === "service") && input.serials?.length)
+      fail("Only serial-tracked stock accepts serial numbers.");
     const qty = integer(input.qty, "Quantity", 1, 9999);
     const key = product.id + "|" + input.binId;
     if (used.has(key)) fail("Combine duplicate product and bin lines.");
@@ -268,10 +270,17 @@ export async function finalizeSale(
     settings.roundingIncrement;
   const rounding = total - unrounded;
   integer(total, "Invoice total");
-  if (lines.length) {
-    lines[lines.length - 1].rounding = rounding;
-    lines[lines.length - 1].total += rounding;
+  if (body.expectedTotal !== undefined && integer(body.expectedTotal, "Quoted total") !== total)
+    fail("The bill total changed. Refresh the register and review the amount before taking payment.", 409);
+  let remainingRounding = rounding;
+  for (const line of [...lines].reverse()) {
+    if (!remainingRounding) break;
+    line.rounding = Math.max(remainingRounding, -(line.total - line.coreCharge * line.qty));
+    line.total += line.rounding;
+    remainingRounding -= line.rounding;
   }
+  if (remainingRounding)
+    fail("Invoice rounding would reduce the refundable core deposit. Use a smaller rounding increment.", 409);
   if (
     !Array.isArray(body.tenders) ||
     !body.tenders.length ||
@@ -570,7 +579,14 @@ export async function returnInvoice(
         return { ...component, amount };
       },
     );
-    const rounding = proportion(original.rounding || 0);
+    // Allocate the refundable amount cumulatively so rounding components separately
+    // cannot produce a negative credit or pay the last unit twice.
+    const priorRefund = previous.flatMap((item) => item.lines)
+      .filter((line) => line.lineId === original.id)
+      .reduce((sum, line) => sum + line.total, 0);
+    const refundable = original.total - (original.coreCharge || 0) * original.qty;
+    const total = Math.max(0, roundRatio(refundable, returned + quantity, original.qty) - priorRefund);
+    const rounding = total - (subtotal - discount + (invoice.taxMode === "inclusive" ? 0 : tax));
     lines.push({
       lineId: original.id,
       productId: original.productId,
@@ -589,11 +605,7 @@ export async function returnInvoice(
       taxComponents,
       rounding,
       taxMode: invoice.taxMode || "exclusive",
-      total:
-        subtotal -
-        discount +
-        (invoice.taxMode === "inclusive" ? 0 : tax) +
-        rounding,
+      total,
       cost: original.cost * quantity,
     });
   }

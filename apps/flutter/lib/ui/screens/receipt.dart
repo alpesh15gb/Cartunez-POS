@@ -43,6 +43,7 @@ class ReceiptView {
       ];
 
   List<(String, String)> get payments => [
+        if (credit) ('Refund · ${doc['refundType'] ?? 'Cash'}', money(doc['total'] as num?)),
         for (final t in doc['tenders'] as List? ?? [])
           ('Paid · ${t['type']}${'${t['reference'] ?? ''}'.isNotEmpty ? ' · ${t['reference']}' : ''}', money(t['amount'] as num)),
         if (doc['change'] != null) ('Change', money(doc['change'] as num)),
@@ -148,7 +149,8 @@ Future<void> printReceipt(AppState app, Json doc) async {
         padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
         child: pw.Row(children: [
           pw.Expanded(child: pw.Text(a, style: pw.TextStyle(fontSize: strong ? 11 : 8, fontWeight: strong ? pw.FontWeight.bold : null))),
-          pw.Text(b, style: pw.TextStyle(fontSize: strong ? 11 : 8, fontWeight: strong ? pw.FontWeight.bold : null)),
+          pw.Flexible(flex: 2, child: pw.Text(b, textAlign: pw.TextAlign.right,
+              style: pw.TextStyle(fontSize: strong ? 11 : 8, fontWeight: strong ? pw.FontWeight.bold : null))),
         ]),
       );
   pdf.addPage(pw.Page(
@@ -161,14 +163,25 @@ Future<void> printReceipt(AppState app, Json doc) async {
       pw.Center(child: pw.Text(r.kind, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
       row('No.', '${doc['number'] ?? 'Pending'}'),
       row('Date', formatDate(doc['createdAt'])),
-      if (r.credit) row('Against', '${doc['invoiceNumber']}'),
-      if (doc['customer'] is Map) row('Customer', '${doc['customer']['name']}'),
+      if (r.credit) ...[
+        row('Against', '${doc['invoiceNumber']}'),
+        if (doc['invoiceDate'] != null) row('Invoice date', formatDate(doc['invoiceDate'])),
+        row('Reason', '${doc['reason'] ?? ''}'),
+      ],
+      if (doc['customer'] is Map) ...[
+        row('Customer', '${doc['customer']['name']}'),
+        if ('${doc['customer']['address'] ?? ''}'.isNotEmpty) row('Customer address', '${doc['customer']['address']}'),
+        if ('${doc['customer']['taxRegistrationId'] ?? ''}'.isNotEmpty) row('Customer tax ID', '${doc['customer']['taxRegistrationId']}'),
+      ],
       if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) row('Place of supply', '${doc['placeOfSupply']}'),
       pw.Divider(thickness: 0.5),
       for (final l in r.lines) ...[
         pw.Text(r.lineName(l), style: const pw.TextStyle(fontSize: 8.5)),
-        row('  ${r.lineQty(l)} × ${'${l['hsnSac'] ?? ''}'.isNotEmpty ? 'HSN ${l['hsnSac']} · ' : ''}${((l['taxRate'] ?? 0) as int) / 100}% tax',
-            r.money(l['total'] as num? ?? 0)),
+        row('${r.lineQty(l)} ${l['unit'] ?? ''}${l['unitPrice'] != null ? ' × ${r.money(l['unitPrice'])}' : ''}', r.money(l['total'] as num? ?? 0)),
+        if ('${l['hsnSac'] ?? ''}'.isNotEmpty) row('HSN / SAC', '${l['hsnSac']}'),
+        row('Taxable', r.money(r.taxable(l))),
+        row('Tax ${((l['taxRate'] ?? 0) as int) / 100}%', r.money(l['tax'])),
+        if ((l['serials'] as List? ?? []).isNotEmpty) row('Serials', (l['serials'] as List).join(', ')),
       ],
       pw.Divider(thickness: 0.5),
       for (final (a, b) in r.totals) row(a, b),

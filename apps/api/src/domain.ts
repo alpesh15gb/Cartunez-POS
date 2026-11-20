@@ -215,38 +215,28 @@ export async function inventory(db: Database, actor: Actor) {
   const sellable = new Set(
     (await records(db, actor.organizationId, "location", actor.branchId)).filter((b) => b.kind === "sellable").map((b) => b.id),
   );
-  const onlineByBin = new Map<string, number>();
-  for (const [productId, units] of online) {
-    let left = units;
-    for (const row of rows
-      .filter((r) => r.product_id === productId && sellable.has(r.bin_id))
-      .sort((a, b) => Number(b.quantity) - Number(a.quantity))) {
-      if (left <= 0) break;
-      const take = Math.min(left, Math.max(0, Number(row.quantity)));
-      onlineByBin.set(productId + "|" + row.bin_id, take);
-      left -= take;
+  const parkedByBin = new Map<string, number>();
+  for (const hold of holds) {
+    for (const line of hold.cart.lines) {
+      const key = line.productId + "|" + line.binId;
+      parkedByBin.set(key, (parkedByBin.get(key) || 0) + line.qty);
     }
   }
-  return rows.map((row) => {
-    const reserved = (onlineByBin.get(row.product_id + "|" + row.bin_id) || 0) + holds.reduce(
-      (sum, hold) =>
-        sum +
-        (hold.cart.lines || [])
-          .filter(
-            (line: any) =>
-              line.productId === row.product_id && line.binId === row.bin_id,
-          )
-          .reduce((sum: number, line: any) => sum + line.qty, 0),
-      0,
-    );
-    return {
-      productId: row.product_id,
-      binId: row.bin_id,
-      quantity: Number(row.quantity),
-      reserved,
-      available: Number(row.quantity) - reserved,
-    };
+  const stock = rows.map((row) => {
+    const quantity = Number(row.quantity);
+    const reserved = parkedByBin.get(row.product_id + "|" + row.bin_id) || 0;
+    return { productId: row.product_id, binId: row.bin_id, quantity, reserved, available: quantity - reserved };
   });
+  const candidates = stock.filter((row) => sellable.has(row.binId) && row.available > 0)
+    .sort((a, b) => b.available - a.available || a.binId.localeCompare(b.binId));
+  for (const row of candidates) {
+    const remaining = online.get(row.productId) || 0;
+    const allocated = Math.min(remaining, row.available);
+    row.reserved += allocated;
+    row.available -= allocated;
+    online.set(row.productId, remaining - allocated);
+  }
+  return stock;
 }
 export function fitment(
   product: RecordData,

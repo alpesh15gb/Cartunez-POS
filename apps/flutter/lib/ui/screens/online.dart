@@ -183,6 +183,14 @@ class _ConnectionBanner extends StatelessWidget {
               child: const Text('Retry errors'),
             ),
           TextButton(onPressed: () => app.sync(loud: true), child: const Text('Refresh')),
+          // Sends every website part again, e.g. after brands were added or the shop changed.
+          Tooltip(
+            message: 'Send every website part to the shop again (brands, categories, prices, stock)',
+            child: TextButton(
+              onPressed: () => app.mutate('/integrations/magento/retry', {'all': true}, 'Sending all website parts again.').catchError((e) => app.toast(errorText(e))),
+              child: const Text('Send all again'),
+            ),
+          ),
           const _ComparisonLine(),
         ]),
       ),

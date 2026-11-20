@@ -61,9 +61,10 @@ export async function report(
     products.filter(productMatch).map((product) => product.id),
   );
   const lineMatches = (line: any) => !productFiltered || productIds.has(line.productId);
-  const allSales = (
-    await records(db, actor.organizationId, "invoice", actor.branchId)
-  ).filter(
+  const invoices = await records(db, actor.organizationId, "invoice", actor.branchId);
+  const invoicesById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+  const historicalMatch = (line: any) => !productFiltered || productMatch(line);
+  const allSales = invoices.filter(
     (sale) =>
       inDate(sale.createdAt) &&
       (!filters.cashier || sale.cashierId === filters.cashier) &&
@@ -75,7 +76,7 @@ export async function report(
   const sales: any[] = allSales
     .map((sale) => ({
       ...sale,
-      lines: sale.lines.filter(lineMatches),
+      lines: sale.lines.filter(historicalMatch),
     }))
     .filter((sale) => sale.lines.length);
   const returns: any[] = (
@@ -89,7 +90,10 @@ export async function report(
     )
     .map((item) => ({
       ...item,
-      lines: item.lines.filter(lineMatches),
+      lines: item.lines.filter((line: any) => {
+        const original = invoicesById.get(item.invoiceId)?.lines.find((l: any) => l.id === line.lineId);
+        return original ? historicalMatch(original) : lineMatches(line);
+      }),
     }))
     .filter((item) => item.lines.length);
   const gross = sales.reduce(
@@ -147,7 +151,8 @@ export async function report(
   ).filter(
     (item) =>
       inDate(item.createdAt) &&
-      lineMatches(item) &&
+      (!productFiltered || invoicesById.get(item.invoiceId)?.lines.some((line: any) =>
+        line.productId === item.productId && historicalMatch(line))) &&
       (!filters.cashier || item.userId === filters.cashier) &&
       (!filters.paymentType || item.refundType === filters.paymentType),
   );
@@ -199,7 +204,7 @@ export async function report(
     name === "sales" ||
     name === "discounts" ||
     name === "margin"
-  )
+  ) {
     rows = sales
       .filter((sale) => name !== "discounts" || sale.lines.some((line: any) => line.discount > 0))
       .map((sale) => ({
@@ -225,7 +230,16 @@ export async function report(
           sum + line.total - line.tax - (line.cost + line.coreCharge) * line.qty, 0) } : {}),
         tenders: sale.tenders,
       }));
-  else if (name === "returns") rows = returns.map((item) => ({
+    if (name === "margin") {
+      for (const credit of returns) {
+        const total = -credit.lines.reduce((n: number, l: any) => n + l.total, 0);
+        const tax = -credit.lines.reduce((n: number, l: any) => n + l.tax, 0);
+        const cost = -credit.lines.reduce((n: number, l: any) => n + l.cost, 0);
+        rows.push({ id: credit.id, invoiceId: credit.invoiceId, number: credit.number,
+          date: credit.createdAt, cashierId: credit.userId, total, tax, cost, margin: total - tax - cost });
+      }
+    }
+  } else if (name === "returns") rows = returns.map((item) => ({
     ...item,
     total: item.lines.reduce((sum: number, line: any) => sum + line.total, 0),
     tax: item.lines.reduce((sum: number, line: any) => sum + line.tax, 0),
@@ -430,7 +444,10 @@ export async function report(
       )
       .flatMap((item) =>
         item.lines
-          .filter((line: any) => productIds.has(line.productId))
+          .filter((line: any) => {
+            const part = products.find((p) => p.id === line.productId);
+            return (!filters.category || part?.category === filters.category) && (!filters.sku || part?.sku === filters.sku);
+          })
           .map((line: any) => ({
             id: item.id,
             purchaseOrderId: item.purchaseOrderId,

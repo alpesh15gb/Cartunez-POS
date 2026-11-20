@@ -31,6 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     if (!_form.currentState!.validate()) {
       setState(() => _showServer = true);
       return;
@@ -68,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 Text('Sign in', style: Theme.of(context).textTheme.headlineMedium),
                 const SizedBox(height: 4),
-                Text('Open your shop register.', style: Theme.of(context).textTheme.bodySmall),
+                Text(context.app.sessionProblem ?? 'Open your shop register.', style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 22),
                 TextFormField(
                   controller: _email,

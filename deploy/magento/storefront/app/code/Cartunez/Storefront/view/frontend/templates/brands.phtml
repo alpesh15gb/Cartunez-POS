@@ -1,0 +1,29 @@
+<?php
+/** @var \Cartunez\Storefront\Block\BrandCards $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$brands = $block->getBrands();
+if (!$brands) {
+    return;
+}
+?>
+<div class="cz-section-head">
+    <span class="cz-kicker"><?= $escaper->escapeHtml(__('Brands we stock')) ?></span>
+    <h2 id="cz-brands"><?= $escaper->escapeHtml(__('Shop by brand')) ?></h2>
+</div>
+<ul class="cz-brands">
+    <?php foreach ($brands as $brand): ?>
+        <li>
+            <a class="cz-brand" href="<?= $escaper->escapeUrl($brand['url']) ?>">
+                <span class="cz-brand-logo">
+                    <?php if ($brand['image']): ?>
+                        <img src="<?= $escaper->escapeUrl($brand['image']) ?>" alt="<?= $escaper->escapeHtmlAttr($brand['name']) ?>" loading="lazy">
+                    <?php else: ?>
+                        <span class="cz-brand-initials"><?= $escaper->escapeHtml($block->initials($brand['name'])) ?></span>
+                    <?php endif; ?>
+                </span>
+                <strong><?= $escaper->escapeHtml($brand['name']) ?></strong>
+                <span class="cz-brand-count"><?= $escaper->escapeHtml(__($brand['count'] === 1 ? '%1 item' : '%1 items', $brand['count'])) ?></span>
+            </a>
+        </li>
+    <?php endforeach; ?>
+</ul>

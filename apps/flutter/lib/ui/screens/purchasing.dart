@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart';
 import '../shell.dart';
 import '../widgets.dart';
 
@@ -45,64 +46,131 @@ class OrdersScreen extends StatelessWidget {
 Future<void> newOrder(BuildContext context) async {
   final app = context.appRead;
   if (app.list('suppliers').isEmpty) return app.toast('Add a supplier first (Purchasing › Suppliers).');
+  await _purchaseDialog(context, app);
+}
+
+Future<void> receiveOrder(BuildContext context, Json order) =>
+    _purchaseDialog(context, context.appRead, order: order);
+
+Future<void> _purchaseDialog(BuildContext context, AppState app, {Json? order}) async {
+  final receiving = order != null;
+  final lines = <Json>[];
+  final transactionId = uuid();
   await showFormDialog<void>(
     context,
-    title: 'New purchase order',
-    submit: 'Create order',
+    title: receiving ? 'Receive goods' : 'New purchase order',
+    submit: receiving ? 'Receive into stock' : 'Create order',
     fields: [
-      FieldSpec('supplierId', 'Supplier', kind: FieldKind.select, required: true, options: optionsOf(app.list('suppliers'))),
-      FieldSpec('productId', 'Part',
-          kind: FieldKind.select,
-          required: true,
-          barcodeChoice: app.uniqueProductIdForCode,
-          options: optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']} · cost ${app.money(p['cost'] as num?)}')),
-      const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
-      const FieldSpec('cost', 'Unit cost', kind: FieldKind.money, help: 'Blank uses the part\'s current cost.'),
+      if (!receiving)
+        FieldSpec('supplierId', 'Supplier', kind: FieldKind.select, required: true, options: optionsOf(app.list('suppliers'))),
+      if (receiving)
+        const FieldSpec('landedCost', 'Freight / landed cost for this delivery', kind: FieldKind.money, value: 0),
     ],
-    onSubmit: (v) async {
-      final product = app.productById('${v['productId']}')!;
-      await app.mutate('/purchase-orders', {
-        'supplierId': v['supplierId'],
-        'lines': [
-          {
-            'productId': v['productId'],
-            'quantity': int.tryParse('${v['quantity']}') ?? 0,
-            'cost': '${v['cost']}'.isEmpty ? product['cost'] : ((double.tryParse('${v['cost']}') ?? 0) * 100).round(),
-          },
-        ],
-      }, 'Purchase order created.');
+    header: _PurchaseLines(app: app, lines: lines, order: order),
+    onSubmit: (values) async {
+      if (lines.isEmpty) throw FormProblem('Add at least one part.');
+      await app.mutate(receiving ? '/purchase-orders/${order['id']}/receive' : '/purchase-orders', {
+        'transactionId': transactionId,
+        if (receiving) 'landedCost': ((double.tryParse('${values['landedCost']}') ?? 0) * 100).round()
+        else 'supplierId': values['supplierId'],
+        'lines': List<Json>.from(lines),
+      }, receiving ? 'Goods received.' : 'Purchase order created.');
     },
   );
 }
 
-Future<void> receiveOrder(BuildContext context, Json order) async {
-  final app = context.appRead;
-  final transactionId = uuid();
-  final open = [for (final l in order['lines'] as List) if ((l['received'] as int) < (l['quantity'] as int)) l];
-  await showFormDialog<void>(
-    context,
-    title: 'Receive goods',
-    submit: 'Receive into stock',
-    fields: [
-      FieldSpec('productId', 'Part',
-          kind: FieldKind.select,
-          required: true,
+class _PurchaseLines extends StatefulWidget {
+  const _PurchaseLines({required this.app, required this.lines, this.order});
+  final AppState app;
+  final List<Json> lines;
+  final Json? order;
+
+  @override
+  State<_PurchaseLines> createState() => _PurchaseLinesState();
+}
+
+class _PurchaseLinesState extends State<_PurchaseLines> {
+  Future<void> edit([int? index]) async {
+    final app = widget.app;
+    final original = index == null ? null : widget.lines[index];
+    final receiving = widget.order != null;
+    final remaining = <String, int>{
+      for (final l in widget.order?['lines'] as List? ?? [])
+        l['productId'] as String: (l['quantity'] - l['received']) as int,
+    };
+    final used = <String>{};
+    for (final line in widget.lines) {
+      if (identical(line, original)) continue;
+      final id = line['productId'] as String;
+      used.add(id);
+      if (receiving) remaining[id] = remaining[id]! - (line['quantity'] as int);
+    }
+    final parts = app.products.where((p) => p['type'] != 'service' &&
+        (receiving ? (remaining[p['id']] ?? 0) > 0 : !used.contains(p['id']))).toList();
+    if (parts.isEmpty) {
+      app.toast(receiving ? 'All outstanding units are in this receipt.' : 'All available parts are in this order.');
+      return;
+    }
+    final line = await showFormDialog<Json>(
+      context,
+      title: receiving ? 'Receive a part' : 'Purchase order line',
+      submit: index == null ? 'Add line' : 'Update line',
+      fields: [
+        FieldSpec('productId', 'Part', kind: FieldKind.select, required: true,
+          value: original?['productId'] ?? (parts.length == 1 ? parts.single['id'] : null),
           barcodeChoice: app.uniqueProductIdForCode,
-          value: open.length == 1 ? open.first['productId'] : null,
-          options: [for (final l in open) ('${l['productId']}', '${app.productName('${l['productId']}')} · ${l['quantity'] - l['received']} outstanding')]),
-      FieldSpec('quantity', 'Quantity received', kind: FieldKind.number, required: true,
-          value: open.length == 1 ? open.first['quantity'] - open.first['received'] : 1),
-      FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: true,
-          barcodeChoice: app.binIdForCode, value: app.sellableBins.firstOrNull?['id'], options: optionsOf(app.sellableBins, app.binName)),
-      const FieldSpec('landedCost', 'Freight / landed cost for this delivery', kind: FieldKind.money, value: 0, advanced: true),
-      const FieldSpec('serials', 'Serial numbers', advanced: true),
-    ],
-    onSubmit: (v) async => app.mutate('/purchase-orders/${order['id']}/receive', {
-      'transactionId': transactionId,
-      'landedCost': ((double.tryParse('${v['landedCost']}') ?? 0) * 100).round(),
-      'lines': [
-        {'productId': v['productId'], 'quantity': int.tryParse('${v['quantity']}') ?? 0, 'binId': v['binId'], 'serials': splitList(v['serials'])},
+          options: optionsOf(parts, (p) => '${p['sku']} · ${p['name']} · ${receiving ? "${remaining[p['id']]} outstanding" : app.money(p['cost'])}')),
+        FieldSpec('quantity', 'Quantity', kind: FieldKind.number, required: true,
+          value: original?['quantity'] ?? (receiving && parts.length == 1 ? remaining[parts.single['id']] : 1)),
+        if (!receiving)
+          FieldSpec('cost', 'Unit cost', kind: FieldKind.money,
+            value: original == null ? '' : (original['cost'] / 100).toStringAsFixed(2), help: 'Blank uses the current catalog cost.'),
+        if (receiving) ...[
+          FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: true,
+            value: original?['binId'] ?? app.sellableBins.firstOrNull?['id'],
+            barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
+          FieldSpec('serials', 'Serial numbers', value: (original?['serials'] as List? ?? []).join(', '),
+            help: 'For tracked parts, enter a serial for each unit, separated by commas.'),
+        ],
       ],
-    }, 'Goods received.'),
-  );
+      onSubmit: (v) async {
+        final id = v['productId'] as String;
+        final product = app.productById(id)!;
+        final quantity = int.tryParse('${v['quantity']}') ?? 0;
+        if (quantity < 1) throw FormProblem('Enter at least one unit.');
+        if (receiving && quantity > remaining[id]!) throw FormProblem('Only ${remaining[id]} units are outstanding.');
+        final serials = splitList(v['serials']);
+        if (receiving && product['serialTracked'] == true &&
+            (serials.length != quantity || serials.toSet().length != quantity)) {
+          throw FormProblem('Enter one unique serial number per unit.');
+        }
+        return {
+          'productId': id, 'quantity': quantity,
+          if (receiving) ...{'binId': v['binId'], 'serials': serials}
+          else 'cost': v['cost'] == '' ? product['cost'] : (double.parse(v['cost']) * 100).round(),
+        };
+      },
+    );
+    if (mounted && line != null) {
+      setState(() {
+        if (index == null) { widget.lines.add(line); } else { widget.lines[index] = line; }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = widget.app;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final (index, line) in widget.lines.indexed)
+        ListTile(contentPadding: EdgeInsets.zero, title: Text(app.productName(line['productId'])),
+          subtitle: Text(widget.order == null
+              ? '${line['quantity']} × ${app.money(line['cost'])}'
+              : '${line['quantity']} units · ${app.locationName(line['binId'])}'),
+          onTap: () => edit(index),
+          trailing: IconButton(tooltip: 'Remove line', icon: const Icon(Icons.remove_circle_outline),
+            onPressed: () => setState(() => widget.lines.removeAt(index)))),
+      OutlinedButton.icon(onPressed: edit, icon: const Icon(Icons.add), label: const Text('Add part')),
+    ]);
+  }
 }

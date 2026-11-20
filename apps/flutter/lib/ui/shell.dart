@@ -373,16 +373,9 @@ class _Content extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.app;
     final narrow = MediaQuery.sizeOf(context).width < 720;
     return Column(children: [
       _TopBar(controller: controller, narrow: narrow),
-      if (app.sessionProblem != null)
-        MaterialBanner(
-          backgroundColor: const Color(0xFFFFF3EC),
-          content: Text(app.sessionProblem!),
-          actions: [TextButton(onPressed: app.logout, child: const Text('Sign in again'))],
-        ),
       Expanded(
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 180),

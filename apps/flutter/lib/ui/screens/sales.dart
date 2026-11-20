@@ -113,13 +113,9 @@ Future<void> returnInvoice(BuildContext context, Json invoice) async {
       if (entry.$1['type'] != 'service' && app.binById('${v['binId']}')?['kind'] != v['condition']) {
         throw FormProblem('Choose a ${v['condition']} bin for ${v['condition']} returns.');
       }
-      var approvalId = v['approvalId'];
-      if (app.isManager) {
-        approvalId = (await app.api('/approvals', body: {'action': 'return', 'transactionId': transactionId, 'reason': v['reason']}) as Map)['id'];
-      }
       await app.mutate('/invoices/${invoice['id']}/returns', {
         'transactionId': transactionId,
-        'approvalId': approvalId,
+        'approvalId': v['approvalId'],
         'reason': v['reason'],
         'condition': v['condition'],
         'refundType': v['refundType'],
@@ -193,6 +189,10 @@ class ShiftsScreen extends StatelessWidget {
 
 Future<void> closeShift(BuildContext context, Json shift) async {
   final app = context.appRead;
+  if (app.pending.any((e) => e['transaction']['shiftId'] == shift['id'])) {
+    app.toast('Resolve waiting payments in Settings › Sync & audit before closing this shift.');
+    return;
+  }
   await showFormDialog<void>(
     context,
     title: 'Close shift',

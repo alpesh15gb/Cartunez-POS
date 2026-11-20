@@ -47,7 +47,10 @@ export async function onlineQuantity(
   const onHand = Number(
     (
       await db.query(
-        "SELECT COALESCE(SUM(quantity),0) AS q FROM stock WHERE organization_id=$1 AND branch_id=$2 AND product_id=$3",
+        `SELECT COALESCE(SUM(s.quantity),0) AS q FROM stock s
+         JOIN records b ON b.organization_id=s.organization_id AND b.branch_id=s.branch_id
+           AND b.kind='location' AND b.id=s.bin_id
+         WHERE s.organization_id=$1 AND s.branch_id=$2 AND s.product_id=$3 AND b.data->>'kind'='sellable'`,
         [organizationId, branchId, productId],
       )
     ).rows[0]?.q || 0,
@@ -104,8 +107,9 @@ export function magentoProduct(
   prices: { mrp: number; selling: number },
   qty: number,
   config: any,
-  categoryId: number | null = null,
+  categoryIds: number | null | (number | null)[] = null,
 ) {
+  const links = (Array.isArray(categoryIds) ? categoryIds : [categoryIds]).filter((c): c is number => !!c);
   const published = !!listing.published;
   const onOrder = listing.availability === "order";
   const inStock = qty > 0 || onOrder;
@@ -135,7 +139,8 @@ export function magentoProduct(
       extension_attributes: {
         website_ids: [Number(config.websiteId || 1)],
         // The POS category decides the shop category (one per part).
-        category_links: categoryId ? [{ position: 0, category_id: String(categoryId) }] : [],
+        // ...and its brand puts it on that brand's page (Brands > brand name).
+        category_links: links.map((c) => ({ position: 0, category_id: String(c) })),
         stock_item: {
           qty,
           is_in_stock: inStock,
@@ -221,13 +226,14 @@ export async function magentoCategoryId(
   org: string,
   config: any,
   name: unknown,
+  parent?: { id: number; prefix: string },
 ): Promise<number | null> {
   const label = String(name ?? "").trim();
   if (!label) return null;
-  const key = `cat-${slug(label) || "x"}`;
+  const key = `${parent?.prefix || "cat"}-${slug(label) || "x"}`;
   const cached = await getRecord(db, org, "magentoCategory", key);
   if (cached?.categoryId) return Number(cached.categoryId);
-  const root = Number(config.rootCategoryId || 2);
+  const root = parent?.id || Number(config.rootCategoryId || 2);
   const q = new URLSearchParams({
     "searchCriteria[filter_groups][0][filters][0][field]": "name",
     "searchCriteria[filter_groups][0][filters][0][value]": label,
@@ -247,6 +253,21 @@ export async function magentoCategoryId(
   if (!id) throw new MagentoError(`Magento did not return a category for "${label}".`);
   await putRecord(db, org, "magentoCategory", { id: key, name: label, categoryId: id });
   return id;
+}
+
+/** The brand's own category under "Brands", so each brand has a page of its parts. */
+export async function magentoBrandCategoryId(
+  fetchImpl: Fetch,
+  baseUrl: string,
+  token: string,
+  db: Database,
+  org: string,
+  config: any,
+  brand: unknown,
+): Promise<number | null> {
+  if (!String(brand ?? "").trim()) return null;
+  const brands = await magentoCategoryId(fetchImpl, baseUrl, token, db, org, config, "Brands");
+  return magentoCategoryId(fetchImpl, baseUrl, token, db, org, config, brand, { id: brands!, prefix: "brand" });
 }
 
 /** Forgets remembered categories (for example after one was deleted in Magento). */
@@ -356,7 +377,10 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
           qty,
           config,
           listing.published
-            ? await magentoCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config, product.category)
+            ? [
+                await magentoCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config, product.category),
+                await magentoBrandCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config, product.brand),
+              ]
             : null,
         ),
       );
@@ -484,6 +508,8 @@ export function magentoRoutes(app: FastifyInstance, db: Database, post: Post, fe
     const before = magentoConfig(settings);
     const next: any = { ...before };
     if (body.baseUrl !== undefined) next.baseUrl = storeUrl(body.baseUrl);
+    if (before.baseUrl && next.baseUrl !== before.baseUrl && !String(body.token || "").trim())
+      fail("Supply the new store's access token when changing the store address.");
     if (body.branchId !== undefined) {
       const branch = await getRecord(tx, actor.organizationId, "branch", String(body.branchId));
       if (!branch) fail("Choose the branch that sells online.");
@@ -524,7 +550,9 @@ export function magentoRoutes(app: FastifyInstance, db: Database, post: Post, fe
     const body = request.body || {};
     const settings = await getRecord(db, actor.organizationId, "settings", "settings");
     const config = magentoConfig(settings);
+    if (body.baseUrl || body.token) allow(actor, ["owner"]);
     const baseUrl = body.baseUrl ? storeUrl(body.baseUrl) : config.baseUrl;
+    if (baseUrl !== config.baseUrl && !body.token) fail("Supply a new access token when testing a different store.");
     const token = body.token ? String(body.token) : (await getRecord(db, actor.organizationId, "integrationSecret", "magento"))?.token;
     if (!baseUrl || !token) fail("Enter the store address and access token first.");
     try {

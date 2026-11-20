@@ -34,11 +34,11 @@ class _BillingScreenState extends State<BillingScreen> {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        final exactMatches = q.isEmpty ? const <Json>[] : app.findByCode(search.text);
+        final exactIds = {for (final part in app.findByCode(search.text)) part['id']};
         final vehicle = app.cart['vehicle'] as Map?;
         final categories = {'All parts', ...app.products.map((p) => '${p['category']}')}.toList();
         final parts = app.products.where((p) {
-          if (exactMatches.isNotEmpty) return exactMatches.contains(p);
+          if (exactIds.isNotEmpty) return exactIds.contains(p['id']);
           if (category != 'All parts' && p['category'] != category) return false;
           if (q.isNotEmpty &&
               ![p['name'], p['sku'], p['partNumber'], p['description'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
@@ -517,6 +517,7 @@ Future<void> addPart(BuildContext context, Json product) async {
         FieldSpec('binId', 'Picked from bin',
             kind: FieldKind.select,
             required: true,
+            barcodeChoice: app.binIdForCode,
             value: choices.first['id'],
             options: [for (final b in choices) ('${b['id']}', '${app.binName(b)} · ${app.available('${product['id']}', '${b['id']}')} available')]),
       if (product['serialTracked'] == true)
@@ -541,7 +542,10 @@ Future<void> addPart(BuildContext context, Json product) async {
         throw FormProblem('Only ${app.available('${product['id']}', binId)} available in that bin.');
       }
       final serials = splitList(values['serials']);
-      if (product['serialTracked'] == true && serials.length != qty) {
+      final existingSerials = lines.where((l) => l['productId'] == product['id'])
+          .expand((l) => l['serials'] as List? ?? const []).toSet();
+      if (product['serialTracked'] == true &&
+          (serials.length != qty || serials.toSet().length != qty || serials.any(existingSerials.contains))) {
         throw FormProblem('Enter one serial number for each unit.');
       }
       var approvalId = '${values['approvalId'] ?? ''}'.isNotEmpty ? values['approvalId'] : app.cart['approvalId'];
@@ -724,8 +728,7 @@ Future<void> editDiscount(BuildContext context) async {
 Future<void> holdSale(BuildContext context) async {
   final app = context.appRead;
   try {
-    await app.mutate('/holds', {'id': app.cart['holdId'], 'cart': app.cart}, 'Sale parked. Its stock is reserved.');
-    app.clearCart();
+    await app.parkCart();
   } catch (error) {
     app.toast(errorText(error));
   }
@@ -744,7 +747,7 @@ Future<void> showParked(BuildContext context, ShellController shell) async {
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            child: ListView(shrinkWrap: true, children: [
               Text('Parked sales', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 10),
               if (holds.isEmpty)
@@ -779,7 +782,7 @@ Future<void> showParked(BuildContext context, ShellController shell) async {
                               app.toast('Hold or clear the current sale first.');
                               return;
                             }
-                            app.updateCart({...Map<String, dynamic>.from(hold['cart'] as Map), 'holdId': hold['id']});
+                            app.replaceCart({...Map<String, dynamic>.from(hold['cart'] as Map), 'holdId': hold['id']});
                             Navigator.pop(sheet);
                             shell.open('billing');
                           },
@@ -801,6 +804,10 @@ Future<void> showParked(BuildContext context, ShellController shell) async {
 Future<void> startCheckout(BuildContext context) async {
   final app = context.appRead;
   if ((app.cart['lines'] as List).isEmpty || !app.canSell) return;
+  if (!app.online) {
+    app.toast('Reconnect before taking payment. Your cart is saved on this counter.');
+    return;
+  }
   if (app.openShift == null) {
     final opened = await openShiftDialog(context, forCheckout: true);
     if (!opened || !context.mounted) return;
@@ -849,7 +856,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
   late String tender;
   late final TextEditingController amount = TextEditingController(text: (widget.total / 100).toStringAsFixed(2));
   final second = TextEditingController(text: '0.00');
-  final reference = TextEditingController();
+  final references = {for (final type in ['Card', 'UPI']) type: TextEditingController()};
   late final TextEditingController place;
   String secondTender = '';
   bool split = false;
@@ -867,7 +874,16 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
         text: '${app.customerById('${app.cart['customerId']}')?['stateCode'] ?? app.business['stateCode'] ?? ''}');
   }
 
-  int _minor(String text) => ((double.tryParse(text) ?? 0) * 100).round();
+  int _minor(String text) => parsePaymentAmount(text) ?? 0;
+
+  @override
+  void dispose() {
+    amount.dispose();
+    second.dispose();
+    for (final c in references.values) { c.dispose(); }
+    place.dispose();
+    super.dispose();
+  }
 
   Future<void> _complete() async {
     if (busy) return;
@@ -876,22 +892,32 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     final cash = (tender == 'Cash' ? _minor(amount.text) : 0) + (split && secondTender == 'Cash' ? _minor(second.text) : 0);
     final nonCash = tender != 'Cash' || (split && secondTender != 'Cash');
     setState(() => error = null);
+    if (parsePaymentAmount(amount.text) == null || (split && (parsePaymentAmount(second.text) ?? 0) <= 0)) {
+      return setState(() => error = 'Enter a valid amount for each payment, with up to two decimal places.');
+    }
+    if (split && (_minor(amount.text) == 0 || tender == secondTender)) {
+      return setState(() => error = 'Choose two different payment methods and enter an amount for each.');
+    }
     if (paid < widget.total) return setState(() => error = 'Payment must cover the total.');
     if (paid - widget.total > cash) return setState(() => error = 'Change can only be given from cash.');
-    if (nonCash && confirmed && reference.text.trim().isEmpty) {
-      return setState(() => error = 'Enter the card or UPI payment reference.');
+    if (nonCash && confirmed) {
+      for (final type in [tender, if (split) secondTender]) {
+        if (type != 'Cash' && references[type]!.text.trim().isEmpty) {
+          return setState(() => error = 'Enter the $type payment reference.');
+        }
+      }
     }
     if (app.gst && !RegExp(r'^\d{2}$').hasMatch(place.text.trim())) {
       return setState(() => error = 'Enter the two-digit place-of-supply state code.');
     }
     final tenders = [
-      {'type': tender, 'amount': _minor(amount.text), 'confirmed': tender == 'Cash' || confirmed, 'reference': reference.text.trim()},
+      {'type': tender, 'amount': _minor(amount.text), 'confirmed': tender == 'Cash' || confirmed, 'reference': references[tender]?.text.trim() ?? ''},
       if (split && _minor(second.text) > 0)
-        {'type': secondTender, 'amount': _minor(second.text), 'confirmed': secondTender == 'Cash' || confirmed, 'reference': reference.text.trim()},
+        {'type': secondTender, 'amount': _minor(second.text), 'confirmed': secondTender == 'Cash' || confirmed, 'reference': references[secondTender]?.text.trim() ?? ''},
     ];
     setState(() => busy = true);
     try {
-      final invoice = await app.checkout(tenders: tenders, placeOfSupply: place.text);
+      final invoice = await app.checkout(tenders: tenders, expectedTotal: widget.total, placeOfSupply: place.text);
       if (mounted) Navigator.pop(context, invoice);
     } catch (e) {
       if (mounted) setState(() => error = errorText(e));
@@ -934,7 +960,12 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
                   ),
               ],
               selected: {tender},
-              onSelectionChanged: (v) => setState(() => tender = v.first),
+              onSelectionChanged: (v) => setState(() {
+                tender = v.first;
+                if (secondTender == tender) secondTender = app.tenderTypes.firstWhere((t) => t != tender, orElse: () => tender);
+                confirmed = false;
+                for (final c in references.values) { c.clear(); }
+              }),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -973,9 +1004,10 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
               Row(children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
+                    key: ValueKey((tender, secondTender)),
                     initialValue: secondTender,
                     decoration: const InputDecoration(labelText: 'Second payment'),
-                    items: [for (final t in app.tenderTypes) DropdownMenuItem(value: t, child: Text(t))],
+                    items: [for (final t in app.tenderTypes.where((t) => t != tender)) DropdownMenuItem(value: t, child: Text(t))],
                     onChanged: (v) => setState(() => secondTender = v ?? secondTender),
                   ),
                 ),
@@ -998,7 +1030,8 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
                 title: const Text('Payment confirmed by the card machine / UPI app'),
                 subtitle: const Text('If not yet confirmed, the sale waits in Sync & audit.'),
               ),
-              TextField(controller: reference, decoration: const InputDecoration(labelText: 'Payment reference')),
+              for (final type in {tender, if (split) secondTender}.where((type) => type != 'Cash'))
+                TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference')),
             ],
             if (app.gst) ...[
               const SizedBox(height: 12),
@@ -1035,11 +1068,11 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
         actions: [
           TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton.icon(
-            onPressed: busy ? null : _complete,
+            onPressed: busy || !app.online ? null : _complete,
             icon: busy
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.check),
-            label: Text(app.online ? 'Complete sale' : 'Save sale'),
+            label: Text(app.online ? 'Complete sale' : 'Reconnect to complete sale'),
           ),
         ],
       )),

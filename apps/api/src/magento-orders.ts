@@ -153,6 +153,9 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
   return db.transaction(async (tx) => {
     const recordId = `mg-${mg.entity_id}`;
     const existing = await getRecord(tx, organizationId, "onlineOrder", recordId);
+    if (existing && existing.updatedAt > isoDate(mg.updated_at)) return existing;
+    // An existing order's stock movements belong to its original fulfilment branch.
+    branchId = existing?.branchId ?? branchId;
     const products = await records(tx, organizationId, "product");
     const address = mg.extension_attributes?.shipping_assignments?.[0]?.shipping?.address || mg.billing_address || {};
     const items = (mg.items || []).filter((item: any) => !item.parent_item_id);
@@ -190,7 +193,7 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
           itemId: item.item_id,
           sku: item.sku,
           name: item.name,
-          productId: product?.id || null,
+          productId: before.productId || product?.id || null,
           price: paise(item.price_incl_tax ?? item.price),
           ordered: t.ordered,
           invoiced: t.invoiced,
@@ -241,13 +244,15 @@ export async function pollMagentoOrders(db: Database, options: { fetch?: Fetch; 
     let since = cursor.since as string;
     let error: string | null = null;
     try {
-      for (let page = 1; page <= 10; page++) {
+      for (let page = 1; ; page++) {
         const q = new URLSearchParams({
           "searchCriteria[filter_groups][0][filters][0][field]": "updated_at",
-          "searchCriteria[filter_groups][0][filters][0][value]": magentoDate(since),
+          "searchCriteria[filter_groups][0][filters][0][value]": magentoDate(cursor.since),
           "searchCriteria[filter_groups][0][filters][0][condition_type]": "gteq",
           "searchCriteria[sortOrders][0][field]": "updated_at",
           "searchCriteria[sortOrders][0][direction]": "ASC",
+          "searchCriteria[sortOrders][1][field]": "entity_id",
+          "searchCriteria[sortOrders][1][direction]": "ASC",
           "searchCriteria[pageSize]": "50",
           "searchCriteria[currentPage]": String(page),
         });
@@ -259,7 +264,7 @@ export async function pollMagentoOrders(db: Database, options: { fetch?: Fetch; 
           const at = isoDate(mg.updated_at);
           if (at > since) since = at;
         }
-        if (items.length < 50) break;
+        if (items.length < 50 || page * 50 >= Number(result.total_count)) break;
       }
     } catch (e: any) {
       error = e instanceof MagentoError ? e.message : String(e?.message || e);
@@ -284,13 +289,13 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
   // Take stock that has arrived for an order waiting for it.
   post("online-orders/:id/fulfil", async (tx, actor, _body, params) => {
     allow(actor, ["owner", "manager"]);
-    const config = magentoConfig(await getRecord(tx, actor.organizationId, "settings", "settings"));
     const order = await getRecord(tx, actor.organizationId, "onlineOrder", String(params.id));
     if (!order) fail("Online order not found.", 404);
     order!.previousHeld = Object.fromEntries(
       (order!.lines || []).filter((l: any) => l.productId).map((l: any) => [l.productId, (l.reserved || 0) + (l.awaiting || 0)]),
     );
-    await applyOnlineOrder(tx, order, config.branchId || order!.branchId);
+    if (order!.branchId !== actor.branchId) fail("Switch to the fulfilment branch for this order.", 409);
+    await applyOnlineOrder(tx, order, order!.branchId);
     return putRecord(tx, actor.organizationId, "onlineOrder", order!, order!.branchId);
   });
 
@@ -300,16 +305,29 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
     const order = await getRecord(tx, actor.organizationId, "onlineOrder", String(params.id));
     if (!order) fail("Online order not found.", 404);
     if (order!.branchId !== actor.branchId) fail("Switch to the online branch to order parts for this order.", 409);
+    const outstanding = new Map<string, number>();
+    for (const poId of order!.purchaseOrderIds || []) {
+      const po = await getRecord(tx, actor.organizationId, "purchaseOrder", poId);
+      for (const line of po?.lines || []) {
+        outstanding.set(line.productId, (outstanding.get(line.productId) || 0) + line.quantity - line.received);
+      }
+    }
     const bySupplier = new Map<string, any[]>();
     for (const line of order!.lines || []) {
       if (!line.productId || !(line.shortage > 0)) continue;
+      const onOrder = outstanding.get(line.productId) || 0;
+      const quantity = Math.max(0, line.shortage - onOrder);
+      outstanding.set(line.productId, Math.max(0, onOrder - line.shortage));
+      if (!quantity) continue;
       const product = await getRecord(tx, actor.organizationId, "product", line.productId);
       if (!product?.supplierId) fail(`${product?.name || line.sku} has no supplier. Add one to the part first.`);
       const lines = bySupplier.get(product!.supplierId) || [];
-      lines.push({ productId: product!.id, quantity: line.shortage, cost: Number(product!.cost || 0), received: 0 });
+      const samePart = lines.find((item) => item.productId === product!.id);
+      if (samePart) samePart.quantity += quantity;
+      else lines.push({ productId: product!.id, quantity, cost: Number(product!.cost || 0), received: 0 });
       bySupplier.set(product!.supplierId, lines);
     }
-    if (!bySupplier.size) fail("Nothing is short for this order.");
+    if (!bySupplier.size) fail("All missing units are already on order or in stock.", 409);
     const created = [];
     for (const [supplierId, lines] of bySupplier) {
       const po = {

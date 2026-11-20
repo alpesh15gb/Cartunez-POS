@@ -33,12 +33,13 @@ class CartunezApp extends StatelessWidget {
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     return AppScope(
       state: state,
-      child: MaterialApp(
+      child: ListenableBuilder(listenable: state, builder: (context, _) => MaterialApp(
+        key: ObjectKey(state.session),
         title: 'Cartunez POS',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
         home: const _Root(),
-      ),
+      )),
     );
   }
 }
@@ -49,7 +50,12 @@ class _Root extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.app;
     final Widget child;
-    if (!app.ready) {
+    if (app.startupProblem != null) {
+      child = Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(app.startupProblem!, textAlign: TextAlign.center),
+        TextButton(onPressed: app.init, child: const Text('Retry')),
+      ])));
+    } else if (!app.ready) {
       child = const Scaffold(key: ValueKey('loading'), body: Center(child: CircularProgressIndicator()));
     } else if (app.session == null) {
       child = const LoginScreen(key: ValueKey('login'));

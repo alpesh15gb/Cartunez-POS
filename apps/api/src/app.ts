@@ -265,7 +265,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       : [];
     data.productImages = await productImages(db, actor.organizationId);
     data.onlineOrders = ["owner", "manager"].includes(actor.role)
-      ? (await records(db, actor.organizationId, "onlineOrder")).slice(-300)
+      ? (await records(db, actor.organizationId, "onlineOrder", actor.branchId)).slice(-300)
       : [];
     if (["owner", "manager"].includes(actor.role)) {
       const cursor = await getRecord(db, actor.organizationId, "magentoCursor", "orders");
@@ -316,8 +316,12 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         lines: invoice.lines.map(({ cost, ...line }: any) => line),
       }));
       data.purchaseOrders = [];
+      const ownInvoices = new Set(data.invoices.map((invoice: any) => invoice.id));
       data.returns = data.returns.filter(
-        (entry: any) => entry.userId === actor.id,
+        (entry: any) => entry.userId === actor.id || ownInvoices.has(entry.invoiceId),
+      );
+      data.coreReturns = data.coreReturns.filter(
+        (entry: any) => entry.userId === actor.id || ownInvoices.has(entry.invoiceId),
       );
     }
     return data;
@@ -921,7 +925,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
           "serial",
           product.id + ":" + serial,
         );
-        if (item.status !== "available" || item.binId !== body.fromBinId)
+        if ((item.status !== "available" && item.status !== from.kind) || item.binId !== body.fromBinId)
           fail("Serial is unavailable in the source bin.");
         await putRecord(
           tx,
@@ -956,6 +960,10 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
           : integer(body.quantity, "Adjustment", -1000000, 1000000);
       if ((stock?.available || 0) + quantity < 0)
         fail("Adjustment would consume reserved stock.", 409);
+      const product = await scoped(tx, actor, "product", body.productId);
+      if (product.type === "service") fail("Services do not carry stock.");
+      const bin = await scoped(tx, actor, "location", body.binId);
+      const serialStatus = bin.kind === "sellable" ? "available" : bin.kind;
       const reference = id(operation);
       await adjust(
         tx,
@@ -966,7 +974,6 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         body.reason,
         reference,
       );
-      const product = await scoped(tx, actor, "product", body.productId);
       if (product.serialTracked && quantity !== 0) {
         if (
           !Array.isArray(body.serials) ||
@@ -995,7 +1002,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
                 productId: product.id,
                 serial,
                 binId: body.binId,
-                status: "available",
+                status: serialStatus,
               },
               actor.branchId,
             );
@@ -1004,7 +1011,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
               !existing ||
               existing.branchId !== actor.branchId ||
               existing.binId !== body.binId ||
-              existing.status !== "available"
+              (existing.status !== serialStatus && existing.status !== "available")
             )
               fail("Serial is unavailable in the counted bin.");
             await putRecord(
@@ -1031,7 +1038,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     const lines = [];
     const used = new Set<string>();
     for (const line of body.lines) {
-      await scoped(tx, actor, "product", line.productId);
+      const product = await scoped(tx, actor, "product", line.productId);
+      if (product.type === "service") fail("Choose a stock part for a purchase order.");
       if (used.has(line.productId)) fail("Combine duplicate purchase lines.");
       used.add(line.productId);
       lines.push({
@@ -1364,7 +1372,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       line.qty = quantity;
       const product = await scoped(tx, actor, "product", line.productId);
       if (product.type === "service") continue;
-      await scoped(tx, actor, "location", line.binId);
+      const bin = await scoped(tx, actor, "location", line.binId);
+      if (bin.kind !== "sellable") fail("Park stock from a sellable bin.");
       const key = line.productId + "|" + line.binId;
       quantities.set(key, (quantities.get(key) || 0) + quantity);
       const own = (previous?.cart.lines || [])

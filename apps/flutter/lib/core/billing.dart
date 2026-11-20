@@ -17,6 +17,13 @@ String uuid() {
       '${hex.substring(16, 20)}-${hex.substring(20)}';
 }
 
+int? parsePaymentAmount(String text) {
+  final match = RegExp(r'^(\d{1,10})(?:\.(\d{0,2}))?$').firstMatch(text.trim());
+  if (match == null) return null;
+  final amount = int.parse(match[1]!) * 100 + int.parse((match[2] ?? '').padRight(2, '0'));
+  return amount <= 100000000000 ? amount : null;
+}
+
 class FitResult {
   const FitResult(this.status, [this.missing = const []]);
   final String status;
@@ -58,7 +65,9 @@ FitResult fitment(Json product, Json? vehicle) {
         valid = false;
       }
     }
-    if (valid && missing.isEmpty) return const FitResult('compatible');
+    final excluded = (fit['exclusions'] as List? ?? const []).whereType<Map>().any((rule) =>
+        rule.entries.every((entry) => normalize(vehicle[entry.key]) == normalize(entry.value)));
+    if (valid && missing.isEmpty && !excluded) return const FitResult('compatible');
   }
   return FitResult(needed.isEmpty ? 'incompatible' : 'unverified', needed.toList());
 }
@@ -138,6 +147,9 @@ Quote quote(Json cart, List<Json> products, {int roundingIncrement = 1, String t
   final unrounded = lines.fold<int>(0, (sum, line) => sum + line.total);
   final total = _ratio(unrounded, 1, roundingIncrement) * roundingIncrement;
   amount(total, 'Invoice total');
+  if (total < lines.fold<int>(0, (sum, line) => sum + line.core)) {
+    throw BillingError('Invoice rounding would reduce the refundable core deposit. Use a smaller rounding increment.');
+  }
   return Quote(
     lines,
     subtotal,

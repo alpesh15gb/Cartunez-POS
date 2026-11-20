@@ -29,7 +29,8 @@ function fakeMagento() {
     if (path === "/rest/all/V1/categories/list") {
       const u = new URL(String(url));
       const name = u.searchParams.get("searchCriteria[filter_groups][0][filters][0][value]");
-      const items = [...categories.values()].filter((c) => c.name === name);
+      const parent = Number(u.searchParams.get("searchCriteria[filter_groups][1][filters][0][value]"));
+      const items = [...categories.values()].filter((c) => c.name === name && c.parent_id === parent);
       return reply(200, { items, total_count: items.length });
     }
     if (path === "/rest/all/V1/categories" && init.method === "POST") {
@@ -88,6 +89,10 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     const check = await call("integrations/magento/test", {}, manager);
     assert.equal(check.currency, "INR");
 
+    await call("inventory/adjust", {
+      productId: "filter", binId: "bin-damaged", quantity: 8, reason: "Damaged stock must stay off the website",
+      transactionId: randomUUID(),
+    }, owner);
     // Publish the oil filter at 10% off MRP. MRP = 285.00 + 18% GST = 336.30.
     await call("online-listings", { productIds: ["filter"], changes: { published: true } }, cashier, 403);
     await call("online-listings", { productIds: ["filter"], changes: { pricing: { mode: "fixed", price: 999999 } } }, owner, 400);
@@ -117,7 +122,15 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     const parts = [...magento.categories.values()].find((c) => c.name === "Parts");
     assert.equal(parts.parent_id, 2);
     assert.equal(parts.include_in_menu, true);
-    assert.deepEqual(product.extension_attributes.category_links, [{ position: 0, category_id: String(parts.id) }]);
+    // Its brand gets a page: Brands > Motorline Demo, under the root category.
+    const brands = [...magento.categories.values()].find((c) => c.name === "Brands");
+    assert.equal(brands.parent_id, 2);
+    const brand = [...magento.categories.values()].find((c) => c.name === "Motorline Demo");
+    assert.equal(brand.parent_id, brands.id);
+    assert.deepEqual(product.extension_attributes.category_links, [
+      { position: 0, category_id: String(parts.id) },
+      { position: 0, category_id: String(brand.id) },
+    ]);
     let saved = await getRecord(db, "demo", "onlineListing", "filter");
     assert.equal(saved!.sync.state, "synced");
     assert.equal(saved!.sync.magentoSku, "ML-FILTER-01");
@@ -149,7 +162,7 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     await call("online-listings", { productIds: ["spark"], changes: { published: true } }, owner);
     await runMagentoSync(db, { fetch: magento.fetch });
     assert.equal([...magento.categories.values()].filter((c) => c.name === "Parts").length, 1);
-    assert.equal(magento.calls.filter((c) => c.method === "POST" && c.path === "/rest/all/V1/categories").length, 1);
+    assert.equal(magento.calls.filter((c) => c.method === "POST" && c.path === "/rest/all/V1/categories").length, 3); // Parts, Brands, the brand
     assert.equal(lastPut("ML-SPARK-01").extension_attributes.category_links[0].category_id, String(parts.id));
 
     // Magento down: the part shows the error, the job waits, and Retry sends it again.

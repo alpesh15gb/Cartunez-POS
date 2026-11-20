@@ -12,7 +12,6 @@ const _featureLabels = {
   'fitment': 'Vehicle fitment',
   'transfers': 'Branch transfers',
   'warranty': 'Warranty & cores',
-  'offline': 'Offline counters',
   'onlineStore': 'Online store (Magento)',
 };
 
@@ -222,10 +221,14 @@ Future<void> editRegister(BuildContext context) async {
     ],
     onSubmit: (v) async {
       if ((v['tenderTypes'] as List).isEmpty) throw FormProblem('Choose at least one payment type.');
+      final rates = splitList(v['taxRates']).map(parsePaymentAmount).toList();
+      if (rates.isEmpty || rates.any((r) => r == null || r > 10000)) {
+        throw FormProblem('Enter tax rates between 0 and 100, separated by commas, with up to two decimal places.');
+      }
       await app.mutate('/settings', {
         'taxScheme': v['taxScheme'],
         'taxMode': v['taxMode'],
-        'taxRates': splitList(v['taxRates']).map((r) => ((double.tryParse(r) ?? 0) * 100).round()).toList(),
+        'taxRates': rates,
         'tenderTypes': v['tenderTypes'],
         'roundingIncrement': int.tryParse('${v['roundingIncrement']}') ?? 1,
         'cashierDiscountLimit': ((double.tryParse('${v['cashierDiscountLimit']}') ?? 0) * 100).round(),
@@ -233,7 +236,7 @@ Future<void> editRegister(BuildContext context) async {
         'creditNotePrefix': '${v['creditNotePrefix']}'.isEmpty ? 'CR' : v['creditNotePrefix'],
         'taxDisplayName': '${v['taxDisplayName']}'.isEmpty ? 'Tax' : v['taxDisplayName'],
         'localTaxName': v['localTaxName'],
-        if ('${v['nextInvoice']}'.isNotEmpty) 'nextInvoice': int.tryParse('${v['nextInvoice']}'),
+        if ('${v['nextInvoice']}'.isNotEmpty && '${v['nextInvoice']}' != '${s['nextInvoice']}') 'nextInvoice': int.tryParse('${v['nextInvoice']}'),
         if ('${v['sessionHours']}'.isNotEmpty) 'sessionHours': int.tryParse('${v['sessionHours']}'),
       }, 'Register settings saved.');
     },
@@ -378,8 +381,11 @@ class SyncScreen extends StatelessWidget {
                 context,
                 title: 'Confirm card / UPI payment',
                 submit: 'Confirm',
-                fields: const [FieldSpec('reference', 'Payment reference from the provider', required: true)],
-                onSubmit: (v) => app.confirmPayment('${e['transaction']['transactionId']}', '${v['reference']}'),
+                fields: [
+                  for (final type in {for (final t in e['transaction']['tenders']) if (t['type'] != 'Cash' && t['confirmed'] != true) t['type']})
+                    FieldSpec('$type', '$type payment reference', required: true),
+                ],
+                onSubmit: (v) => app.confirmPayment('${e['transaction']['transactionId']}', v),
               ),
               child: const Text('Confirm payment'),
             ),

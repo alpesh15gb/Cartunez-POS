@@ -55,7 +55,7 @@ class ApiError implements Exception {
   ApiError(this.message, this.status);
   final String message;
   final int status;
-  bool get rejected => status >= 400 && status < 500 && status != 401;
+  bool get rejected => status >= 400 && status < 500 && !const {401, 408, 425, 429}.contains(status);
   @override
   String toString() => message;
 }
@@ -83,7 +83,7 @@ Future<dynamic> request(String api, String token, String path,
     final req = http.Request(verb, uri)..headers.addAll(headers);
     if (body != null) req.body = jsonEncode(body);
     response = await http.Response.fromStream(
-        await _client.send(req).timeout(const Duration(seconds: 15)));
+        await _client.send(req).timeout(const Duration(seconds: 15))).timeout(const Duration(seconds: 30));
   } on TimeoutException {
     throw OfflineError('The server took too long to respond. Check the connection.');
   } on http.ClientException {

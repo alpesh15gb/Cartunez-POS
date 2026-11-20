@@ -183,7 +183,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
       if (text.isNotEmpty) {
         if (field.kind == FieldKind.signedNumber && int.tryParse(text) == null) return 'Enter a whole number';
         if (field.kind == FieldKind.number && (int.tryParse(text) ?? -1) < 0) return 'Enter a non-negative whole number';
-        if (field.kind == FieldKind.money && (num.tryParse(text) ?? -1) < 0) return 'Enter a valid amount';
+        if (field.kind == FieldKind.money && parsePaymentAmount(text) == null) return 'Enter a valid amount';
       }
       return null;
     }

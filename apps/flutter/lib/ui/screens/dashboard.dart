@@ -18,7 +18,7 @@ class DashboardScreen extends StatelessWidget {
     }
 
     final sales = app.list('invoices').where((i) => isToday(i['createdAt'])).toList();
-    final refunds = [...app.list('returns'), ...app.list('coreReturns')].where((r) => isToday(r['createdAt']));
+    final refunds = [...app.list('returns'), ...app.list('coreReturns')].where((r) => isToday(r['createdAt']) && (app.role != 'cashier' || r['userId'] == app.session?.userId));
     final gross = sales.fold<int>(0, (n, i) => n + (i['total'] as int));
     final refunded = refunds.fold<int>(0, (n, r) => n + (r['total'] as int));
     final low = app.products

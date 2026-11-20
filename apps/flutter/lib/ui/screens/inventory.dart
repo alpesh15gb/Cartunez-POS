@@ -20,9 +20,9 @@ class PartsScreen extends StatelessWidget {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        final matches = q.isEmpty ? const <Json>[] : app.findByCode(search.text);
+        final exactIds = {for (final part in app.findByCode(search.text)) part['id']};
         final rows = app.products
-            .where((p) => matches.isNotEmpty ? matches.contains(p) : q.isEmpty ||
+            .where((p) => exactIds.isNotEmpty ? exactIds.contains(p['id']) : q.isEmpty ||
                 [p['name'], p['sku'], p['partNumber'], p['brand'], p['category'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
                     .any((v) => normalize(v).contains(q)))
             .toList();
@@ -339,8 +339,8 @@ Future<void> dispatchTransfer(BuildContext context) async {
     fields: [
       FieldSpec('destinationBranchId', 'To branch',
           kind: FieldKind.select, required: true, options: optionsOf(app.list('branches').where((b) => b['id'] != app.session?.branchId).toList())),
-      FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, options: optionsOf(app.products, (p) => '${p['sku']} · ${p['name']}')),
-      FieldSpec('binId', 'From bin', kind: FieldKind.select, required: true, options: optionsOf(app.sellableBins, app.binName)),
+      FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, barcodeChoice: app.uniqueProductIdForCode, options: optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']}')),
+      FieldSpec('binId', 'From bin', kind: FieldKind.select, required: true, barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
       const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
       const FieldSpec('reason', 'Reason', required: true),
       const FieldSpec('serials', 'Serial numbers', advanced: true),
@@ -357,16 +357,22 @@ Future<void> dispatchTransfer(BuildContext context) async {
 
 Future<void> receiveTransfer(BuildContext context, Json transfer) async {
   final app = context.appRead;
+  final open = (transfer['lines'] as List).where((l) => l['quantity'] > l['received']).toList();
   await showFormDialog<void>(
     context,
     title: 'Receive transfer',
     submit: 'Receive',
     fields: [
-      FieldSpec('productId', 'Part',
-          kind: FieldKind.select,
-          required: true,
-          options: [for (final l in transfer['lines'] as List) ('${l['productId']}', '${app.productName('${l['productId']}')} · ${l['quantity'] - l['received']} to receive')]),
-      FieldSpec('binId', 'Into bin', kind: FieldKind.select, required: true, options: optionsOf(app.sellableBins, app.binName)),
+      FieldSpec('lineId', 'Dispatch line',
+          kind: FieldKind.select, required: true,
+          value: open.length == 1 ? open.single['id'] : null,
+          barcodeChoice: (code) {
+            final id = app.uniqueProductIdForCode(code);
+            final matches = open.where((l) => l['productId'] == id);
+            return matches.length == 1 ? matches.single['id'] as String : null;
+          },
+          options: [for (final l in open) ('${l['id']}', '${app.productName('${l['productId']}')} · ${l['binId']} · ${l['quantity'] - l['received']} to receive')]),
+      FieldSpec('binId', 'Into bin', kind: FieldKind.select, required: true, barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
       const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
       const FieldSpec('serials', 'Serial numbers', advanced: true),
     ],
