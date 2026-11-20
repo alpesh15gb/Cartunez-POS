@@ -160,10 +160,16 @@ class ShiftsScreen extends StatelessWidget {
       Toolbar([
         if (mine == null)
           FilledButton.icon(onPressed: () => openShiftDialog(context), icon: const Icon(Icons.lock_open), label: const Text('Open shift'))
-        else
+        else ...[
+          OutlinedButton.icon(onPressed: app.online ? () => recordDrawerMovement(context, mine, 'in') : null,
+            icon: const Icon(Icons.add), label: const Text('Cash in')),
+          OutlinedButton.icon(onPressed: app.online ? () => recordDrawerMovement(context, mine, 'out') : null,
+            icon: const Icon(Icons.remove), label: const Text('Cash out')),
           FilledButton.icon(onPressed: () => closeShift(context, mine), icon: const Icon(Icons.lock_outline), label: const Text('Close my shift')),
+        ],
       ]),
       DataList(
+        onTap: (shift) => showDrawerActivity(context, shift),
         rows: app.list('shifts').reversed.toList(),
         empty: 'No shifts yet.',
         columns: [
@@ -187,6 +193,51 @@ class ShiftsScreen extends StatelessWidget {
   }
 }
 
+Future<void> recordDrawerMovement(BuildContext context, Json shift, String direction) async {
+  final app = context.appRead;
+  final transactionId = uuid();
+  await showFormDialog<void>(context,
+    title: direction == 'in' ? 'Cash in' : 'Cash out',
+    submit: 'Record movement',
+    fields: const [
+      FieldSpec('amount', 'Amount', kind: FieldKind.money, required: true),
+      FieldSpec('reason', 'Reason', required: true),
+    ],
+    onSubmit: (values) async {
+      final amount = parsePaymentAmount('${values['amount']}');
+      if (amount == null || amount < 1) throw FormProblem('Enter an amount above zero with up to two decimal places.');
+      await app.mutate('/shifts/${shift['id']}/cash-movements', {
+        'transactionId': transactionId, 'direction': direction, 'amount': amount, 'reason': values['reason'],
+      }, 'Drawer movement recorded.');
+    },
+  );
+}
+
+Future<void> showDrawerActivity(BuildContext context, Json shift) async {
+  final app = context.appRead;
+  final entries = app.list('cashMovements').where((m) => m['shiftId'] == shift['id']).toList().reversed;
+  final staff = app.userName(shift['userId']);
+  await showDialog<void>(context: context, builder: (dialog) => AlertDialog(
+    title: const Text('Shift cash activity'),
+    content: SizedBox(width: 520, child: SingleChildScrollView(child: Column(
+      mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$staff · ${formatDate(shift['openedAt'])}'),
+        Text('Opening cash   ${app.money(shift['openingCash'])}'),
+        if (app.isManager || shift['closedAt'] != null)
+          Text('Expected cash   ${app.money(shift['expectedCash'] ?? app.expectedCash(shift))}'),
+        if (shift['closedAt'] != null) Text('Counted cash   ${app.money(shift['countedCash'])}'),
+        const Divider(),
+        if (entries.isEmpty) const Text('No cash-in or cash-out entries.'),
+        for (final entry in entries) ListTile(contentPadding: EdgeInsets.zero,
+          title: Text('${entry['direction'] == 'in' ? 'Cash in' : 'Cash out'} · ${app.money(entry['amount'])}'),
+          subtitle: Text('${formatDate(entry['createdAt'])} · ${app.userName(entry['userId'])}\n${entry['reason']}'),
+        ),
+      ],
+    ))),
+    actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Close'))],
+  ));
+}
+
 Future<void> closeShift(BuildContext context, Json shift) async {
   final app = context.appRead;
   if (app.pending.any((e) => e['transaction']['shiftId'] == shift['id'])) {
@@ -206,7 +257,7 @@ Future<void> closeShift(BuildContext context, Json shift) async {
     ],
     onSubmit: (v) async {
       final result = await app.mutate('/shifts/${shift['id']}/close', {
-        'countedCash': ((double.tryParse('${v['countedCash']}') ?? 0) * 100).round(),
+        'countedCash': parsePaymentAmount('${v['countedCash']}'),
         'reason': '${v['reason']}'.isEmpty ? 'Shift close' : v['reason'],
       }) as Map;
       final variance = (result['variance'] ?? 0) as int;

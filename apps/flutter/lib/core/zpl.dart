@@ -49,26 +49,36 @@ String _elements(LabelPlan plan, double offsetMm, int dpi) {
 
 /// Labels for [labels], each printed [copies] times. With several labels
 /// across the roll, each row of the roll is one label format.
-String zplJob(List<LabelData> labels, LabelLayout layout, {int dpi = 203, int? darkness, int copies = 1}) {
+String zplJob(List<LabelData> labels, LabelLayout layout, {int dpi = 203, int? darkness, int copies = 1, List<int>? quantities}) {
   int d(double mm) => (mm * dpi / 25.4).round();
   final header = StringBuffer()
     ..write('^XA^CI28^PW${d(layout.rollWidthMm)}^LL${d(layout.heightMm)}^LH0,0')
     ..write(darkness == null ? '' : '~SD${darkness.clamp(0, 30).toString().padLeft(2, '0')}');
-  final plans = [for (final l in labels) planLabel(layout, l, dpi: dpi)];
   final formats = <String>[];
-  if (layout.columns == 1) {
-    for (final p in plans) {
-      formats.add('$header${_elements(p, 0, dpi)}^PQ${copies.clamp(1, 999)},0,1,Y^XZ');
-    }
-  } else {
-    final all = [for (final p in plans) for (var i = 0; i < copies; i++) p];
-    for (var start = 0; start < all.length; start += layout.columns) {
-      final row = StringBuffer(header);
-      for (var c = 0; c < layout.columns && start + c < all.length; c++) {
-        row.write(_elements(all[start + c], c * (layout.widthMm + layout.gapMm), dpi));
+  var row = StringBuffer(header);
+  var column = 0;
+  for (final (index, label) in labels.indexed) {
+    var count = quantities?[index] ?? copies;
+    if (count <= 0) continue;
+    final plan = planLabel(layout, label, dpi: dpi);
+    if (layout.columns == 1) {
+      final elements = _elements(plan, 0, dpi);
+      while (count > 0) {
+        final batch = count.clamp(1, 999);
+        formats.add('$header$elements^PQ$batch,0,1,Y^XZ');
+        count -= batch;
       }
-      formats.add('$row^PQ1,0,1,Y^XZ');
+    } else {
+      for (var i = 0; i < count; i++) {
+        row.write(_elements(plan, column * (layout.widthMm + layout.gapMm), dpi));
+        if (++column == layout.columns) {
+          formats.add('$row^PQ1,0,1,Y^XZ');
+          row = StringBuffer(header);
+          column = 0;
+        }
+      }
     }
   }
+  if (column > 0) formats.add('$row^PQ1,0,1,Y^XZ');
   return formats.join('\n');
 }

@@ -6,6 +6,8 @@ import '../shell.dart';
 import '../photos.dart';
 import '../widgets.dart';
 import 'receipt.dart';
+import 'catalog_import.dart';
+import 'physical_count.dart';
 
 int _minor(Object? value) => ((double.tryParse('$value') ?? 0) * 100).round();
 
@@ -30,12 +32,19 @@ class PartsScreen extends StatelessWidget {
           if (app.canStock)
             Toolbar([
               FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part')),
+              OutlinedButton.icon(onPressed: app.online ? () => importCatalog(context) : null, icon: const Icon(Icons.upload_file), label: const Text('Import parts')),
+              if (app.isManager && app.list('removedProducts').isNotEmpty)
+                OutlinedButton(onPressed: () => restorePart(context), child: const Text('Restore part')),
               OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
-              OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'count'), child: const Text('Stock count')),
+              OutlinedButton(onPressed: app.online && app.bins.isNotEmpty && app.products.any((p) => p['type'] != 'service')
+                  ? () => startPhysicalCount(context) : null, child: const Text('Stock count')),
+              if (app.list('stockCounts').isNotEmpty)
+                OutlinedButton(onPressed: app.online ? () => openPhysicalCounts(context) : null,
+                  child: Text("Open counts (${app.list('stockCounts').length})")),
               OutlinedButton.icon(
                 onPressed: rows.isEmpty ? null : () => printLabels(context, [for (final p in rows) productLabel(context.appRead, p)]),
                 icon: const Icon(Icons.qr_code_2, size: 18),
-                label: Text(q.isEmpty ? 'Print all labels' : 'Print ${rows.length} labels'),
+                label: Text(q.isEmpty ? 'Print all labels' : 'Print ${rows.length} ${rows.length == 1 ? 'label' : 'labels'}'),
               ),
             ]),
           if (app.canStock && app.bins.isEmpty && app.products.isNotEmpty)
@@ -46,6 +55,7 @@ class PartsScreen extends StatelessWidget {
             onTap: app.canStock ? (p) => editProduct(context, p) : null,
             columns: [
               Col('Part', (p) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    if (p['salesStopped'] == true) const StatusChip('Sales stopped'),
                     Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
                     Text('${p['sku']}${'${p['partNumber'] ?? ''}'.isNotEmpty ? ' · ${p['partNumber']}' : ''}',
                         style: Theme.of(context).textTheme.bodySmall),
@@ -62,9 +72,18 @@ class PartsScreen extends StatelessWidget {
               Col('Retail', (p) => Text(app.money(p['retailPrice'] as num?)), numeric: true),
               if (app.canStock) Col('Cost', (p) => Text(app.money(p['cost'] as num?)), numeric: true),
             ],
-            actionWidth: 100,
+            actionWidth: app.isManager ? 144 : 100,
             actions: app.canStock
                 ? (p) => [
+                      if (app.isManager)
+                        IconButton(tooltip: 'Remove part', icon: const Icon(Icons.delete_outline), onPressed: () async {
+                          if (!await confirm(context, 'Remove ${p['sku']}?', 'This removes an unused part from Billing and Inventory. You can restore it from Inventory.', action: 'Remove')) return;
+                          try {
+                            await app.mutate('/products/${p['id']}/remove', {}, 'Part removed.');
+                          } catch (error) {
+                            app.toast(errorText(error));
+                          }
+                        }),
                       IconButton(tooltip: 'Photos', onPressed: () => editPhotos(context, p), icon: const Icon(Icons.photo_library_outlined)),
                       IconButton(tooltip: 'Print label', onPressed: () => printLabels(context, [productLabel(context.appRead, p)]), icon: const Icon(Icons.qr_code_2)),
                     ]
@@ -75,6 +94,19 @@ class PartsScreen extends StatelessWidget {
     );
   }
 
+}
+
+Future<void> restorePart(BuildContext context) async {
+  final app = context.appRead;
+  final removed = app.list('removedProducts');
+  await showFormDialog<bool>(context, title: 'Restore part', submit: 'Restore',
+    fields: [FieldSpec('part', 'Removed part', kind: FieldKind.select, required: true,
+      options: [for (final p in removed) ('${p['id']}', '${p['sku']} · ${p['name']}')])],
+    onSubmit: (v) async {
+      await app.mutate('/products/${v['part']}/restore', {}, 'Part restored.');
+      return true;
+    },
+  );
 }
 
 Future<void> editProduct(BuildContext context, Json product) async {
@@ -95,6 +127,11 @@ Future<void> editProduct(BuildContext context, Json product) async {
     fields: [
       FieldSpec('name', 'Part name', value: product['name'], required: true),
       FieldSpec('sku', 'SKU / item code', value: product['sku'], required: true),
+      if (product['id'] != null && app.isManager)
+        FieldSpec('salesAction', 'New sales', kind: FieldKind.select, value: 'keep', options: [
+          ('keep', product['salesStopped'] == true ? 'Sales stopped' : 'Available for sale'),
+          if (product['salesStopped'] == true) ('resume', 'Resume sales') else ('stop', 'Stop new sales'),
+        ]),
       FieldSpec('brand', 'Brand', value: product['brand'], required: true),
       FieldSpec('category', 'Category',
           value: product['category'], required: true, suggestions: {...app.products.map((p) => '${p['category']}')}.toList()),
@@ -168,6 +205,7 @@ Future<void> editProduct(BuildContext context, Json product) async {
         'unit': '${v['unit']}'.isEmpty ? 'Each' : v['unit'],
         for (final k in ['oemReferences', 'supplierReferences', 'supersedes', 'interchanges']) k: splitList(v[k]),
       }..remove('generateBarcode');
+      if (body['salesAction'] == 'keep') body.remove('salesAction');
       await app.mutate('/products', body, created == null ? 'Part saved.' : 'Part saved with barcode $created.');
     },
   );
@@ -180,7 +218,7 @@ Future<void> stockOperation(BuildContext context, String kind) async {
   final allBins = optionsOf(app.bins, (b) => '${app.binName(b)} · ${b['kind']}');
   await showFormDialog<void>(
     context,
-    title: {'adjust': 'Adjust stock', 'count': 'Stock count', 'move': 'Move stock'}[kind]!,
+    title: kind == 'adjust' ? 'Adjust stock' : 'Move stock',
     fields: [
       FieldSpec('productId', 'Part', kind: FieldKind.select, options: parts, required: true, barcodeChoice: app.uniqueProductIdForCode),
       if (kind == 'move') ...[
@@ -188,8 +226,7 @@ Future<void> stockOperation(BuildContext context, String kind) async {
         FieldSpec('toBinId', 'To bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),
       ] else
         FieldSpec('binId', 'Bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),
-      FieldSpec(kind == 'count' ? 'counted' : 'quantity',
-          kind == 'count' ? 'Counted quantity' : kind == 'move' ? 'Quantity' : 'Change (+ adds, − removes)',
+      FieldSpec('quantity', kind == 'move' ? 'Quantity' : 'Change (+ adds, − removes)',
           kind: kind == 'adjust' ? FieldKind.signedNumber : FieldKind.number, required: true),
       const FieldSpec('reason', 'Reason', required: true),
       const FieldSpec('serials', 'Serial numbers', advanced: true, help: 'Serial-tracked parts only, separated by commas.'),
@@ -201,7 +238,6 @@ Future<void> stockOperation(BuildContext context, String kind) async {
         'transactionId': transactionId,
         'serials': splitList(v['serials']),
         if (v['quantity'] != null) 'quantity': int.tryParse('${v['quantity']}') ?? 0,
-        if (v['counted'] != null) 'counted': int.tryParse('${v['counted']}') ?? 0,
       }, 'Stock updated.');
     },
   );

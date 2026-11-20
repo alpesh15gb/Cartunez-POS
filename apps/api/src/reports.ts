@@ -1,3 +1,5 @@
+import { reorderSuggestions } from "./replenishment.js";
+import { shiftCashSummaries } from "./shift-cash.js";
 import type { Database } from "./db.js";
 import { records, getRecord } from "./db.js";
 import { type Actor, allow, fail, inventory, now } from "./domain.js";
@@ -53,6 +55,12 @@ export async function report(
   if (filters.paymentType && !["Cash", "Card", "UPI"].includes(filters.paymentType))
     fail("Choose a supported payment method.");
   const products = await records(db, actor.organizationId, "product");
+  const byProduct = new Map(products.map(p => [p.id, p]));
+  const binNames = new Map<string, string>();
+  if (name === "stock-movement" || name === "purchase-receipts") {
+    for (const bin of await records(db, actor.organizationId, "location", actor.branchId))
+      binNames.set(bin.id, [bin.area, bin.rack, bin.shelf, bin.bin].filter(Boolean).join(" / "));
+  }
   const productMatch = (product: any) =>
     (!filters.category || product.category === filters.category) &&
     (!filters.supplierId || product.supplierId === filters.supplierId) &&
@@ -61,7 +69,8 @@ export async function report(
     products.filter(productMatch).map((product) => product.id),
   );
   const lineMatches = (line: any) => !productFiltered || productIds.has(line.productId);
-  const invoices = await records(db, actor.organizationId, "invoice", actor.branchId);
+  const needsSales = ["daily-sales", "sales", "returns", "discounts", "margin", "tenders", "tax", "cores", "fitment", "fast-moving", "slow-moving"].includes(name);
+  const invoices = needsSales ? await records(db, actor.organizationId, "invoice", actor.branchId) : [];
   const invoicesById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
   const historicalMatch = (line: any) => !productFiltered || productMatch(line);
   const allSales = invoices.filter(
@@ -80,7 +89,7 @@ export async function report(
     }))
     .filter((sale) => sale.lines.length);
   const returns: any[] = (
-    await records(db, actor.organizationId, "return", actor.branchId)
+    needsSales ? await records(db, actor.organizationId, "return", actor.branchId) : []
   )
     .filter(
       (item) =>
@@ -147,7 +156,7 @@ export async function report(
     0,
   );
   const coreRefunds = (
-    await records(db, actor.organizationId, "coreReturn", actor.branchId)
+    needsSales ? await records(db, actor.organizationId, "coreReturn", actor.branchId) : []
   ).filter(
     (item) =>
       inDate(item.createdAt) &&
@@ -282,15 +291,19 @@ export async function report(
           })),
         ),
       );
-  else if (name === "shifts")
-    rows = (
+  else if (name === "shifts") {
+    const shifts = (
       await records(db, actor.organizationId, "shift", actor.branchId)
     ).filter(
       (item) =>
         inDate(item.openedAt) &&
         (!filters.cashier || item.userId === filters.cashier),
     );
-  else if (name === "tenders")
+    rows = await shiftCashSummaries(db, actor, shifts);
+  } else if (name === "cash-movements") {
+    rows = (await records(db, actor.organizationId, "cashMovement", actor.branchId))
+      .filter(entry => inDate(entry.createdAt) && (!filters.cashier || entry.userId === filters.cashier));
+  } else if (name === "tenders")
     rows = ["Cash", "Card", "UPI"]
       .filter((type) => !filters.paymentType || filters.paymentType === type)
       .map((type) => {
@@ -315,7 +328,7 @@ export async function report(
   else if (name === "stock-movement")
     rows = (
       await db.query(
-        'SELECT id,product_id AS "productId",bin_id AS "binId",quantity,reason,reference_id AS "referenceId",user_id AS "userId",cost,created_at AS "createdAt" FROM stock_ledger WHERE organization_id=$1 AND branch_id=$2 ORDER BY created_at',
+        'SELECT id,product_id AS "productId",bin_id AS "binId",quantity,reason,reference_id AS "referenceId",user_id AS "userId",cost,created_at AS "createdAt" FROM stock_ledger WHERE organization_id=$1 AND branch_id=$2 ORDER BY created_at,id',
         [actor.organizationId, actor.branchId],
       )
     ).rows
@@ -325,11 +338,19 @@ export async function report(
           inDate(new Date(item.createdAt).toISOString()),
       )
       .map((item) => ({
+        sku: byProduct.get(item.productId)?.sku ?? item.productId,
+        name: byProduct.get(item.productId)?.name,
+        location: binNames.get(item.binId) ?? item.binId,
         ...item,
         quantity: Number(item.quantity),
         cost: Number(item.cost),
       }));
-  else if (["stock-by-bin", "valuation", "low-stock", "aging"].includes(name)) {
+  else if (name === "low-stock") {
+    const stock = await inventory(db, actor);
+    const locations = await records(db, actor.organizationId, "location", actor.branchId);
+    const orders = await records(db, actor.organizationId, "purchaseOrder", actor.branchId);
+    rows = reorderSuggestions(products.filter(productMatch), stock, locations, orders);
+  } else if (["stock-by-bin", "valuation", "aging"].includes(name)) {
     const stock = (await inventory(db, actor)).filter((item) =>
       productIds.has(item.productId),
     );
@@ -387,53 +408,40 @@ export async function report(
           .reduce((sum, lot) => sum + lot.quantity, 0),
       };
     });
-    if (name === "low-stock")
-      rows = products
-        .filter(productMatch)
-        .filter((product) => product.type !== "service")
-        .map((product) => {
-          const available = stock
-            .filter(
-              (item) =>
-                item.productId === product.id &&
-                locations.find((location) => location.id === item.binId)
-                  ?.kind === "sellable",
-            )
-            .reduce((sum, item) => sum + item.available, 0);
-          return {
-            productId: product.id,
-            sku: product.sku,
-            name: product.name,
-            available,
-            reorderLevel: product.reorderLevel,
-            suggestedQuantity: Math.max(
-              0,
-              product.reorderLevel * 2 - available,
-            ),
-            supplierId: product.supplierId,
-          };
-        })
-        .filter((item) => item.available <= item.reorderLevel);
   } else if (name === "fast-moving" || name === "slow-moving") {
-    rows = products
-      .filter(productMatch)
-      .map((product) => ({
-        productId: product.id,
-        sku: product.sku,
-        name: product.name,
-        quantity: flat
-          .filter((line) => line.productId === product.id)
-          .reduce((sum, line) => sum + line.qty, 0),
-        revenue: flat
-          .filter((line) => line.productId === product.id)
-          .reduce((sum, line) => sum + line.total, 0),
-      }))
+    const movement = new Map<string, { productId: string; sku: string; name: string; soldUnits: number; returnedUnits: number; quantity: number; revenue: number }>();
+    const bucket = (productId: string, source: any) => {
+      let row = movement.get(productId);
+      if (!row) {
+        row = { productId, sku: source.sku, name: source.name, soldUnits: 0, returnedUnits: 0, quantity: 0, revenue: 0 };
+        movement.set(productId, row);
+      }
+      return row;
+    };
+    for (const product of products.filter(productMatch)) bucket(product.id, product);
+    for (const line of flat) {
+      const row = bucket(line.productId, line);
+      row.soldUnits += line.qty;
+      row.quantity += line.qty;
+      row.revenue += line.total;
+    }
+    for (const credit of returns) {
+      for (const line of credit.lines) {
+        const row = bucket(line.productId, line);
+        row.returnedUnits += line.quantity;
+        row.quantity -= line.quantity;
+        row.revenue -= line.total;
+      }
+    }
+    rows = [...movement.values()]
       .sort((a, b) =>
         name === "fast-moving"
           ? b.quantity - a.quantity
           : a.quantity - b.quantity,
       );
-  } else if (name === "purchase-receipts")
+  } else if (name === "purchase-receipts") {
+    const suppliers = await records(db, actor.organizationId, "supplier");
+    const supplierNames = new Map(suppliers.map(s => [s.id, s.name]));
     rows = (
       await records(db, actor.organizationId, "purchaseReceipt", actor.branchId)
     )
@@ -445,19 +453,24 @@ export async function report(
       .flatMap((item) =>
         item.lines
           .filter((line: any) => {
-            const part = products.find((p) => p.id === line.productId);
-            return (!filters.category || part?.category === filters.category) && (!filters.sku || part?.sku === filters.sku);
+            const part = byProduct.get(line.productId);
+            return (!filters.category || (line.category ?? part?.category) === filters.category)
+              && (!filters.sku || (line.sku ?? part?.sku) === filters.sku);
           })
           .map((line: any) => ({
             id: item.id,
             purchaseOrderId: item.purchaseOrderId,
             date: item.createdAt,
             supplierId: item.supplierId,
+            supplier: supplierNames.get(item.supplierId) ?? item.supplierId,
+            sku: byProduct.get(line.productId)?.sku ?? line.productId,
+            name: byProduct.get(line.productId)?.name,
+            location: binNames.get(line.binId) ?? line.binId,
             ...line,
             total: line.cost * line.quantity + line.landedCost,
           })),
       );
-  else if (name === "warranty")
+  } else if (name === "warranty")
     rows = (
       await records(db, actor.organizationId, "warranty", actor.branchId)
     ).filter((item) => inDate(item.createdAt));
@@ -546,11 +559,19 @@ export async function report(
     totals = {
       shifts: rows.length,
       openingCash: sum("openingCash"),
+      cashSales: sum("cashSales"),
+      cashRefunds: sum("cashRefunds"),
+      cashIn: sum("cashIn"),
+      cashOut: sum("cashOut"),
       expectedCash: sum("expectedCash"),
       countedCash: sum("countedCash"),
       variance: sum("variance"),
     };
-  else if (name === "tenders")
+  else if (name === "cash-movements") {
+    const cashIn = rows.reduce((sum, entry) => sum + (entry.direction === "in" ? entry.amount : 0), 0);
+    const cashOut = rows.reduce((sum, entry) => sum + (entry.direction === "out" ? entry.amount : 0), 0);
+    totals = { cashIn, cashOut, netMovement: cashIn - cashOut };
+  } else if (name === "tenders")
     totals = {
       collected: sum("collected"),
       refunded: sum("refunded"),
@@ -569,7 +590,7 @@ export async function report(
       outstanding: sum("charged") - sum("refunded"),
     };
   else if (["fast-moving", "slow-moving"].includes(name))
-    totals = { quantity: sum("quantity"), revenue: sum("revenue") };
+    totals = { soldUnits: sum("soldUnits"), returnedUnits: sum("returnedUnits"), quantity: sum("quantity"), revenue: sum("revenue") };
   else if (name === "fitment")
     totals = {
       overrides: rows.filter((row) => row.status).length,
@@ -582,6 +603,7 @@ export async function report(
     name,
     rows,
     totals,
+    currency: settings?.currency || "INR",
     confirmedOnly: true,
     pendingConflicts: conflicts,
     branchId: actor.branchId,

@@ -26,8 +26,10 @@ export async function queueMagentoSync(
   const at = new Date().toISOString();
   for (const productId of new Set(productIds)) {
     const listing = await getRecord(db, organizationId, "onlineListing", productId);
-    if (!listing || (!listing.published && !listing.sync?.magentoId)) continue;
-    const job = (await getRecord(db, organizationId, "magentoJob", productId)) || {
+    if (!listing) continue;
+    const currentJob = await getRecord(db, organizationId, "magentoJob", productId);
+    if (!listing.published && !listing.sync?.magentoId && !currentJob) continue;
+    const job = currentJob || {
       id: productId,
       productId,
       version: 0,

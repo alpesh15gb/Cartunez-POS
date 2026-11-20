@@ -1,6 +1,8 @@
 // Shop label design: which lines appear on a barcode label, how big they are
 // and where they sit. planLabel() places everything in millimetres once; the
 // Zebra (ZPL), PDF and on-screen preview renderers all draw from that plan.
+import 'package:barcode/barcode.dart';
+
 import 'billing.dart';
 
 /// The parts of a label that can be sized and moved.
@@ -275,11 +277,21 @@ double textHeight(LabelLayout layout, String part) => (part == 'price' ? _priceM
 int barcodeModules(String format, String code) => switch (format) {
       'EAN13' || 'UPC' => 95 + 18,
       'EAN8' => 67 + 14,
-      _ => 11 * (_code128Symbols(code) + 2) + 13 + 20,
+      _ => _code128Modules(code),
     };
 
-int _code128Symbols(String code) =>
-    RegExp(r'^\d+$').hasMatch(code) && code.length >= 4 ? (code.length + 1) ~/ 2 + 1 : code.length;
+int _code128Modules(String code) {
+  // Each encoded symbol has six runs across eleven modules. The final stop
+  // pattern has seven runs across thirteen. Count the encoder's actual runs
+  // because a mixed SKU can switch to paired digits partway through the code.
+  try {
+    final runs = Barcode.code128().make(code, width: 1, height: 1).whereType<BarcodeBar>().length;
+    return ((runs - 7) ~/ 6) * 11 + 13 + 20;
+  } on BarcodeException {
+    // The designer still needs to lay out and explain an unprintable code.
+    return 11 * (code.length + 2) + 13 + 20;
+  }
+}
 
 /// Shortens text that would not fit [width] mm at [height] mm (about 0.55 em per character).
 String fitText(String text, double width, double height) {

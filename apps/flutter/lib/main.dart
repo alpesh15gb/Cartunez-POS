@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:flutter/services.dart';
 
 import 'state/app_state.dart';
@@ -8,6 +10,11 @@ import 'ui/theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) {
+    MobileScannerPlatform.instance
+      ..setWebBarcodeReader(WebBarcodeReader.zxingWasm)
+      ..setBarcodeLibraryScriptUrl('scanner/3.1.6/reader.js');
+  }
   final state = AppState();
   runApp(CartunezApp(state: state));
   await state.init();

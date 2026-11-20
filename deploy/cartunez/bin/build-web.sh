@@ -13,7 +13,7 @@ if json.load(open(sys.argv[1])).get('name')!='motorline-production':sys.exit('Un
 PY
 web="$source_root/apps/flutter/release/web"
 [[ -d "$web" && ! -L "$web" && "$(realpath "$web")" = "$web" ]] || die 'Missing apps/flutter/release/web. Build it with apps/flutter/tool/build_web.ps1 and commit it.'
-for file in index.html flutter_bootstrap.js main.dart.js sw.js version.json canvaskit/canvaskit.wasm; do
+for file in index.html flutter_bootstrap.js main.dart.js sw.js version.json canvaskit/canvaskit.wasm scanner/3.1.6/reader.js scanner/3.1.6/zxing_reader.wasm; do
   [[ -s "$web/$file" ]] || die "Flutter web build is incomplete: $file is missing."
 done
 if find "$web" -type l | grep -q .; then die 'Flutter web build must not contain symlinks.'; fi

@@ -91,10 +91,12 @@ void main() {
         await tester.tap(find.text('Checkout  (F6)'));
         await tester.pumpAndSettle();
         if (find.text('Open shift').evaluate().isNotEmpty) {
-          await tester.runAsync(() async {
-            await tester.tap(find.widgetWithText(FilledButton, 'Open shift'));
-            await Future<void>.delayed(const Duration(seconds: 2));
-          });
+          await tester.runAsync(() => tester.tap(find.widgetWithText(FilledButton, 'Open shift')));
+          for (var i = 0; i < 200 && find.text('Complete sale').evaluate().isEmpty; i++) {
+            await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+            await tester.pump(const Duration(milliseconds: 30));
+          }
+          expect(find.text('Complete sale'), findsOneWidget);
           await tester.pumpAndSettle();
         }
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/$name-05-checkout.png'));

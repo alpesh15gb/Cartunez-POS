@@ -202,7 +202,7 @@ export async function inventory(db: Database, actor: Actor) {
   const holds = await records(db, actor.organizationId, "hold", actor.branchId);
   const rows = (
     await db.query(
-      "SELECT product_id,bin_id,quantity FROM stock WHERE organization_id=$1 AND branch_id=$2",
+      "SELECT product_id,bin_id,quantity FROM stock WHERE organization_id=$1 AND branch_id=$2 ORDER BY product_id,bin_id",
       [actor.organizationId, actor.branchId],
     )
   ).rows;

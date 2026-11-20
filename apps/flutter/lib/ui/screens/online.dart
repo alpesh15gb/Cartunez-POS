@@ -96,7 +96,7 @@ class _OnlineStoreScreenState extends State<OnlineStoreScreen> {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        final parts = app.products.where((p) => p['type'] != 'service').toList();
+        final parts = app.saleProducts.where((p) => p['type'] != 'service').toList();
         final rows = parts
             .where((p) => q.isEmpty || [p['name'], p['sku'], p['brand'], p['partNumber'], ...(p['barcodes'] as List? ?? [])].any((v) => normalize(v).contains(q)))
             .where((p) => _matches(app, p, listings['${p['id']}']))

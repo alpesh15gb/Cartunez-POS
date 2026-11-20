@@ -8,9 +8,9 @@ Windows program and as an Android app, all talking to the server API in `apps/ap
 - Billing: catalog with photos and stock, USB/Bluetooth keyboard-mode scanners with an Enter suffix,
   and camera scanning on Android and supported browsers. Repeat scans add one more. The register also has discounts,
   retail/wholesale, hold and resume, cash/card/UPI and split payments with change, receipts.
-- Sales: invoices and credit notes, returns, voids, shifts with cash counts.
+- Sales: invoices and credit notes, returns, voids, shifts with reasoned cash in/out, counts and drawer reconciliation.
 - Customers, suppliers, parts (with in-store Code 128 barcodes and support for existing EAN/UPC labels), bins, stock adjust/count/move,
-  purchase orders and receiving, label printing (50 × 30 mm), dashboard, reports with CSV export,
+  catalog CSV import, reviewed bin counts, reorder suggestions, purchase orders and receipt-specific label printing, dashboard, reports with CSV export,
   settings, modules, staff, branches, approvals, sync and audit.
 - Optional modules (vehicle fitment, branch transfers, warranty & cores) follow Settings › Modules.
 - Every sale is saved on the device before it is sent. If the connection drops it is kept and sent
@@ -24,11 +24,12 @@ Not in the app yet: enrolled offline counters with their own invoice ranges, and
 - In Billing, Parts, or Bins, use **Scan barcode** or focus the search field and scan with an Enter
   suffix. Scanner buttons in stock and receiving forms select the matching part or bin. The Windows app
   uses keyboard-mode scanners. For a webcam on Windows, open the HTTPS web app in a browser that allows camera access.
+- The web camera loads its pinned ZXing WebAssembly reader from the POS host when scanning starts. The reader and WebAssembly file in `web/scanner/3.1.6` match the version used by `mobile_scanner`. The packaged script adds a local file resolver. [ZXing WebAssembly reader](https://github.com/Sec-ant/zxing-wasm/tree/v3.1.6)
 - Product lookup preserves leading zeroes and punctuation and matches equivalent valid UPC/EAN/GTIN
   representations. New internal codes print as Code 128. Print thermal labels at actual size and test a sample with each counter scanner.
 - INR reports use IST business dates. Reports cover the active branch. The tender report reconciles
-  recorded invoices, change and refunds. Compare Card and UPI with the provider statement separately.
-  CSV amounts are integer minor units, such as paise for INR.
+  recorded invoices, change and refunds. Managers can compare a CSV of gross INR Card and UPI captures by reference, amount and date.
+  Report CSV headings identify the currency. A ₹500 amount exports as 500.00.
 
 ## Label design
 
@@ -69,9 +70,8 @@ Requirements: Flutter 3.50+, Visual Studio 2022 C++ build tools (Windows), Andro
 ```
 flutter pub get
 flutter test                      # billing maths and barcode rules
-flutter build apk --release --split-per-abi   # buildpp\outputslutter-apkpp-arm64-v8a-release.apk
-flutter build appbundle --release             # buildpp\outputsundle
-eleasepp-release.aab (Play Store)
+flutter build apk --release --split-per-abi   # build/app/outputs/flutter-apk/
+flutter build appbundle --release             # build/app/outputs/bundle/release/app-release.aab
 ```
 
 `flutter test visual --update-goldens` renders every screen to `visual/out/` against a demo API on
@@ -80,14 +80,14 @@ eleasepp-release.aab (Play Store)
 ## Web app
 
 ```
-powershell -ExecutionPolicy Bypass -File tooluild_web.ps1
+powershell -ExecutionPolicy Bypass -File tool\build_web.ps1
 ```
 
 This builds the web app with every resource bundled locally (no Google CDN) and refreshes
 `release/web`. **Commit `release/web` with the change**: the VPS release copies it as the site and
 does not build Flutter itself. `tool/serve_web.py` serves the build with `/api` forwarded to a local
 API, the same way the VPS does. On the web the app reads `/installation.json` to fill in the shop's
-organization and branch, and stores the register in the browser's local storage.
+organization and branch, and stores the register in IndexedDB, migrating older browser-local data on the next visit.
 
 `web/sw.js` retires the service worker left by the old Next.js app: on a counter's next visit it
 clears the old offline cache, unregisters itself and reloads the tab onto this app.
@@ -97,7 +97,7 @@ clears the old offline cache, unregisters itself and reloads the tab onto this a
 Needs Inno Setup 6 (`winget install JRSoftware.InnoSetup`). From `apps/flutter`:
 
 ```
-powershell -ExecutionPolicy Bypass -File windows\installeruild.ps1
+powershell -ExecutionPolicy Bypass -File windows\installer\build.ps1
 ```
 
 This builds the release and writes `build\installer\CartunezPOS-Setup-<version>.exe` (version from

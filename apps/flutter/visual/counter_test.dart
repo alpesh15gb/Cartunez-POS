@@ -11,7 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   testWidgets('scan twice, post one cash invoice, return stock, reconcile margin and tenders', (tester) async {
     HttpOverrides.global = null;
-    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.physicalSize = const Size(697, 667);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     LocalStore.overrideDirectory = Directory.systemTemp.createTempSync('cartunez-checkout');
@@ -40,6 +40,9 @@ void main() {
       await tester.pumpAndSettle();
       expect((state.cart['lines'] as List).single['qty'], count);
     }
+    await tester.tap(find.text('View sale · 2 items'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Increase quantity'), findsOneWidget);
     await tester.tap(find.text('Checkout  (F6)'));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextField, 'Amount received'), '600');
@@ -55,6 +58,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 30));
     }
     expect(state.syncing, isFalse);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text('Current sale'), findsNothing);
+    expect(find.byTooltip('Scan barcode'), findsOneWidget);
     await tester.runAsync(() async {
       await state.sync();
       final invoice = state.list('invoices').singleWhere((r) => r['lines'][0]['productId'] == part['id']);

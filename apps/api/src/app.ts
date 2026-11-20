@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { reportOutput } from "./report-output.js";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import jwt from "jsonwebtoken";
@@ -25,11 +26,15 @@ import {
   approved,
   idempotent,
   normalize,
-  barcodeKey,
   roundRatio,
 } from "./domain.js";
+import { shiftCashSummaries } from "./shift-cash.js";
+import { compareTenderStatement } from "./tender-comparison.js";
+import { confirmCount, discardCount, startCount, submitCount } from "./physical-count.js";
 import { finalizeSale, returnInvoice } from "./sales.js";
 import { report } from "./reports.js";
+import { reorderSuggestions } from "./replenishment.js";
+import { buildProduct, CatalogCodes, previewCatalog } from "./catalog.js";
 import { magentoRoutes } from "./magento.js";
 import { magentoOrderRoutes } from "./magento-orders.js";
 import { productImageRoutes, productImages } from "./product-images.js";
@@ -95,7 +100,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     return {
       status: "ok",
       database: process.env.DATABASE_URL ? "postgresql" : "pglite-development",
-      version: "1.1.0",
+      version: "1.2.0",
     };
   });
   app.post(
@@ -246,6 +251,20 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         kind,
         scope === "branch" ? actor.branchId : undefined,
       );
+    if (actor.role === "inventory") {
+      data.shifts = [];
+      data.audit = data.audit.filter((entry: any) => entry.action !== "cash-in" && entry.action !== "cash-out");
+    }
+    if (["owner", "manager", "cashier"].includes(actor.role)) {
+      const entries = await records(db, actor.organizationId, "cashMovement", actor.branchId);
+      data.cashMovements = actor.role === "cashier" ? entries.filter(entry => entry.userId === actor.id) : entries;
+    }
+    if (["owner", "manager", "inventory"].includes(actor.role)) {
+      const counts = await db.query("SELECT data FROM records WHERE organization_id=$1 AND branch_id=$2 AND kind='stockCount' " +
+        "AND data->>'status' IN ('counting','review') AND ($3::text IS NULL OR data->>'startedBy'=$3) ORDER BY created_at DESC",
+        [actor.organizationId, actor.branchId, actor.role === "inventory" ? actor.id : null]);
+      data.stockCounts = counts.rows.map(row => row.data);
+    }
     data.transfers = data.transfers.filter(
       (transfer: any) =>
         transfer.branchId === actor.branchId ||
@@ -253,12 +272,20 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     );
     if (actor.role === "cashier") {
       data.audit = [];
+      data.shifts = data.shifts.filter((shift: any) => shift.userId === actor.id);
       data.conflicts = [];
       data.invoices = data.invoices.filter(
         (invoice: any) => invoice.cashierId === actor.id,
       );
     }
+    if (["owner", "manager"].includes(actor.role)) {
+      data.removedProducts = (await records(db, actor.organizationId, "removedProduct"))
+        .map(({ id, sku, name }) => ({ id, sku, name }));
+    }
     data.stock = await inventory(db, actor);
+    if (actor.role !== "cashier") {
+      data.reorderSuggestions = reorderSuggestions(data.products, data.stock, data.locations, data.purchaseOrders);
+    }
     data.onlineListings = ["owner", "manager"].includes(actor.role)
       ? await records(db, actor.organizationId, "onlineListing")
       : [];
@@ -348,6 +375,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
           path === "invoices" ||
           path === "core-returns" ||
           path === "invoices/:id/returns" ||
+          path === "shifts/:id/cash-movements" ||
+          path.startsWith("inventory/count") ||
           path === "purchase-orders/:id/receive";
         const operation = () =>
           handler(tx, request.actor, body, request.params);
@@ -628,57 +657,22 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     const existing = body.id
       ? await scoped(tx, actor, "product", body.id)
       : undefined;
-    const value = { ...existing, ...body };
-    const product: any = { id: existing?.id || id("part") };
-    for (const key of [
-      "name",
-      "sku",
-      "brand",
-      "partNumber",
-      "category",
-      "unit",
-    ])
-      product[key] = text(value[key] ?? "", key, key !== "partNumber");
-    product.description = text(
-      value.description || "",
-      "description",
-      false,
-      2000,
-    );
-    product.hsnSac = text(value.hsnSac || "", "HSN or SAC", false, 30);
-    for (const key of [
-      "cost",
-      "retailPrice",
-      "wholesalePrice",
-      "coreCharge",
-      "reorderLevel",
-    ])
-      product[key] = integer(value[key] ?? 0, key);
-    product.taxRate = integer(value.taxRate ?? 1800, "Tax rate", 0, 10000);
-    product.packSize = integer(value.packSize ?? 1, "Pack size", 1, 9999);
-    for (const key of [
-      "oemReferences",
-      "barcodes",
-      "supplierReferences",
-      "alternatives",
-      "supersedes",
-      "interchanges",
-    ]) {
-      if (value[key] !== undefined && !Array.isArray(value[key]))
-        fail(`${key} must be an array.`);
-      product[key] = (value[key] || []).map((entry: any) =>
-        text(entry, key, true, 100),
-      );
+    const product = buildProduct({ ...existing, ...body }, existing?.id);
+    // Only an explicit manager action changes sale status, including on older-client edits.
+    if (existing?.salesStopped) product.salesStopped = true;
+    if (body.salesAction !== undefined) {
+      allow(actor, ["owner", "manager"]);
+      if (!existing || !["stop", "resume"].includes(body.salesAction))
+        fail("Choose stop or resume for an existing product.");
+      if (body.salesAction === "stop") {
+        const listing = await getRecord(tx, actor.organizationId, "onlineListing", product.id);
+        if (listing?.published || (listing?.sync && !["never", "unpublished"].includes(listing.sync.state)))
+          fail("Unpublish this part from the online store and wait for synchronization before stopping sales.", 409);
+        product.salesStopped = true;
+      } else {
+        delete product.salesStopped;
+      }
     }
-    Object.assign(product, {
-      taxCategory: value.taxCategory || "Standard",
-      supplierId: value.supplierId || null,
-      serialTracked: !!value.serialTracked,
-      universal: !!value.universal,
-      type: value.type === "service" ? "service" : "part",
-      icon: value.icon || "",
-      fitments: value.fitments || [],
-    });
     for (const rule of product.fitments) validateFitment(rule);
     const products = await records(tx, actor.organizationId, "product");
     if (
@@ -698,21 +692,9 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
           409,
         );
     }
-    const existingBarcodes = new Set((existing?.barcodes || []).map(barcodeKey));
-    const addedBarcodes = product.barcodes.filter((code: string) => !existingBarcodes.has(barcodeKey(code)));
-    for (const other of products) {
-      if (other.id === product.id) continue;
-      const otherBarcodes: string[] = other.barcodes || [];
-      const sku = normalize(product.sku);
-      if (
-        sku === normalize(other.sku) ||
-        (sku !== normalize(existing?.sku) && otherBarcodes.some((code) => normalize(code) === sku)) ||
-        addedBarcodes.some((code: string) =>
-          otherBarcodes.some((barcode) => barcodeKey(barcode) === barcodeKey(code)) ||
-          normalize(code) === normalize(other.sku),
-        )
-      ) fail(`SKU or barcode conflicts with ${other.name}.`, 409);
-    }
+    const removed = await records(tx, actor.organizationId, "removedProduct");
+    const codes = new CatalogCodes([...products, ...removed].filter((p) => p.id !== product.id));
+    codes.check(product, existing);
     if (
       existing &&
       (await records(tx, actor.organizationId, "hold")).some((hold) =>
@@ -720,11 +702,56 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       )
     )
       fail("Complete or release parked sales before editing this part.", 409);
-    await audit(tx, actor, "product", product.id, "Catalog update");
+    const statusChanged = Boolean(existing?.salesStopped) !== Boolean(product.salesStopped);
+    await audit(tx, actor, "product", product.id, statusChanged
+      ? (product.salesStopped ? "Stopped new sales" : "Resumed sales") : "Catalog update");
     const saved = await putRecord(tx, actor.organizationId, "product", product);
     await queueMagentoSync(tx, actor.organizationId, [product.id], "product");
     return saved;
   });
+  for (const preview of [true, false]) {
+    post(preview ? "products/import/preview" : "products/import", async (tx, actor, body) => {
+      allow(actor, ["owner", "manager", "inventory"]);
+      const org = actor.organizationId;
+      const existing = await records(tx, org, "product");
+      const removed = await records(tx, org, "removedProduct");
+      const settings = await getRecord(tx, org, "settings", "settings");
+      const result = previewCatalog(body.csv, new CatalogCodes([...existing, ...removed]), settings?.taxScheme === "india-gst");
+      if (preview) return { rows: result.rows, valid: result.valid };
+      if (!result.valid) {
+        const first = result.rows.find((row) => row.error)!;
+        fail(`Row ${first.row}: ${first.error} Preview the file again before importing.`, 409);
+      }
+      for (const product of result.products) await putRecord(tx, org, "product", product);
+      await audit(tx, actor, "catalog-import", "catalog", "Imported new parts from CSV", {
+        productIds: result.products.map((p) => p.id),
+      });
+      return { imported: result.products.length };
+    });
+  }
+  for (const restoring of [false, true]) {
+    const source = restoring ? "removedProduct" : "product";
+    const destination = restoring ? "product" : "removedProduct";
+    post("products/:id/" + (restoring ? "restore" : "remove"), async (tx, actor, _body, params) => {
+      allow(actor, ["owner", "manager"]);
+      const part = await scoped(tx, actor, source, params.id);
+      if (!restoring) {
+        const used = await tx.query(
+          `SELECT 1 WHERE EXISTS (SELECT 1 FROM stock WHERE organization_id=$1 AND product_id=$2)
+           OR EXISTS (SELECT 1 FROM stock_ledger WHERE organization_id=$1 AND product_id=$2)
+           OR EXISTS (SELECT 1 FROM records WHERE organization_id=$1
+             AND kind NOT IN ('audit', 'catalogSnapshot') AND NOT (kind='product' AND id=$2)
+             AND (id=$2 OR jsonb_path_exists(data, 'strict $.** ? (@ == $ref)', jsonb_build_object('ref', $2::text))))`,
+          [actor.organizationId, part.id],
+        );
+        if (used.rows.length) fail("This part is linked to stock or another shop record and must stay in the catalog.", 409);
+      }
+      await tx.query("UPDATE records SET kind=$4 WHERE organization_id=$1 AND kind=$2 AND id=$3",
+        [actor.organizationId, source, part.id, destination]);
+      await audit(tx, actor, restoring ? "product-restore" : "product-remove", part.id, part.sku);
+      return { id: part.id };
+    });
+  }
   for (const kind of ["customer", "supplier"] as const)
     post(kind + "s", async (tx, actor, body) => {
       allow(
@@ -947,8 +974,11 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     await audit(tx, actor, "stock-move", reference, body.reason, body);
     return { id: reference };
   });
-  for (const operation of ["adjust", "count"])
-    post(`inventory/${operation}`, async (tx, actor, body) => {
+  post("inventory/count/start", startCount);
+  post("inventory/count/submit", submitCount);
+  post("inventory/count/discard", discardCount);
+  post("inventory/count", confirmCount);
+  post("inventory/adjust", async (tx, actor, body) => {
       allow(actor, ["owner", "manager", "inventory"]);
       text(body.reason, "reason");
       await approved(
@@ -962,17 +992,14 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         (item) =>
           item.productId === body.productId && item.binId === body.binId,
       );
-      const quantity =
-        operation === "count"
-          ? integer(body.counted, "Counted quantity") - (stock?.quantity || 0)
-          : integer(body.quantity, "Adjustment", -1000000, 1000000);
+      const quantity = integer(body.quantity, "Adjustment", -1000000, 1000000);
       if ((stock?.available || 0) + quantity < 0)
         fail("Adjustment would consume reserved stock.", 409);
       const product = await scoped(tx, actor, "product", body.productId);
       if (product.type === "service") fail("Services do not carry stock.");
       const bin = await scoped(tx, actor, "location", body.binId);
       const serialStatus = bin.kind === "sellable" ? "available" : bin.kind;
-      const reference = id(operation);
+      const reference = id("adjust");
       await adjust(
         tx,
         actor,
@@ -1032,7 +1059,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
           }
         }
       }
-      await audit(tx, actor, "stock-" + operation, reference, body.reason, {
+      await audit(tx, actor, "stock-adjust", reference, body.reason, {
         ...body,
         quantity,
       });
@@ -1043,11 +1070,18 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     await scoped(tx, actor, "supplier", body.supplierId);
     if (!Array.isArray(body.lines) || !body.lines.length)
       fail("Add purchase lines.");
+    const suggestions = body.replenishment === true ? reorderSuggestions(
+      await records(tx, actor.organizationId, "product"), await inventory(tx, actor),
+      await records(tx, actor.organizationId, "location", actor.branchId),
+      await records(tx, actor.organizationId, "purchaseOrder", actor.branchId),
+    ) : null;
     const lines = [];
     const used = new Set<string>();
     for (const line of body.lines) {
       const product = await scoped(tx, actor, "product", line.productId);
       if (product.type === "service") fail("Choose a stock part for a purchase order.");
+      if (suggestions && line.quantity > (suggestions.find(row => row.productId === product.id)?.suggestedQuantity ?? 0))
+        fail("The reorder quantity changed. Refresh the dashboard and review the stock already on order.", 409);
       if (used.has(line.productId)) fail("Combine duplicate purchase lines.");
       used.add(line.productId);
       lines.push({
@@ -1080,6 +1114,18 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       order,
       actor.branchId,
     );
+  });
+  app.get("/api/v1/purchase-orders/:id/receipts", async (request: any) => {
+    const actor: Actor = request.actor;
+    allow(actor, ["owner", "manager", "inventory"]);
+    return db.readSnapshot(async (tx) => {
+      const order = await scoped(tx, actor, "purchaseOrder", request.params.id);
+      const result = await tx.query(
+        "SELECT data FROM records WHERE organization_id=$1 AND branch_id=$2 AND kind='purchaseReceipt' AND data->>'purchaseOrderId'=$3 ORDER BY created_at DESC,id DESC",
+        [actor.organizationId, actor.branchId, order.id],
+      );
+      return { receipts: result.rows.map(({ data }) => data) };
+    });
   });
   post("purchase-orders/:id/receive", async (tx, actor, body, params) => {
     allow(actor, ["owner", "manager", "inventory"]);
@@ -1163,8 +1209,12 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
           line.received += quantity;
           lines.push({
             productId: product.id,
+            sku: product.sku,
+            name: product.name,
+            category: product.category,
             quantity,
             binId: bin.id,
+            location: [bin.area, bin.rack, bin.shelf, bin.bin].filter(Boolean).join(" / "),
             cost: line.cost,
             landedCost: extra,
           });
@@ -1215,36 +1265,34 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       branchId: actor.branchId,
       userId: actor.id,
       openedAt: now(),
-      openingCash: integer(body.openingCash || 0, "Opening cash"),
+      openingCash: integer(body.openingCash ?? 0, "Opening cash"),
     };
     return putRecord(tx, actor.organizationId, "shift", shift, actor.branchId);
   });
+  post("shifts/:id/cash-movements", async (tx, actor, body, params) => {
+    allow(actor, ["owner", "manager", "cashier"]);
+    const shift = await scoped(tx, actor, "shift", params.id);
+    if (shift.userId !== actor.id) fail("Record cash movements on your own shift.", 403);
+    if (!["in", "out"].includes(body.direction)) fail("Choose cash in or cash out.");
+    const amount = integer(body.amount, "Cash movement", 1);
+    const reason = text(body.reason, "cash movement reason");
+    const entry = { branchId: actor.branchId, shiftId: shift.id, userId: actor.id, direction: body.direction, amount, reason };
+    return idempotent(tx, actor, body.transactionId, { operation: "cash-movement", ...entry }, async () => {
+      if (shift.closedAt) fail("The shift has already closed.", 409);
+      const movement = await putRecord(tx, actor.organizationId, "cashMovement", {
+        id: id("cash"), ...entry, createdAt: now(),
+      }, actor.branchId);
+      await audit(tx, actor, "cash-" + body.direction, movement.id, reason, { shiftId: shift.id, amount });
+      return movement;
+    });
+  });
   post("shifts/:id/close", async (tx, actor, body, params) => {
+    allow(actor, ["owner", "manager", "cashier"]);
     const shift = await scoped(tx, actor, "shift", params.id);
     if (shift.userId !== actor.id) allow(actor, ["owner", "manager"]);
     if (shift.closedAt) fail("Shift already closed.", 409);
-    const sales = (
-      await records(tx, actor.organizationId, "invoice", actor.branchId)
-    ).filter((sale) => sale.shiftId === shift.id);
-    const refunds = (
-      await records(tx, actor.organizationId, "return", actor.branchId)
-    ).filter((item) => item.shiftId === shift.id && item.refundType === "Cash");
-    const coreRefunds = (
-      await records(tx, actor.organizationId, "coreReturn", actor.branchId)
-    ).filter((item) => item.shiftId === shift.id && item.refundType === "Cash");
-    shift.expectedCash =
-      shift.openingCash +
-      sales.reduce(
-        (sum, sale) =>
-          sum +
-          sale.tenders
-            .filter((tender: any) => tender.type === "Cash")
-            .reduce((n: number, tender: any) => n + tender.amount, 0) -
-          sale.change,
-        0,
-      ) -
-      refunds.reduce((sum, item) => sum + item.total, 0) -
-      coreRefunds.reduce((sum, item) => sum + item.total, 0);
+    const [summary] = await shiftCashSummaries(tx, actor, [shift]);
+    shift.expectedCash = summary.expectedCash;
     shift.countedCash = integer(body.countedCash, "Counted cash");
     shift.variance = shift.countedCash - shift.expectedCash;
     shift.closedAt = now();
@@ -1379,6 +1427,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       const quantity = integer(line.qty, "Quantity", 1, 9999);
       line.qty = quantity;
       const product = await scoped(tx, actor, "product", line.productId);
+      if (product.salesStopped) fail("New sales are stopped for " + product.sku + ".", 409);
       if (product.type === "service") continue;
       const bin = await scoped(tx, actor, "location", line.binId);
       if (bin.kind !== "sellable") fail("Park stock from a sellable bin.");
@@ -1907,6 +1956,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       );
     });
   });
+  app.post("/api/v1/reports/tenders/compare", async (request: any) =>
+    db.readSnapshot(snapshot => compareTenderStatement(snapshot, request.actor, request.body ?? {})));
   app.get("/api/v1/reports/:name", async (request: any, reply) => {
     const result = await db.readSnapshot((snapshot) => report(
       snapshot,
@@ -1914,30 +1965,11 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       request.params.name,
       request.query,
     ));
-    if (request.query.format === "csv") {
-      const keys = [
-        ...new Set(result.rows.flatMap((row: any) => Object.keys(row))),
-      ];
-      const escape = (value: any) => {
-        const raw = value == null ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
-        const cell = typeof value === "string" && /^(?:\s*[=+@-]|[\t\r\n])/.test(raw) ? `'${raw}` : raw;
-        return `"${cell.replace(/"/g, '""')}"`;
-      };
-      const csv = [
-        keys.map(escape).join(","),
-        ...result.rows.map((row: any) =>
-          keys.map((key) => escape(row[key])).join(","),
-        ),
-      ].join("\r\n");
-      return reply
-        .type("text/csv")
-        .header(
-          "Content-Disposition",
-          `attachment; filename="${request.params.name}.csv"`,
-        )
-        .send(csv);
-    }
-    return result;
+    const output = reportOutput(result, request.query);
+    if (typeof output === "string")
+      return reply.type("text/csv; charset=utf-8")
+        .header("Content-Disposition", `attachment; filename="${result.name}.csv"`).send(output);
+    return output;
   });
   return app;
 }

@@ -63,6 +63,37 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
     assert.equal(bootstrap.products.length, 12);
     await migrate(db);
     assert.equal((await records(db, "demo", "product")).length, 12);
+    const draft = { sku: "UNUSED-TEST", name: "Unused audit part", brand: "Test", category: "Filters",
+      barcodes: ["TEST-123"], unit: "Each", retailPrice: 100 };
+    const unused = await call("POST", "products", draft, tok);
+    const remove = "products/" + unused.id + "/remove";
+    const restore = "products/" + unused.id + "/restore";
+    await call("GET", "bootstrap", undefined, tok); // A catalog snapshot alone is safe to retain.
+    await call("POST", remove, {}, cashier.token, 403);
+    const removalId = randomUUID();
+    await call("POST", remove, { transactionId: removalId }, tok);
+    await call("POST", remove, { transactionId: removalId }, tok);
+    const afterRemoval = await call("GET", "bootstrap", undefined, tok);
+    assert.ok(!afterRemoval.products.some((p: any) => p.id === unused.id));
+    assert.ok(afterRemoval.removedProducts.some((p: any) => p.id === unused.id));
+    await call("POST", "products", draft, tok, 409);
+    await call("POST", restore, {}, cashier.token, 403);
+    await call("POST", restore, {}, tok);
+    assert.deepEqual(await getRecord(db, "demo", "product", unused.id), unused);
+    await putRecord(db, "demo", "purchaseOrder", { id: "other-branch-test", branchId: "mumbai", lines: [{ productId: unused.id }] }, "mumbai");
+    await call("POST", remove, {}, tok, 409);
+    await call("POST", "products/filter/remove", {}, tok, 409);
+    await call("POST", "products", { ...unused, reorderLevel: 3 }, tok);
+    const reorder = { supplierId: "supplier-1", replenishment: true, transactionId: randomUUID(),
+      lines: [{ productId: unused.id, cost: 50, quantity: 4 }] };
+    const reordering = await call("POST", "purchase-orders", reorder, tok);
+    assert.equal((await call("POST", "purchase-orders", reorder, tok)).id, reordering.id);
+    await call("POST", "purchase-orders", { ...reorder, transactionId: randomUUID() }, tok, 409);
+    const low = await call("GET", "reports/low-stock?sku=UNUSED-TEST", undefined, tok);
+    assert.equal(low.rows[0].onOrder, 4);
+    assert.equal(low.rows[0].suggestedQuantity, 2);
+    const home = await call("GET", "bootstrap", undefined, tok);
+    assert.deepEqual(home.reorderSuggestions.find((p: any) => p.productId === unused.id), low.rows[0]);
     const part = await call(
       "POST",
       "products",
@@ -125,6 +156,13 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       },
       tok,
     );
+    const receiptHistory = await call("GET", `purchase-orders/${po.id}/receipts`, undefined, tok);
+    assert.deepEqual(
+      receiptHistory.receipts.map((r: any) => [r.lines[0].binId, r.lines[0].quantity]).sort(),
+      [["bin-a1", 6], ["bin-a2", 4]],
+    );
+    await call("GET", `purchase-orders/${po.id}/receipts`, undefined, cashier.token, 403);
+    await call("GET", "purchase-orders/nonexistent/receipts", undefined, tok, 404);
     await call(
       "POST",
       "inventory/move",
@@ -382,16 +420,44 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       salesReport.totals.net,
       salesReport.totals.gross - salesReport.totals.returns,
     );
+    for (const name of ["fast-moving", "slow-moving"]) {
+      const movement = await call("GET", "reports/" + name, undefined, tok);
+      assert.ok(movement.totals.returnedUnits > 0);
+      assert.equal(movement.totals.quantity, movement.totals.soldUnits - movement.totals.returnedUnits);
+      assert.equal(movement.totals.revenue, salesReport.totals.gross - salesReport.totals.returns);
+    }
     const daily = await call("GET", "reports/daily-sales", undefined, tok);
     assert.equal(daily.rows.reduce((sum: number, row: any) => sum + row.net, 0), salesReport.totals.net);
     const tender = await call("GET", "reports/tenders", undefined, tok);
     assert.equal(tender.rows.reduce((sum: number, row: any) => sum + row.net, 0), tender.totals.net);
     assert.equal(tender.totals.net, salesReport.totals.net);
+    const receipts = await call("GET", "reports/purchase-receipts?sku=" + part.sku, undefined, tok);
+    assert.ok(receipts.rows.length >= 2);
+    assert.ok(receipts.rows.every((row: any) => row.sku === part.sku && row.location.includes(" / ") && row.supplier));
+    const stockLog = await call("GET", "reports/stock-movement?sku=" + part.sku, undefined, tok);
+    assert.ok(stockLog.rows.length > 0 && stockLog.rows.every((row: any) => row.sku === part.sku && row.location));
     await call("GET", "reports/tenders?category=Filters", undefined, tok, 400);
     await call("GET", "reports/sales?dateFrom=2025-02-30", undefined, tok, 400);
     await putRecord(db, "demo", "invoice", {
       ...final.invoices[0], id: "report-boundary-fixture", createdAt: "2025-01-01T19:00:00Z",
     }, "pune");
+    const header = { authorization: "Bearer " + tok };
+    const paged = await call("GET", "reports/daily-sales?pageSize=1", undefined, tok);
+    assert.ok(paged.totalRows >= 2);
+    assert.equal(paged.rows.length, 1);
+    const next = await call("GET", "reports/daily-sales?page=2&pageSize=1&revision=" + paged.revision, undefined, tok);
+    assert.notEqual(next.rows[0].day, paged.rows[0].day);
+    assert.deepEqual(paged.totals, next.totals);
+    const csvResponse = await app.inject({ method: "GET", url: "/api/v1/reports/daily-sales?format=csv&revision=" + paged.revision, headers: header });
+    assert.equal(csvResponse.statusCode, 200);
+    assert.match(csvResponse.body, /"gross \(INR\)"/);
+    assert.equal(csvResponse.body.split("\r\n").length, paged.totalRows + 1);
+    assert.ok(csvResponse.body.includes('"' + (paged.rows[0].gross / 100).toFixed(2) + '"'));
+    assert.equal((await call("GET", "reports/daily-sales?format=csv-json&revision=" + paged.revision, undefined, tok)).csv, csvResponse.body);
+    await call("GET", "reports/daily-sales?page=2&pageSize=1&revision=expired", undefined, tok, 409);
+    await call("GET", "reports/daily-sales?page=999&pageSize=1", undefined, tok, 400);
+    await call("GET", "reports/daily-sales?pageSize=251", undefined, tok, 400);
+    await call("GET", "reports/daily-sales?page=0", undefined, tok, 400);
     const boundary = await call("GET", "reports/daily-sales?dateFrom=2025-01-02&dateTo=2025-01-02", undefined, tok);
     assert.equal(boundary.timeZone, "Asia/Kolkata");
     assert.equal(boundary.rows[0].day, "2025-01-02");

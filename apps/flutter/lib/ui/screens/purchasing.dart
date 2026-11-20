@@ -5,6 +5,7 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../shell.dart';
 import '../widgets.dart';
+import 'labels.dart';
 
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
@@ -26,7 +27,7 @@ class OrdersScreen extends StatelessWidget {
       DataList(
         rows: app.list('purchaseOrders').reversed.toList(),
         empty: 'No purchase orders yet.',
-        actionWidth: 112,
+        actionWidth: 158,
         columns: [
           Col('Created', (o) => Text(formatDate(o['createdAt']))),
           Col('Supplier', (o) => Text('${app.list('suppliers').where((s) => s['id'] == o['supplierId']).firstOrNull?['name'] ?? '—'}',
@@ -37,9 +38,56 @@ class OrdersScreen extends StatelessWidget {
         ],
         actions: (o) => [
           if (o['status'] != 'received') FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => receiveOrder(context, o), child: const Text('Receive')),
+          if ((o['lines'] as List).any((line) => (line['received'] ?? 0) > 0))
+            IconButton(tooltip: 'Print receipt labels', icon: const Icon(Icons.print_outlined),
+                onPressed: () => _receiptLabels(context, o)),
         ],
       ),
     ]);
+  }
+}
+
+Future<void> _receiptLabels(BuildContext context, Json order) async {
+  final app = context.appRead;
+  late final history = Future.sync(() => app.api('/purchase-orders/${order['id']}/receipts'));
+  final receipt = await showDialog<Json>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Choose a goods receipt'),
+      children: [
+        FutureBuilder<dynamic>(
+          future: history,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) return Padding(padding: const EdgeInsets.all(16), child: Text(errorText(snapshot.error!)));
+            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+            final receipts = (snapshot.data['receipts'] as List).cast<Json>();
+            if (receipts.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('No deliveries recorded.'));
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              for (final receipt in receipts)
+                ListTile(title: Text(formatDate(receipt['createdAt'])), isThreeLine: true,
+                    subtitle: Text('${receipt['id']}\n${(receipt['lines'] as List).map((line) => "${app.productName(line['productId'])} × ${line['quantity']}").join(', ')}',
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    onTap: () => Navigator.pop(context, receipt)),
+            ]);
+          },
+        ),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      ],
+    ),
+  );
+  if (!context.mounted || receipt == null) return;
+  final labels = <({LabelItem item, int quantity})>[];
+  for (final line in receipt['lines'] as List) {
+    final part = app.productById(line['productId']);
+    final item = part == null
+        ? LabelItem(app.productName(line['productId']), '', sku: 'Unavailable', bin: app.locationName(line['binId']))
+        : productLabel(app, part, binId: line['binId']);
+    labels.add((item: item, quantity: line['quantity'] as int));
+  }
+  try {
+    await printReceiptLineLabels(context, labels);
+  } catch (e) {
+    app.toast('Labels could not be printed. ${errorText(e)}');
   }
 }
 

@@ -132,6 +132,9 @@ export async function finalizeSale(
       : currentProduct;
     if (!product)
       fail("Part was absent from the authorized offline catalog.", 409);
+    if (currentProduct.salesStopped || product.salesStopped)
+      fail("New sales are stopped for " + product.sku + "." +
+        (body.offline ? " Manager review of this offline claim is required." : ""), 409);
     if (profile.taxScheme === "india-gst") {
       if (!/^(\d{4}|\d{6}|\d{8})$/.test(product.hsnSac || ""))
         fail(

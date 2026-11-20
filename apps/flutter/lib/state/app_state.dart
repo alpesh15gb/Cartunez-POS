@@ -478,6 +478,7 @@ class AppState extends ChangeNotifier {
   Json get business => Map<String, dynamic>.from(settings['business'] as Map? ?? {});
   List<Json> list(String key) => _jsonList(snapshot[key]);
   List<Json> get products => list('products');
+  List<Json> get saleProducts => products.where((p) => p['salesStopped'] != true).toList();
   List<Json> get bins => list('locations');
   List<Json> get stock => list('stock');
   List<Json> get sellableBins => bins.where((b) => b['kind'] == 'sellable').toList();
@@ -633,19 +634,26 @@ class AppState extends ChangeNotifier {
         cash -= (refund['total'] ?? 0) as int;
       }
     }
+    for (final movement in list('cashMovements').where((m) => m['shiftId'] == shift['id'])) {
+      final amount = movement['amount'] as int;
+      cash += movement['direction'] == 'in' ? amount : -amount;
+    }
     return cash;
   }
 
   /// Barcodes first, then SKU, then manufacturer and cross references.
-  List<Json> findByCode(String code) {
+  List<Json> findByCode(String code, {bool forSale = false}) {
     final raw = code.trim();
     if (raw.isEmpty) return [];
     final gtin = canonicalGtin(scannedProductCode(raw));
-    final barcodeMatches = products.where((p) => (p['barcodes'] as List? ?? const []).any((v) {
+    final catalog = products;
+    List<Json> allowed(List<Json> matches) =>
+        forSale ? matches.where((p) => p['salesStopped'] != true).toList() : matches;
+    final barcodeMatches = catalog.where((p) => (p['barcodes'] as List? ?? const []).any((v) {
       final stored = '$v'.trim();
       return stored == raw || (gtin != null && canonicalGtin(stored) == gtin);
     })).toList();
-    if (barcodeMatches.isNotEmpty) return barcodeMatches;
+    if (barcodeMatches.isNotEmpty) return allowed(barcodeMatches);
     final key = normalize(code);
     if (key.isEmpty) return [];
     bool exact(Iterable values) => values.any((v) => normalize(v) == key);
@@ -660,8 +668,8 @@ class AppState extends ChangeNotifier {
           ]),
     ];
     for (final tier in tiers) {
-      final found = products.where(tier).toList();
-      if (found.isNotEmpty) return found;
+      final found = catalog.where(tier).toList();
+      if (found.isNotEmpty) return allowed(found);
     }
     return [];
   }

@@ -9,22 +9,24 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../widgets.dart';
 import 'receipt.dart';
+import 'tender_comparison.dart';
 
 const _reports = [
   'daily-sales', 'sales', 'returns', 'discounts', 'margin', 'shifts', 'tenders', 'valuation', 'stock-by-bin', 'stock-movement',
-  'low-stock', 'fast-moving', 'slow-moving', 'aging', 'purchase-receipts', 'tax', 'warranty', 'cores', 'fitment',
+  'low-stock', 'fast-moving', 'slow-moving', 'aging', 'purchase-receipts', 'tax', 'warranty', 'cores', 'fitment', 'cash-movements',
 ];
 const _stockReports = [
   'valuation', 'stock-by-bin', 'stock-movement', 'low-stock', 'fast-moving', 'slow-moving', 'aging', 'purchase-receipts', 'warranty',
 ];
 const _moneyKeys = {
   'gross', 'returns', 'coreReturns', 'net', 'discount', 'tax', 'cost', 'margin', 'value', 'landedCost', 'total', 'openingCash',
+  'cashSales', 'cashRefunds', 'cashIn', 'cashOut', 'netMovement',
   'expectedCash', 'countedCash', 'variance', 'collected', 'refunded', 'charged', 'outstanding', 'revenue', 'amount', 'taxable',
   'unitPrice', 'subtotal', 'coreCharge', 'coreDeposits', 'rounding', 'price', 'retailPrice', 'wholesalePrice', 'cgst', 'sgst', 'igst', 'utgst',
 };
 const _hidden = {'id', 'invoiceId', 'productId', 'returnId', 'purchaseOrderId', 'supplierId', 'lineId', 'binId'};
 const _snapshotReports = {'valuation', 'stock-by-bin', 'low-stock', 'aging'};
-const _cashierReports = {'daily-sales', 'sales', 'returns', 'discounts', 'margin', 'shifts', 'tenders', 'tax', 'cores', 'fitment'};
+const _cashierReports = {'cash-movements', 'daily-sales', 'sales', 'returns', 'discounts', 'margin', 'shifts', 'tenders', 'tax', 'cores', 'fitment'};
 const _tenderFilters = {'daily-sales', 'sales', 'returns', 'discounts', 'margin', 'tenders', 'tax', 'cores', 'fitment'};
 const _reportColumns = {
   'sales': ['number', 'date', 'cashierId', 'total', 'discount', 'tax', 'cost'],
@@ -32,7 +34,10 @@ const _reportColumns = {
   'margin': ['number', 'date', 'total', 'tax', 'cost', 'margin'],
   'returns': ['number', 'invoiceNumber', 'createdAt', 'reason', 'refundType', 'total', 'tax'],
   'tax': ['document', 'date', 'sku', 'hsnSac', 'taxRate', 'taxable', 'tax', 'cgst', 'sgst', 'igst', 'utgst'],
-  'shifts': ['userId', 'openedAt', 'closedAt', 'openingCash', 'expectedCash', 'countedCash', 'variance'],
+  'shifts': ['userId', 'openedAt', 'closedAt', 'openingCash', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'variance'],
+  'stock-movement': ['createdAt', 'sku', 'name', 'location', 'quantity', 'reason', 'userId'],
+  'purchase-receipts': ['date', 'sku', 'supplier', 'location', 'quantity', 'cost', 'landedCost', 'total'],
+  'cash-movements': ['createdAt', 'userId', 'direction', 'amount', 'reason'],
   'tenders': ['type', 'collected', 'refunded', 'net'],
 };
 const _reportLabels = {
@@ -42,6 +47,33 @@ const _reportLabels = {
 };
 
 String reportLabel(String key) => _reportLabels[key] ?? humanize(key);
+
+String reportCsv(List<Map> rows, {required String currency}) {
+  final keys = {for (final row in rows) ...row.keys.map((key) => '$key')};
+  String header(String key) {
+    if (_moneyKeys.contains(key)) return '$key ($currency)';
+    return key == 'taxRate' ? 'taxRate (%)' : key;
+  }
+  String decimal(int value) {
+    final magnitude = value.abs();
+    return "${value < 0 ? '-' : ''}${magnitude ~/ 100}.${(magnitude % 100).toString().padLeft(2, '0')}";
+  }
+  Object? convert(String key, Object? value) {
+    if (value is int && (_moneyKeys.contains(key) || key == 'taxRate')) return decimal(value);
+    if (value is Map) return {for (final e in value.entries) header('${e.key}'): convert('${e.key}', e.value)};
+    if (value is List) return value.map((v) => convert('', v)).toList();
+    return value;
+  }
+  String quote(Object? value, {bool protectText = true}) {
+    final raw = value is Map || value is List ? jsonEncode(value) : '${value ?? ''}';
+    final safe = protectText && value is String && RegExp(r'^(?:\s*[=+@-]|[\t\r\n])').hasMatch(raw) ? "'$raw" : raw;
+    return '"${safe.replaceAll('"', '""')}"';
+  }
+  return [
+    keys.map((k) => quote(header(k))).join(','),
+    for (final row in rows) keys.map((k) => quote(convert(k, row[k]), protectText: row[k] is String)).join(','),
+  ].join('\r\n');
+}
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -58,6 +90,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String payment = '';
   Json? report;
   bool busy = false;
+  int requestVersion = 0;
   String? errorMessage;
   int page = 0;
   static const pageSize = 25;
@@ -70,24 +103,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
     range = DateTimeRange(start: DateTime(now.year, now.month, now.day - 29), end: end);
   }
 
-  bool get hasPartFilters => !const {'tenders', 'shifts', 'warranty'}.contains(name);
+  String columnLabel(String key) {
+    if (name == 'fast-moving' || name == 'slow-moving') {
+      if (key == 'quantity') return 'Net units';
+      if (key == 'revenue') return 'Net billed';
+    }
+    return reportLabel(key);
+  }
+
+  bool get hasPartFilters => !const {'cash-movements', 'tenders', 'shifts', 'warranty'}.contains(name);
 
   void changeFilter(VoidCallback change) => setState(() {
     change();
+    requestVersion++;
+    busy = false;
     report = null;
     errorMessage = null;
     page = 0;
   });
 
-  Future<void> run() async {
-    final app = context.appRead;
-    setState(() {
-      busy = true;
-      errorMessage = null;
-    });
+  Map<String, String> filters() {
     String day(DateTime d) => d.toIso8601String().substring(0, 10);
-    try {
-      final query = {
+    return {
         if (range != null && !_snapshotReports.contains(name)) ...{
           'dateFrom': day(range!.start), 'dateTo': day(range!.end),
         },
@@ -96,17 +133,31 @@ class _ReportsScreenState extends State<ReportsScreen> {
         if (_cashierReports.contains(name) && cashier.isNotEmpty) 'cashier': cashier,
         if (_tenderFilters.contains(name) && payment.isNotEmpty) 'paymentType': payment,
       };
-      final result = await app.api('/reports/$name${query.isEmpty ? '' : '?${Uri(queryParameters: query).query}'}');
-      if (mounted) {
+  }
+
+  Future<void> run({int nextPage = 0, bool continuing = false}) async {
+    final version = ++requestVersion;
+    final app = context.appRead;
+    setState(() {
+      busy = true;
+      errorMessage = null;
+    });
+    try {
+      final query = {
+        ...filters(), 'page': '${nextPage + 1}', 'pageSize': '$pageSize',
+        if (continuing && report?['revision'] != null) 'revision': '${report!['revision']}',
+      };
+      final result = await app.api('/reports/$name?${Uri(queryParameters: query).query}');
+      if (mounted && version == requestVersion) {
         setState(() {
           report = Map<String, dynamic>.from(result as Map);
-          page = 0;
+          page = nextPage;
         });
       }
     } catch (error) {
-      if (mounted) setState(() => errorMessage = errorText(error));
+      if (mounted && version == requestVersion) setState(() => errorMessage = errorText(error));
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted && version == requestVersion) setState(() => busy = false);
     }
   }
 
@@ -121,6 +172,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       return '$value';
     }
     if (value is bool) return value ? 'Yes' : 'No';
+    if (key == 'direction' && name == 'cash-movements') return value == 'in' ? 'Cash in' : 'Cash out';
     if (key == 'cashierId' || key == 'userId') return app.userName('$value');
     final timestamp = DateTime.tryParse('$value');
     if ('$value'.contains('T') && timestamp != null) {
@@ -131,17 +183,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Future<void> export() async {
-    final rows = (report!['rows'] as List).cast<Map>();
-    final keys = {for (final r in rows) ...r.keys.map((k) => '$k')}.toList();
-    String esc(Object? v) {
-      final raw = v is Map || v is List ? jsonEncode(v) : '${v ?? ''}';
-      final safe = v is String && RegExp(r'^(?:\s*[=+@-]|[\t\r\n])').hasMatch(raw) ? "'$raw" : raw;
-      return '"${safe.replaceAll('"', '""')}"';
-    }
-
-    final csv = [keys.map(esc).join(','), for (final r in rows) keys.map((k) => esc(r[k])).join(',')].join('\r\n');
+    final snapshot = report!;
+    final app = context.appRead;
+    final rows = (snapshot['rows'] as List).cast<Map>();
     try {
-      final message = await saveTextFile('${report!['name']}-${DateTime.now().millisecondsSinceEpoch}.csv', '﻿$csv');
+      final String csv;
+      if ((snapshot['totalRows'] ?? rows.length) > rows.length) {
+        final query = {...filters(), 'format': 'csv-json', 'revision': '${snapshot['revision']}'};
+        final data = await app.api('/reports/$name?${Uri(queryParameters: query).query}');
+        csv = data['csv'] as String;
+      } else {
+        csv = reportCsv(rows, currency: '${snapshot['currency'] ?? app.settings['currency'] ?? 'INR'}');
+      }
+      final message = await saveTextFile('${snapshot['name']}-${DateTime.now().millisecondsSinceEpoch}.csv', '\uFEFF$csv');
       if (mounted) context.appRead.toast(message);
     } catch (error) {
       if (mounted) context.appRead.toast(errorText(error));
@@ -172,6 +226,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
       for (final invoice in app.list('invoices')) '${invoice['cashierId']}',
     }..remove('null');
     final rows = ((report?['rows'] as List?) ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    final serverPaged = report?['totalRows'] is int;
+    final totalRows = serverPaged ? report!['totalRows'] as int : rows.length;
+    void goToPage(int next) {
+      if (serverPaged) {
+        run(nextPage: next, continuing: true);
+      } else {
+        setState(() => page = next);
+      }
+    }
     final keys = <String>{
       for (final r in rows)
         for (final e in r.entries)
@@ -204,11 +267,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
         if (_cashierReports.contains(name) && users.isNotEmpty) filter('Cashier', cashier, [for (final user in users) (user, app.userName(user))], (value) => cashier = value),
         if (_tenderFilters.contains(name)) filter('Payment', payment, const [('Cash', 'Cash'), ('Card', 'Card'), ('UPI', 'UPI')], (value) => payment = value),
         FilledButton.icon(
-          onPressed: busy ? null : run,
+          onPressed: busy ? null : () => run(),
           icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow),
           label: const Text('Run report'),
         ),
         if (rows.isNotEmpty) OutlinedButton.icon(onPressed: busy ? null : export, icon: const Icon(Icons.download), label: const Text('Export CSV')),
+        if (name == 'tenders' && app.isManager && app.settings['currency'] == 'INR')
+          OutlinedButton.icon(onPressed: busy ? null : () => compareTenderStatement(context, range: range, method: payment),
+            icon: const Icon(Icons.compare_arrows), label: const Text('Compare provider CSV')),
       ]),
       if (errorMessage != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
       if (report != null) ...[
@@ -216,7 +282,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         Text('${app.branchName('${report!['branchId'] ?? app.session?.branchId}')} · ${report!['timeZone'] == 'Asia/Kolkata' ? 'IST' : 'UTC'} · Confirmed transactions'),
         if (name == 'tenders') const Text('Recorded payments less cash change and refunds. Card and UPI payouts are reconciled with your provider separately.'),
         Wrap(spacing: 12, runSpacing: 12, children: [
-          for (final e in (report!['totals'] as Map? ?? {}).entries) Metric(reportLabel('${e.key}'), cell('${e.key}', e.value)),
+          for (final e in (report!['totals'] as Map? ?? {}).entries) Metric(columnLabel('${e.key}'), cell('${e.key}', e.value)),
         ]),
         if ((report!['pendingConflicts'] ?? 0) > 0)
           Padding(
@@ -225,7 +291,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         const SizedBox(height: 16),
         DataList(
-          rows: rows.skip(page * pageSize).take(pageSize).toList(),
+          rows: serverPaged ? rows : rows.skip(page * pageSize).take(pageSize).toList(),
           empty: 'No rows for this period.',
           onTap: (r) {
             final invoice = app.list('invoices').where((i) => i['id'] == r['invoiceId']).firstOrNull;
@@ -238,14 +304,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
           },
           columns: [
             for (final k in visibleKeys)
-              Col(reportLabel(k), (r) => Text(cell(k, r[k])), numeric: r0Numeric(rows, k),
+              Col(columnLabel(k), (r) => Text(cell(k, r[k])), numeric: r0Numeric(rows, k),
                   flex: const {'date', 'openedAt', 'closedAt', 'createdAt', 'reason'}.contains(k) ? 2 : 1),
           ],
         ),
-        if (rows.length > pageSize) Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          IconButton(tooltip: 'Previous page', onPressed: page == 0 ? null : () => setState(() => page--), icon: const Icon(Icons.chevron_left)),
-          Text('${page * pageSize + 1}–${(page * pageSize + pageSize).clamp(0, rows.length)} of ${rows.length}'),
-          IconButton(tooltip: 'Next page', onPressed: (page + 1) * pageSize >= rows.length ? null : () => setState(() => page++), icon: const Icon(Icons.chevron_right)),
+        if (totalRows > pageSize) Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+          IconButton(tooltip: 'Previous page', onPressed: busy || page == 0 ? null : () => goToPage(page - 1), icon: const Icon(Icons.chevron_left)),
+          Text('${page * pageSize + 1}–${(page * pageSize + pageSize).clamp(0, totalRows)} of $totalRows'),
+          IconButton(tooltip: 'Next page', onPressed: busy || (page + 1) * pageSize >= totalRows ? null : () => goToPage(page + 1), icon: const Icon(Icons.chevron_right)),
         ]),
       ],
     ]);

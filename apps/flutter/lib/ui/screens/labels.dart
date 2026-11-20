@@ -24,17 +24,19 @@ class LabelItem {
 }
 
 /// A part's label, with its brand, part number, main bin, price and MRP.
-LabelItem productLabel(AppState app, Json p) {
+LabelItem productLabel(AppState app, Json p, {String? binId}) {
   final price = p['type'] == 'service' ? null : p['retailPrice'] as int?;
   final taxRate = (p['taxRate'] as num?)?.toInt() ?? 0;
   final mrp = price == null ? null : (app.settings['taxMode'] == 'inclusive' ? price : (price + price * taxRate / 10000).round());
-  Json? bin;
-  var most = 0;
-  for (final b in app.bins) {
-    final n = app.available('${p['id']}', '${b['id']}');
-    if (n > most) {
-      most = n;
-      bin = b;
+  var bin = binId == null ? '' : app.locationName(binId);
+  if (binId == null) {
+    var most = 0;
+    for (final b in app.bins) {
+      final n = app.available('${p['id']}', '${b['id']}');
+      if (n > most) {
+        most = n;
+        bin = app.binName(b);
+      }
     }
   }
   return LabelItem(
@@ -43,7 +45,7 @@ LabelItem productLabel(AppState app, Json p) {
     sku: '${p['sku'] ?? ''}',
     brand: '${p['brand'] ?? ''}',
     partNumber: '${p['partNumber'] ?? ''}',
-    bin: bin == null ? '' : app.binName(bin),
+    bin: bin,
     price: price,
     mrp: mrp,
   );
@@ -154,31 +156,78 @@ Future<void> printLabels(BuildContext context, List<LabelItem> items) async {
     },
   );
   if (copies == null) return;
-  await _print(app, items, copies, shopLabelLayout(app));
+  await _print(app, items, List.filled(items.length, copies), shopLabelLayout(app));
 }
 
-Future<void> _print(AppState app, List<LabelItem> items, int copies, LabelLayout layout) async {
+Future<void> printReceiptLineLabels(BuildContext context, List<({LabelItem item, int quantity})> lines) async {
+  final app = context.appRead;
+  await _autoDetect(app);
+  if (!context.mounted || lines.isEmpty) return;
+  final preview = lines.where((line) => printableCode(line.item.code)).firstOrNull;
+  final counts = await showFormDialog<List<int>>(
+    context,
+    title: 'Labels for this delivery',
+    submit: 'Print labels',
+    header: preview == null ? null : _PrintHeader(item: preview.item),
+    fields: [
+      for (final (index, line) in lines.indexed)
+        FieldSpec('copies$index', '${line.item.name} · ${line.item.sku} · ${line.item.bin}',
+            kind: FieldKind.number, required: true, value: line.quantity,
+            help: '${line.quantity} received. Enter 0 to skip.'),
+    ],
+    onSubmit: (v) async {
+      final counts = <int>[];
+      for (final (index, line) in lines.indexed) {
+        final n = int.tryParse('${v['copies$index']}');
+        if (n == null || n < 0 || n > line.quantity) {
+          throw FormProblem('Choose 0 to ${line.quantity} copies for ${line.item.name}.');
+        }
+        if (n > 0 && !printableCode(line.item.code)) {
+          throw FormProblem('Set a printable barcode or SKU for ${line.item.name}, or enter 0 to skip it.');
+        }
+        counts.add(n);
+      }
+      if (!counts.any((n) => n > 0)) throw FormProblem('Choose at least one label to print.');
+      // The browser and PDF driver hold every generated page in memory.
+      // Multi-column ZPL likewise builds a complete row for every roll advance.
+      final columns = shopLabelLayout(app).columns;
+      final limit = _zebra(app) && columns == 1 ? 1000000 : 1000 * columns;
+      if (counts.fold(0, (sum, n) => sum + n) > limit) {
+        throw FormProblem('This printer can prepare up to $limit labels in one job. Reduce the quantities and print in batches.');
+      }
+      return counts;
+    },
+  );
+  if (counts != null) await _print(app, [for (final line in lines) line.item], counts, shopLabelLayout(app));
+}
+
+Future<void> _print(AppState app, List<LabelItem> items, List<int> counts, LabelLayout layout) async {
   final printer = app.labelPrinter;
   final mode = _mode(printer);
   final zebra = mode != _modeDialog;
   final data = [for (final i in items) _data(app, i, zebra: zebra)];
   if (!zebra) {
     final doc = pw.Document(theme: await pdfTheme());
-    final plans = [for (final d in data) for (var c = 0; c < copies; c++) planLabel(layout, d, dpi: 300)];
-    for (final page in pdfLabelPages(layout, plans)) {
+    final plans = [
+      for (final (i, label) in data.indexed)
+        if (counts[i] > 0) ...List.filled(counts[i], planLabel(layout, label, dpi: _dpi(app))),
+    ];
+    final pages = pdfLabelPages(layout, plans);
+    for (final page in pages) {
       doc.addPage(page);
     }
-    await Printing.layoutPdf(name: 'labels', onLayout: (_) => doc.save());
+    await Printing.layoutPdf(name: 'labels', format: pages.first.pageFormat, dynamicLayout: false,
+        forceCustomPrintPaper: true, onLayout: (_) => doc.save());
     return;
   }
-  final zpl = zplJob(data, layout, dpi: _dpi(app), darkness: int.tryParse('${printer['darkness'] ?? ''}'), copies: copies);
+  final zpl = zplJob(data, layout, dpi: _dpi(app), darkness: int.tryParse('${printer['darkness'] ?? ''}'), quantities: counts);
   try {
     if (mode == _modeZebraUsb) {
       await printRawToInstalled('${printer['printer']}', zpl);
     } else {
       await printRawToNetwork('${printer['host']}', int.tryParse('${printer['port'] ?? 9100}') ?? 9100, zpl);
     }
-    final count = items.length * copies;
+    final count = counts.fold(0, (sum, n) => sum + n);
     app.toast('Sent $count label${count == 1 ? '' : 's'} to ${mode == _modeZebraUsb ? printer['printer'] : 'the Zebra printer'}.');
   } catch (e) {
     app.toast('Labels not printed: ${errorText(e)}');
@@ -198,7 +247,7 @@ LabelItem _previewItem(AppState app) {
 Future<void> printTestLabel(BuildContext context, {LabelLayout? layout}) async {
   final app = context.appRead;
   await _autoDetect(app);
-  await _print(app, [_previewItem(app)], 1, layout ?? shopLabelLayout(app));
+  await _print(app, [_previewItem(app)], [1], layout ?? shopLabelLayout(app));
 }
 
 // ---------- Label design ----------

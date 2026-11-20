@@ -39,6 +39,16 @@ void main() {
     expect(code128, contains('^FDML-OIL-01^FS'));
   });
 
+  test('an internal Code 128 label fits complete printer dots including its quiet zones', () {
+    const sample = LabelData(name: 'Filter', code: 'CTZ-246885734044');
+    expect(barcodeModules('CODE128', sample.code), 176);
+    for (final dpi in [203, 300]) {
+      final bar = planLabel(layout, sample, dpi: dpi).elements.singleWhere((e) => e.barcode);
+      expect(bar.module, dpi == 203 ? 2 : 3);
+      expect(bar.width * dpi / 25.4, closeTo(176 * bar.module, 0.001));
+    }
+  });
+
   test('digits under the bars can be switched off', () {
     expect(zplJob(const [part], layout), contains('^BEN,93,Y,N'.substring(0, 5)));
     expect(zplJob(const [part], layout.copyWith(digits: false)), matches(RegExp(r'\^BEN,\d+,N,N')));
@@ -79,6 +89,16 @@ void main() {
     final zpl = zplJob(const [LabelData(name: 'Bolt ^XZ ~JR_1', code: 'ML-1')], layout);
     expect(zpl, contains('Bolt _5EXZ _7EJR_5F1'));
     expect('^XZ'.allMatches(zpl).length, 1);
+  });
+
+  test('receipt quantities skip omitted lines, split large runs and fill partial rows', () {
+    const labels = [part, LabelData(name: 'Oil', code: 'OIL'), LabelData(name: 'Belt', code: 'BELT')];
+    final single = zplJob(labels, layout, quantities: [1001, 0, 1]);
+    expect(single, allOf(contains('^PQ999,'), contains('^PQ2,'), contains('^PQ1,'), isNot(contains('OIL'))));
+    final twoAcross = zplJob(labels, layout.copyWith(columns: 2), quantities: [2, 0, 1]);
+    expect('^XA'.allMatches(twoAcross).length, 2);
+    expect('^BY'.allMatches(twoAcross).length, 3);
+    expect(twoAcross.split('\n').last, allOf(contains('BELT'), isNot(contains('Filter'))));
   });
 
   test('copies and darkness', () {

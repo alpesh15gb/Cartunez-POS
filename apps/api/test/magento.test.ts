@@ -183,9 +183,16 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
 
     // Unpublish disables the product in Magento instead of deleting it.
     await call("online-listings", { productIds: ["filter"], changes: { published: false } }, owner);
+    await call("products", { id: "filter", salesAction: "stop" }, manager, 409);
     await runMagentoSync(db, { fetch: magento.fetch });
     assert.equal(lastPut("ML-FILTER-01").status, 2);
     assert.equal((await getRecord(db, "demo", "onlineListing", "filter"))!.sync.state, "unpublished");
+
+    await call("products", { id: "filter", salesAction: "stop" }, manager);
+    await call("online-listings", { productIds: ["filter"], changes: { published: true } }, owner, 409);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    assert.equal(lastPut("ML-FILTER-01").status, 2);
+    await call("products", { id: "filter", salesAction: "resume" }, manager);
 
     // Managers see listings; nobody receives the token.
     const boot = (await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { authorization: "Bearer " + manager } })).json();

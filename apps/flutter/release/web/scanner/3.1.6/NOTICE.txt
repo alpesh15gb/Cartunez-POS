@@ -1,0 +1,13 @@
+Camera barcode reader dependencies
+
+The JavaScript reader and the WebAssembly binary come from zxing-wasm 3.1.6.
+The JavaScript file adds a local URL resolver. The WebAssembly file is unchanged.
+https://github.com/Sec-ant/zxing-wasm/tree/v3.1.6
+
+zxing-wasm JavaScript is distributed under the MIT license.
+See LICENSE-MIT.txt.
+
+The WebAssembly reader includes zxing-cpp and the zxing-wasm C++ bridge under
+the Apache License, Version 2.0. See LICENSE-Apache.txt.
+https://github.com/zxing-cpp/zxing-cpp/tree/2c3dcfeffa7878950a58c1703c86774a428b0c91
+https://github.com/Sec-ant/zxing-wasm/tree/v3.1.6/src/cpp

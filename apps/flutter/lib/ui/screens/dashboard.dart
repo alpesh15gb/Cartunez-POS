@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../main.dart';
+import '../../core/billing.dart';
 import '../widgets.dart';
 import 'receipt.dart';
 
@@ -21,9 +22,7 @@ class DashboardScreen extends StatelessWidget {
     final refunds = [...app.list('returns'), ...app.list('coreReturns')].where((r) => isToday(r['createdAt']) && (app.role != 'cashier' || r['userId'] == app.session?.userId));
     final gross = sales.fold<int>(0, (n, i) => n + (i['total'] as int));
     final refunded = refunds.fold<int>(0, (n, r) => n + (r['total'] as int));
-    final low = app.products
-        .where((p) => p['type'] != 'service' && app.available('${p['id']}') <= (p['reorderLevel'] ?? 0))
-        .toList();
+    final low = app.list('reorderSuggestions');
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 12, runSpacing: 12, children: [
         Metric('Sales today', '${sales.length}'),
@@ -31,15 +30,20 @@ class DashboardScreen extends StatelessWidget {
         Metric('Refunds today', app.money(refunded)),
         Metric('Waiting to send', app.money(app.pending.fold<int>(0, (n, e) => n + ((e['total'] ?? 0) as int)))),
       ]),
-      SectionTitle('Running low'),
-      DataList(
+      if (app.canStock) SectionTitle('Running low'),
+      if (app.canStock) DataList(
         rows: low,
-        empty: 'Nothing is below its reorder level.',
+        empty: 'No parts have reached their reorder level.',
+        actions: (p) => [
+          if ((p['suggestedQuantity'] as int) > 0)
+            TextButton(onPressed: app.online ? () => reviewReorder(context, p) : null, child: const Text('Reorder')),
+        ],
         columns: [
           Col('Part', (p) => Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)), flex: 2),
-          Col('In stock', (p) => Text('${app.available('${p['id']}')}'), numeric: true),
+          Col('In stock', (p) => Text('${p['available']}'), numeric: true),
           Col('Reorder at', (p) => Text('${p['reorderLevel']}'), numeric: true),
-          Col('Suggested order', (p) => Text('${((p['reorderLevel'] as int) * 2 - app.available('${p['id']}')).clamp(0, 99999)}'), numeric: true),
+          Col('On order', (p) => Text('${p['onOrder']}'), numeric: true),
+          Col('Suggested order', (p) => Text('${p['suggestedQuantity']}'), numeric: true),
         ],
       ),
       SectionTitle('Latest invoices'),
@@ -56,4 +60,33 @@ class DashboardScreen extends StatelessWidget {
       ),
     ]);
   }
+}
+
+Future<void> reviewReorder(BuildContext context, Json row) async {
+  final app = context.appRead;
+  final suppliers = app.list('suppliers');
+  if (suppliers.isEmpty) {
+    app.toast('Add a supplier in Purchasing before ordering parts.');
+    return;
+  }
+  final part = app.productById('${row['productId']}');
+  if (part == null) return;
+  final transactionId = uuid();
+  await showFormDialog<void>(context, title: 'Reorder ${row['sku']}', submit: 'Create purchase order',
+    fields: [
+      FieldSpec('supplier', 'Supplier', kind: FieldKind.select, required: true,
+        options: optionsOf(suppliers), value: row['supplierId'] ?? (suppliers.length == 1 ? suppliers.single['id'] : null)),
+      FieldSpec('qty', 'Quantity to order', kind: FieldKind.number, required: true, value: row['suggestedQuantity'],
+        help: "${row['available']} available · ${row['onOrder']} already on order"),
+      FieldSpec('cost', 'Unit purchase cost', kind: FieldKind.money, required: true,
+        value: ((part['cost'] as num) / 100).toStringAsFixed(2)),
+    ],
+    onSubmit: (v) async {
+      final qty = int.tryParse('${v['qty']}') ?? 0;
+      if (qty < 1 || qty > row['suggestedQuantity']) throw FormProblem('Enter between 1 and ${row['suggestedQuantity']} units.');
+      await app.mutate('/purchase-orders', {'transactionId': transactionId, 'replenishment': true, 'supplierId': v['supplier'],
+        'lines': [{'productId': part['id'], 'quantity': qty, 'cost': (double.parse('${v['cost']}') * 100).round()}]},
+        'Purchase order created. Open Purchasing to receive it.');
+    },
+  );
 }

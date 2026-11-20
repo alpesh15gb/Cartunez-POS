@@ -34,12 +34,14 @@ class _BillingScreenState extends State<BillingScreen> {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        final exactIds = {for (final part in app.findByCode(search.text)) part['id']};
+        final exactIds = {for (final part in app.findByCode(search.text, forSale: true)) part['id']};
         final vehicle = app.cart['vehicle'] as Map?;
-        final categories = {'All parts', ...app.products.map((p) => '${p['category']}')}.toList();
-        final parts = app.products.where((p) {
+        final saleProducts = app.saleProducts;
+        final categories = {'All parts', ...saleProducts.map((p) => '${p['category']}')}.toList();
+        final currentCategory = categories.contains(category) ? category : 'All parts';
+        final parts = saleProducts.where((p) {
           if (exactIds.isNotEmpty) return exactIds.contains(p['id']);
-          if (category != 'All parts' && p['category'] != category) return false;
+          if (currentCategory != 'All parts' && p['category'] != currentCategory) return false;
           if (q.isNotEmpty &&
               ![p['name'], p['sku'], p['partNumber'], p['description'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
                   .any((v) => normalize(v).contains(q))) {
@@ -72,7 +74,7 @@ class _BillingScreenState extends State<BillingScreen> {
                       padding: const EdgeInsets.only(right: 8),
                       child: ChoiceChip(
                         label: Text(c),
-                        selected: c == category,
+                        selected: c == currentCategory,
                         onSelected: (_) => setState(() => category = c),
                       ),
                     ),
@@ -83,8 +85,8 @@ class _BillingScreenState extends State<BillingScreen> {
           ),
           if (parts.isEmpty)
             SliverToBoxAdapter(child: Column(children: [
-              EmptyState(message: app.products.isEmpty ? 'No parts in the catalog yet.' : q.isEmpty ? 'No parts in this category.' : 'No part matches "${search.text}".'),
-              if (app.products.isEmpty) TextButton(onPressed: () => shell.open('parts'), child: const Text('Go to parts')),
+              EmptyState(message: saleProducts.isEmpty ? 'No parts are available for sale.' : q.isEmpty ? 'No parts in this category.' : 'No part matches "${search.text}".'),
+              if (saleProducts.isEmpty && app.canStock) TextButton(onPressed: () => shell.open('parts'), child: const Text('Go to parts')),
             ]))
           else
             SliverPadding(
@@ -111,6 +113,7 @@ class _BillingScreenState extends State<BillingScreen> {
             ),
           ]);
         }
+        final units = (app.cart['lines'] as List).fold<int>(0, (total, line) => total + (line['qty'] as int));
         return Stack(children: [
           catalog,
           if ((app.cart['lines'] as List).isNotEmpty)
@@ -124,13 +127,13 @@ class _BillingScreenState extends State<BillingScreen> {
                   context: context,
                   isScrollControlled: true,
                   showDragHandle: true,
-                  builder: (_) => FractionallySizedBox(heightFactor: 0.92, child: AppScope(state: app, child: const CartPanel())),
+                  builder: (_) => FractionallySizedBox(heightFactor: 0.92, child: AppScope(state: app, child: const CartPanel(inSheet: true))),
                 ),
                 child: Row(children: [
                   const Icon(Icons.shopping_bag_outlined),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text('View sale · ${(app.cart['lines'] as List).length} item(s)', overflow: TextOverflow.ellipsis),
+                    child: Text('View sale · $units ${units == 1 ? 'item' : 'items'}', overflow: TextOverflow.ellipsis),
                   ),
                   const SizedBox(width: 8),
                   Text(app.money(app.bill?.total ?? 0)),
@@ -232,7 +235,8 @@ class _PartCard extends StatelessWidget {
 // ---------------- cart ----------------
 
 class CartPanel extends StatelessWidget {
-  const CartPanel({super.key});
+  const CartPanel({super.key, this.inSheet = false});
+  final bool inSheet;
 
   @override
   Widget build(BuildContext context) {
@@ -316,7 +320,7 @@ class CartPanel extends StatelessWidget {
       if (billError != null)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-          child: Text('$billError Clear the sale or refresh.', style: const TextStyle(color: Brand.danger)),
+          child: Text(billError, style: const TextStyle(color: Brand.danger)),
         ),
       if (needsApproval)
         Padding(
@@ -352,7 +356,7 @@ class CartPanel extends StatelessWidget {
           const SizedBox(height: 12),
           Row(children: [
             OutlinedButton.icon(
-              onPressed: lines.isEmpty || !app.online ? null : () => holdSale(context),
+              onPressed: lines.isEmpty || billError != null || !app.online ? null : () => holdSale(context),
               icon: const Icon(Icons.pause, size: 18),
               label: const Text('Hold'),
             ),
@@ -360,7 +364,14 @@ class CartPanel extends StatelessWidget {
             Expanded(
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                onPressed: lines.isEmpty || needsApproval || billError != null ? null : () => startCheckout(context),
+                onPressed: lines.isEmpty || needsApproval || billError != null ? null : () async {
+                  final transactionId = app.cart['transactionId'];
+                  await startCheckout(context);
+                  if (inSheet && context.mounted && app.cart['transactionId'] != transactionId &&
+                      (app.cart['lines'] as List).isEmpty && ModalRoute.of(context)?.isCurrent == true) {
+                    Navigator.pop(context);
+                  }
+                },
                 icon: const Icon(Icons.payments_outlined),
                 label: const Text('Checkout  (F6)'),
               ),
@@ -425,7 +436,7 @@ class _CartLine extends StatelessWidget {
           const SizedBox(height: 6),
           _Stepper(
             value: raw['qty'] as int,
-            enabled: !serial,
+            enabled: !serial && product?['salesStopped'] != true,
             onChanged: (qty) => setLineQuantity(context, index, qty),
           ),
         ]),
@@ -454,12 +465,14 @@ class _Stepper extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           IconButton(
             visualDensity: VisualDensity.compact,
+            tooltip: 'Decrease quantity',
             onPressed: enabled ? () => onChanged(value - 1) : null,
             icon: const Icon(Icons.remove, size: 16),
           ),
           SizedBox(width: 30, child: Text('$value', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700))),
           IconButton(
             visualDensity: VisualDensity.compact,
+            tooltip: 'Increase quantity',
             onPressed: enabled ? () => onChanged(value + 1) : null,
             icon: const Icon(Icons.add, size: 16),
           ),
@@ -481,6 +494,10 @@ bool setLineQuantity(BuildContext context, int index, int qty, {bool quiet = fal
   if (qty > 9999) return false;
   final line = lines[index];
   final product = app.productById('${line['productId']}');
+  if (product?['salesStopped'] == true && qty > (line['qty'] as int)) {
+    if (!quiet) app.toast('Sales are stopped for this part.');
+    return false;
+  }
   if (line['binId'] != null && product?['type'] != 'service') {
     final max = app.available('${line['productId']}', '${line['binId']}');
     if (qty > max) {
@@ -497,6 +514,10 @@ Future<void> addPart(BuildContext context, Json product) async {
   final app = context.appRead;
   if (!app.canSell) {
     app.toast('Your role cannot create sales.');
+    return;
+  }
+  if (product['salesStopped'] == true) {
+    app.toast('Sales are stopped for this part.');
     return;
   }
   final service = product['type'] == 'service';
@@ -531,6 +552,9 @@ Future<void> addPart(BuildContext context, Json product) async {
             required: true, help: 'Ask a manager to approve fitment for ${app.cart['transactionId']}.'),
     ],
     onSubmit: (values) async {
+      if (app.productById('${product['id']}')?['salesStopped'] == true) {
+        throw FormProblem('Sales are stopped for this part.');
+      }
       final qty = int.tryParse('${values['qty']}') ?? 0;
       if (qty < 1 || qty > 9999) throw FormProblem('Enter a quantity from 1 to 9999.');
       final binId = '${values['binId'] ?? ''}'.isEmpty ? null : '${values['binId']}';
@@ -580,7 +604,7 @@ void handleScan(BuildContext context, ShellController shell, String raw) {
   final app = context.appRead;
   final code = raw.trim();
   if (code.isEmpty) return;
-  final matches = app.findByCode(code);
+  final matches = app.findByCode(code, forSale: shell.section == 'billing' && app.canSell);
   final bin = app.bins.where((b) => normalize(b['id']) == normalize(code)).firstOrNull;
   if (shell.section != 'billing' || !app.canSell) {
     shell.search.text = bin != null && matches.isEmpty ? app.binName(bin) : code;
@@ -589,7 +613,9 @@ void handleScan(BuildContext context, ShellController shell, String raw) {
   }
   if (matches.isEmpty) {
     shell.search.text = code;
-    app.toast(bin != null ? '${app.binName(bin)} is a bin label. Scan the part barcode.' : 'No part matches "$code".');
+    final stopped = app.findByCode(code).where((p) => p['salesStopped'] == true).firstOrNull;
+    app.toast(stopped != null ? 'Sales are stopped for ${stopped['sku']}.'
+        : bin != null ? '${app.binName(bin)} is a bin label. Scan the part barcode.' : 'No part matches "$code".');
     return;
   }
   if (matches.length > 1) {
@@ -837,7 +863,7 @@ Future<bool> openShiftDialog(BuildContext context, {bool forCheckout = false}) a
           kind: FieldKind.money, value: 0, required: true, help: forCheckout ? 'A shift is needed before taking payment.' : null),
     ],
     onSubmit: (values) async {
-      await app.mutate('/shifts/open', {'openingCash': ((double.tryParse('${values['openingCash']}') ?? 0) * 100).round()},
+      await app.mutate('/shifts/open', {'openingCash': parsePaymentAmount('${values['openingCash']}')},
           'Shift opened.');
       return true;
     },
