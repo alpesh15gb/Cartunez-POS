@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'prefs.dart';
+
 class Brand {
   static const forest = Color(0xFF117755);
   static const forestDark = Color(0xFF0C6146);
@@ -15,44 +17,130 @@ class Brand {
   static const warning = Color(0xFF855A07);
 }
 
-ThemeData buildTheme() {
+/// The palette that changes between light, dark and high-contrast light.
+class _Palette {
+  const _Palette({
+    required this.brightness,
+    required this.primary,
+    required this.ink,
+    required this.muted,
+    required this.canvas,
+    required this.surface,
+    required this.field,
+    required this.line,
+    required this.focus,
+    required this.lineWidth,
+    required this.snack,
+  });
+  final Brightness brightness;
+  final Color primary;
+  final Color ink;
+  final Color muted;
+  final Color canvas;
+  final Color surface;
+  final Color field;
+  final Color line;
+  final Color focus;
+  final double lineWidth;
+  final Color snack;
+}
+
+const _light = _Palette(
+  brightness: Brightness.light,
+  primary: Brand.forest,
+  ink: Brand.ink,
+  muted: Brand.muted,
+  canvas: Brand.canvas,
+  surface: Colors.white,
+  field: Color(0xFFF8FAF9),
+  line: Brand.line,
+  focus: Brand.forest,
+  lineWidth: 1,
+  snack: Color(0xFF23533D),
+);
+
+const _dark = _Palette(
+  brightness: Brightness.dark,
+  primary: Color(0xFF5FC79E),
+  ink: Color(0xFFE6EEE9),
+  muted: Color(0xFFA7B6AC),
+  canvas: Color(0xFF0F1A17),
+  surface: Color(0xFF17241F),
+  field: Color(0xFF1D2C26),
+  line: Color(0xFF2E4038),
+  focus: Brand.lime,
+  lineWidth: 1,
+  snack: Color(0xFF2A3D32),
+);
+
+/// High-contrast light: pure white surfaces, near-black text and heavy borders
+/// for bright shop floors and low-vision staff.
+const _highContrast = _Palette(
+  brightness: Brightness.light,
+  primary: Color(0xFF00402B),
+  ink: Colors.black,
+  muted: Color(0xFF1F2A25),
+  canvas: Colors.white,
+  surface: Colors.white,
+  field: Colors.white,
+  line: Color(0xFF1A1A1A),
+  focus: Color(0xFF0050C8),
+  lineWidth: 1.6,
+  snack: Colors.black,
+);
+
+ThemeData buildTheme([Appearance appearance = Appearance.light]) {
+  final p = switch (appearance) {
+    Appearance.light => _light,
+    Appearance.dark => _dark,
+    Appearance.highContrast => _highContrast,
+  };
   final scheme = ColorScheme.fromSeed(
     seedColor: Brand.forest,
-    primary: Brand.forest,
+    brightness: p.brightness,
+    primary: p.primary,
+    onPrimary: p.brightness == Brightness.dark ? Colors.black : Colors.white,
     secondary: Brand.lime,
-    surface: Colors.white,
-    error: Brand.danger,
+    surface: p.surface,
+    onSurface: p.ink,
+    onSurfaceVariant: p.muted,
+    outline: p.line,
+    outlineVariant: p.line,
+    error: appearance == Appearance.dark ? const Color(0xFFFF9C85) : Brand.danger,
+    contrastLevel: appearance == Appearance.highContrast ? 1 : 0,
   );
   const radius = BorderRadius.all(Radius.circular(10));
+  final side = BorderSide(color: p.line, width: p.lineWidth);
   return ThemeData(
     useMaterial3: true,
+    brightness: p.brightness,
     // The web uses the bundled font so pages never wait on a font download.
     fontFamily: kIsWeb ? 'CartunezSans' : null,
     colorScheme: scheme,
-    scaffoldBackgroundColor: Brand.canvas,
+    scaffoldBackgroundColor: p.canvas,
     visualDensity: VisualDensity.standard,
     splashFactory: InkSparkle.splashFactory,
-    textTheme: const TextTheme(
-      headlineMedium: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.8, color: Brand.ink),
-      titleLarge: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.3, color: Brand.ink),
-      titleMedium: TextStyle(fontWeight: FontWeight.w700, color: Brand.ink),
-      bodyMedium: TextStyle(color: Brand.ink),
-      bodySmall: TextStyle(color: Brand.muted),
+    textTheme: TextTheme(
+      headlineMedium: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.8, color: p.ink),
+      titleLarge: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.3, color: p.ink),
+      titleMedium: TextStyle(fontWeight: FontWeight.w700, color: p.ink),
+      bodyMedium: TextStyle(color: p.ink),
+      bodySmall: TextStyle(color: p.muted, fontWeight: appearance == Appearance.highContrast ? FontWeight.w500 : null),
     ),
-    cardTheme: const CardThemeData(
+    cardTheme: CardThemeData(
       elevation: 0,
-      color: Colors.white,
+      color: p.surface,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(14)), side: BorderSide(color: Brand.line)),
+      shape: RoundedRectangleBorder(borderRadius: const BorderRadius.all(Radius.circular(14)), side: side),
     ),
-    inputDecorationTheme: const InputDecorationTheme(
+    inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Color(0xFFF8FAF9),
+      fillColor: p.field,
       isDense: true,
-      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: Brand.line)),
-      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: Brand.line)),
-      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: Brand.forest, width: 1.6)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      border: OutlineInputBorder(borderRadius: radius, borderSide: side),
+      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: side),
+      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: p.focus, width: p.lineWidth + 1)),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -64,22 +152,27 @@ ThemeData buildTheme() {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size(64, 42),
-        foregroundColor: Brand.ink,
-        side: const BorderSide(color: Brand.line),
+        foregroundColor: p.ink,
+        side: side,
         shape: const RoundedRectangleBorder(borderRadius: radius),
         textStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
     ),
-    dialogTheme: const DialogThemeData(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(18))),
+    dialogTheme: DialogThemeData(
+      backgroundColor: p.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.all(Radius.circular(18)),
+        side: appearance == Appearance.highContrast ? side : BorderSide.none,
+      ),
     ),
-    snackBarTheme: const SnackBarThemeData(
+    snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: Color(0xFF23533D),
+      backgroundColor: p.snack,
+      contentTextStyle: const TextStyle(color: Colors.white),
       width: 460,
     ),
-    dividerTheme: const DividerThemeData(color: Brand.line, space: 1),
+    dividerTheme: DividerThemeData(color: p.line, space: 1, thickness: p.lineWidth),
+    focusColor: appearance == Appearance.highContrast ? p.focus.withValues(alpha: 0.2) : null,
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
       TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
       TargetPlatform.windows: FadeForwardsPageTransitionsBuilder(),
