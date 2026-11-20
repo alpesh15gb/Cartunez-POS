@@ -29,7 +29,7 @@ inphp sh -c 'for f in $(find app/code/Cartunez app/design/frontend/Cartunez -nam
 
 echo '== Enabling (maintenance page for a few minutes)'
 mage maintenance:enable >/dev/null
-trap 'echo; echo "Stopped with an error. The shop is still in maintenance. After fixing, run this script again, or turn maintenance off with:"; echo "  docker compose -p cartunezshop exec -T php php bin/magento maintenance:disable"' ERR
+trap 'echo; echo "Stopped with an error. The shop is still in maintenance. After fixing, run this script again, or turn maintenance off with:"; echo "  docker compose -p cartunezshop exec -T php php bin/magento maintenance:disable"; docker compose -p cartunezshop start cron >/dev/null 2>\&1 || true' ERR
 mage module:enable Cartunez_Storefront >/dev/null || true
 mage setup:upgrade --keep-generated
 
@@ -54,12 +54,17 @@ si street_line2 'S.P. Road, Secunderabad'
 mage config:set design/footer/copyright '© Car Tunez. All prices include GST.' >/dev/null
 
 echo '== Rebuilding code and theme files (5-10 minutes)'
+# Magento's cron container writes generated code too; it is paused so the
+# rebuild can clear that folder ("Directory not empty" otherwise).
+dc stop cron >/dev/null
+dc exec -T -u root php sh -c 'rm -rf generated/code/* generated/metadata/*'
 mage setup:di:compile
 inphp rm -rf pub/static/frontend/Cartunez var/view_preprocessed/pub/static/frontend/Cartunez
 mage setup:static-content:deploy -f en_US --jobs 1 --theme Cartunez/default --theme Magento/backend
 mage indexer:reindex design_config_grid >/dev/null || true
 mage maintenance:disable >/dev/null
 mage cache:flush >/dev/null
+dc start cron >/dev/null
 trap - ERR
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' -m 20 -H 'Host: shop.cartunez.in' -H 'X-Forwarded-Proto: https' http://127.0.0.1:18600/ 2>&1 || true)
