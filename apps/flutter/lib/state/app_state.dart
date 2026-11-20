@@ -7,6 +7,11 @@ import '../core/api.dart';
 import '../core/billing.dart';
 import '../core/store.dart';
 
+part 'cart_state.dart';
+part 'catalog_state.dart';
+part 'shift_state.dart';
+part 'sync_state.dart';
+
 const allFeatures = ['transfers', 'fitment', 'warranty', 'onlineStore', 'negativeStock'];
 
 Json emptyCart() => {
@@ -19,56 +24,43 @@ Json emptyCart() => {
       'shiftId': '',
     };
 
+/// The register, split into scoped controllers:
+///
+/// * [syncState]: session, server calls, the offline queue, online flag, toasts.
+/// * [catalogState]: parts, bins, stock available to sell, code lookups, photos.
+/// * [shiftState]: the cashier's open shift and the cash expected in the drawer.
+/// * [cartState]: the sale on the counter, parking and checkout.
+///
+/// [AppState] owns them and forwards the old API so every screen keeps working.
+/// It notifies when sync, catalog or shift data changes, but NOT when only the
+/// cart changes: widgets that show the cart listen to [cartState] (or to
+/// [CartState.terms] for price level / vehicle / customer), so scanning a
+/// barcode rebuilds the cart pane and not the whole shell.
 class AppState extends ChangeNotifier {
-  late LocalStore _store;
+  AppState() {
+    syncState.addListener(_relay);
+    catalogState.addListener(_relay);
+    shiftState.addListener(_relay);
+  }
+
+  late final SyncState syncState = SyncState._(this);
+  late final CatalogState catalogState = CatalogState._(this);
+  late final ShiftState shiftState = ShiftState._(this);
+  late final CartState cartState = CartState._(this);
+
+  void _relay() => notifyListeners();
+
   bool ready = false;
   String? startupProblem;
-  bool online = false;
-  Future<void>? _syncTask;
-  bool get syncing => _syncTask != null;
-  String? _posting;
-  bool _parking = false;
-  Session? session;
-  Json connection = {'api': 'https://pos.cartunez.in/api/v1', 'organizationId': '', 'branchId': ''};
-  Json snapshot = {};
-  List<Json> pending = [];
-  Json cart = emptyCart();
-  String? lastSync;
-  String? sessionProblem;
 
   /// This device's label printer (kept on the device, not the server).
   Json labelPrinter = {};
-  Timer? _timer;
-  Timer? _cartTimer;
-
-  /// One-line messages for the snackbar; the shell listens to this.
-  final messages = StreamController<String>.broadcast();
-  void toast(String text) => messages.add(text);
 
   // ---------- lifecycle ----------
   Future<void> saveLabelPrinter(Json value) async {
     labelPrinter = value;
-    await _store.write('label-printer', value);
+    await syncState._store.write('label-printer', value);
     notifyListeners();
-  }
-
-  /// On the web the app is served by the shop server itself, so it signs in to
-  /// that same server. installation.json (written by the VPS release) adds the
-  /// organization and branch codes.
-  Future<Json> _installationDefaults() async {
-    final defaults = {...connection, 'api': '${Uri.base.origin}/api/v1'};
-    try {
-      final data = await fetchJson(Uri.base.resolve('/installation.json'));
-      if (data is Map) {
-        return {
-          ...defaults,
-          if (data['apiUrl'] is String) 'api': data['apiUrl'],
-          if (data['organizationId'] is String) 'organizationId': data['organizationId'],
-          if (data['branchId'] is String) 'branchId': data['branchId'],
-        };
-      }
-    } catch (_) {}
-    return defaults;
   }
 
   Future<void> init() async {
@@ -83,429 +75,112 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _load() async {
-    _store = await LocalStore.open();
-    final saved = await _store.read('connection');
-    if (saved is Map) {
-      connection = {...connection, ...Map<String, dynamic>.from(saved)};
-    } else if (kIsWeb) {
-      connection = await _installationDefaults();
-    }
-    final printer = await _store.read('label-printer');
+    final store = await LocalStore.open();
+    syncState._store = store;
+    await syncState._loadConnection();
+    final printer = await store.read('label-printer');
     if (printer is Map) labelPrinter = Map<String, dynamic>.from(printer);
-    session = Session.fromJson(await _store.read('session'));
-    if (session != null && !_validSession(session!)) {
-      session = null;
-      sessionProblem = 'Sign in again to open your saved register.';
-    }
-    if (session != null) {
-      final workspace = await _store.read(session!.scope);
-      if (workspace is Map) {
-        snapshot = Map<String, dynamic>.from(workspace['snapshot'] as Map? ?? {});
-        pending = _jsonList(workspace['pending']);
-        lastSync = workspace['lastSync'] as String?;
-        if (workspace['cart'] is Map) cart = Map<String, dynamic>.from(workspace['cart'] as Map);
-      } else {
-        session = null;
-      }
-    }
+    await syncState._loadWorkspace();
     ready = true;
     notifyListeners();
     if (session != null) {
       unawaited(sync());
-      _startTimer();
+      syncState._startTimer();
     }
   }
 
-  bool _validSession(Session s) =>
-      DateTime.tryParse(s.expiresAt)?.isAfter(DateTime.now()) == true;
+  // ---------- sync (forwarded) ----------
+  Session? get session => syncState.session;
+  set session(Session? value) => syncState.session = value;
+  Json get connection => syncState.connection;
+  set connection(Json value) => syncState.connection = value;
+  Json get snapshot => syncState.snapshot;
+  set snapshot(Json value) => syncState.snapshot = value;
+  List<Json> get pending => syncState.pending;
+  set pending(List<Json> value) => syncState.pending = value;
+  bool get online => syncState.online;
+  set online(bool value) => syncState.online = value;
+  bool get syncing => syncState.syncing;
+  String? get lastSync => syncState.lastSync;
+  set lastSync(String? value) => syncState.lastSync = value;
+  String? get sessionProblem => syncState.sessionProblem;
+  set sessionProblem(String? value) => syncState.sessionProblem = value;
 
-  void _startTimer() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) => sync());
-  }
+  /// One-line messages for the snackbar; the shell listens to this.
+  StreamController<String> get messages => syncState.messages;
+  void toast(String text) => syncState.toast(text);
 
-  static List<Json> _jsonList(Object? value) =>
-      (value as List? ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-
-  Future<void> _saveWorkspace() async {
-    final s = session;
-    if (s == null) return;
-    await _store.write(s.scope, {
-      'snapshot': snapshot,
-      'pending': pending,
-      'lastSync': lastSync,
-      'cart': cart,
-    });
-  }
-
-  // ---------- session ----------
   Future<void> login({
     required String api,
     required String organizationId,
     required String branchId,
     required String email,
     required String password,
-  }) async {
-    final address = api.trim().replaceAll(RegExp(r'/+$'), '');
-    final auth = await request(address, '', '/auth/login', body: {
-      'email': email.trim(),
-      'password': password,
-      'organizationId': organizationId.trim(),
-      'branchId': branchId.trim(),
-    }) as Map;
-    final next = Session(
-      api: address,
-      token: '${auth['token']}',
-      user: Map<String, dynamic>.from(auth['user'] as Map),
-      branchId: '${auth['branchId']}',
-      organizationId: '${auth['organizationId']}',
-      expiresAt: '${auth['expiresAt']}',
-    );
-    connection = {'api': address, 'organizationId': organizationId.trim(), 'branchId': branchId.trim()};
-    await _store.write('connection', connection);
-    final boot = await request(address, next.token, '/bootstrap') as Map;
-    final previous = await _store.read(next.scope);
-    _photoCache.clear();
-    session = next;
-    snapshot = Map<String, dynamic>.from(boot);
-    pending = previous is Map ? _jsonList(previous['pending']) : [];
-    cart = previous is Map && previous['cart'] is Map
-        ? Map<String, dynamic>.from(previous['cart'] as Map)
-        : emptyCart();
-    lastSync = DateTime.now().toIso8601String();
-    online = true;
-    sessionProblem = null;
-    await _store.write('session', next.toJson());
-    await _saveWorkspace();
-    _startTimer();
-    notifyListeners();
-  }
+  }) =>
+      syncState.login(api: api, organizationId: organizationId, branchId: branchId, email: email, password: password);
 
-  Future<void> logout() async {
-    final saved = _saveWorkspace();
-    _timer?.cancel();
-    _cartTimer?.cancel();
-    _photoCache.clear();
-    _syncTask = null;
-    _posting = null;
-    online = false;
-    lastSync = null;
-    session = null;
-    snapshot = {};
-    pending = [];
-    cart = emptyCart();
-    final signedOut = _store.write('session', null);
-    notifyListeners();
-    await Future.wait([saved, signedOut]);
-  }
+  Future<void> logout() => syncState.logout();
 
-  // ---------- server ----------
-  /// Photos of a part, main photo first.
-  List<Json> photosOf(String productId) =>
-      list('productImages').where((i) => i['productId'] == productId).toList()..sort((a, b) => ((a['position'] as num?) ?? 0).compareTo((b['position'] as num?) ?? 0));
+  Future<dynamic> api(String path, {Object? body, String? method}) => syncState.api(path, body: body, method: method);
 
-  final _photoCache = <String, Future<Uint8List>>{};
-
-  /// A supplier-bill photo or PDF, downloaded once per app session.
-  Future<Uint8List> fileBytes(String fileId) {
-    final s = session;
-    if (s == null) return Future.error(ApiError('Sign in to continue.', 401));
-    return _photoCache.putIfAbsent('file:$fileId', () async {
-      try {
-        return Uint8List.fromList(await fetchBytes(s.api, s.token, '/attachments/$fileId'));
-      } catch (e) {
-        _photoCache.remove('file:$fileId');
-        rethrow;
-      }
-    });
-  }
-
-  /// What we owe a supplier, or what a customer owes us (negative = advance).
-  int partyBalance(String kind, String? id) {
-    final all = snapshot['partyBalances'];
-    if (all is! Map || id == null) return 0;
-    final map = all[kind];
-    return map is Map ? ((map[id] as num?) ?? 0).toInt() : 0;
-  }
-
-  Json? supplierById(String? id) => list('suppliers').where((s) => s['id'] == id).firstOrNull;
-
-  /// A photo's bytes, downloaded once per app session (photo IDs never change).
-  Future<Uint8List> photoBytes(String imageId) {
-    final s = session;
-    if (s == null) return Future.error(ApiError('Sign in to continue.', 401));
-    return _photoCache.putIfAbsent(imageId, () async {
-      try {
-        return Uint8List.fromList(await fetchBytes(s.api, s.token, '/product-images/$imageId'));
-      } catch (e) {
-        _photoCache.remove(imageId);
-        rethrow;
-      }
-    });
-  }
-
-  Future<dynamic> api(String path, {Object? body, String? method}) {
-    final s = session;
-    if (s == null) throw ApiError('Sign in to continue.', 401);
-    return request(s.api, s.token, path, body: body, method: method);
-  }
-
-  Future<void> sync({bool loud = false, bool afterMutation = false}) async {
-    final s = session;
-    if (s == null) return;
-    if (!_validSession(s)) {
-      sessionProblem = 'Your session expired. Sign in again to open your saved register.';
-      await logout();
-      return;
-    }
-    final active = _syncTask;
-    if (active != null) {
-      await active;
-      if (afterMutation && identical(s, session)) await sync(loud: loud);
-      return;
-    }
-    final task = _refresh(s, loud);
-    _syncTask = task;
-    notifyListeners();
-    try {
-      await task;
-    } finally {
-      if (identical(_syncTask, task)) {
-        _syncTask = null;
-        notifyListeners();
-      }
-    }
-  }
-
-  Future<void> _refresh(Session s, bool loud) async {
-    try {
-      for (final item in List<Json>.from(pending)) {
-        if (!identical(session, s)) return;
-        if (item['transaction']['transactionId'] == _posting ||
-            item['status'] == 'awaiting-payment' || item['error'] != null) {
-          continue;
-        }
-        try {
-          await request(s.api, s.token, '/invoices', body: item['transaction']);
-          if (!identical(session, s)) return;
-          pending.remove(item);
-        } on ApiError catch (error) {
-          if (!error.rejected) rethrow;
-          if (!identical(session, s)) return;
-          item['error'] = error.message;
-        }
-      }
-      final boot = await request(s.api, s.token, '/bootstrap') as Map;
-      if (!identical(session, s)) return;
-      snapshot = Map<String, dynamic>.from(boot);
-      if (boot['user'] is Map) s.user = {...s.user, ...Map<String, dynamic>.from(boot['user'] as Map)};
-      lastSync = DateTime.now().toIso8601String();
-      online = true;
-      sessionProblem = null;
-      try {
-        await _saveWorkspace();
-      } catch (_) {
-        toast('Register refreshed, but local storage is full or unavailable. Check free space on this counter.');
-        return;
-      }
-      if (loud) toast('Up to date.');
-    } on ApiError catch (error) {
-      if (!identical(session, s)) return;
-      online = false;
-      if (error.status == 401) {
-        sessionProblem = 'Your session has ended. Sign in again to open your saved register.';
-        await logout();
-      }
-    } on OfflineError {
-      if (identical(session, s)) online = false;
-    }
-  }
+  Future<void> sync({bool loud = false, bool afterMutation = false}) =>
+      syncState.sync(loud: loud, afterMutation: afterMutation);
 
   /// Sends a change to the server with a stable transaction ID and retries once
   /// on a network failure, then refreshes the workspace.
-  Future<dynamic> mutate(String path, Json body, [String? message]) async {
-    final payload = {...body, 'transactionId': body['transactionId'] ?? uuid()};
-    final s = session;
-    dynamic result;
-    try {
-      result = await api(path, body: payload);
-    } on OfflineError {
-      if (!identical(session, s)) rethrow;
-      result = await api(path, body: payload);
-    }
-    if (!identical(session, s)) return result;
-    await sync(afterMutation: true);
-    if (message != null) toast(message);
-    return result;
-  }
+  Future<dynamic> mutate(String path, Json body, [String? message]) => syncState.mutate(path, body, message);
 
-  // ---------- cart ----------
-  void updateCart(Json changes) => replaceCart({...cart, ...changes});
+  Future<void> confirmPayment(String transactionId, Json references) => syncState.confirmPayment(transactionId, references);
 
-  void replaceCart(Json value) {
-    cart = value;
-    notifyListeners();
-    _cartTimer?.cancel();
-    _cartTimer = Timer(const Duration(milliseconds: 300), _saveWorkspace);
-  }
+  Future<void> discardPending(String transactionId) => syncState.discardPending(transactionId);
 
-  void clearCart() => replaceCart(emptyCart());
+  Json get settings => syncState.settings;
+  List<Json> list(String key) => syncState.list(key);
 
-  Future<void> parkCart() async {
-    if (_parking || _posting != null) return;
-    final draft = cart;
-    final cashier = session;
-    _parking = true;
-    try {
-      final hold = await mutate('/holds', {'id': draft['holdId'], 'cart': draft}, 'Sale parked. Its stock is reserved.');
-      if (!identical(cashier, session)) return;
-      if (identical(draft, cart)) {
-        clearCart();
-      } else if (cart['transactionId'] == draft['transactionId']) {
-        updateCart({'holdId': hold['id']});
-      }
-      await _saveWorkspace();
-    } finally {
-      _parking = false;
-    }
-  }
-
-  Quote? get bill {
-    try {
-      return currentQuote();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Quote currentQuote([Json? value]) => quote(value ?? cart, products,
-      roundingIncrement: (settings['roundingIncrement'] ?? 1) as int,
-      taxMode: '${settings['taxMode'] ?? 'exclusive'}');
+  // ---------- cart (forwarded) ----------
+  Json get cart => cartState.cart;
+  void updateCart(Json changes) => cartState.updateCart(changes);
+  void replaceCart(Json value) => cartState.replaceCart(value);
+  void clearCart() => cartState.clearCart();
+  Future<void> parkCart() => cartState.parkCart();
+  Quote? get bill => cartState.bill;
+  Quote currentQuote([Json? value]) => cartState.currentQuote(value);
 
   /// Saves the sale locally first so it survives a crash, then sends it.
   /// Returns the invoice, or null when it was kept for later sending.
-  Future<Json?> checkout({required List<Json> tenders, required int expectedTotal, String placeOfSupply = ''}) async {
-    final s = session;
-    if (s == null || !_validSession(s)) throw ApiError('Sign in again before taking payment.', 401);
-    if (!online) throw OfflineError('Reconnect before taking payment. Your cart is saved on this counter.');
-    if (_parking) throw ApiError('Wait for the sale to finish parking.', 409);
-    if (_posting != null) throw ApiError('The previous payment is still being submitted.', 409);
-    final bill = currentQuote();
-    if (bill.total != expectedTotal) throw ApiError('The bill total changed. Reopen checkout to review the amount.', 409);
-    final originalCart = cart;
-    final shift = openShift;
-    if (shift == null) throw ApiError('Open your shift before checkout.', 409);
-    final transaction = {
-      ...cart,
-      'shiftId': shift['id'],
-      'placeOfSupply': placeOfSupply.trim(),
-      'expectedTotal': expectedTotal,
-      'discount': bill.discount,
-      'catalogRevision': snapshot['catalogRevision'],
-      'occurredAt': DateTime.now().toUtc().toIso8601String(),
-      'tenders': tenders,
-      'offline': false,
-    };
-    final awaiting = tenders.any((t) => t['type'] != 'Cash' && t['confirmed'] != true);
-    final entry = {
-      'transaction': transaction,
-      'status': awaiting ? 'awaiting-payment' : 'pending',
-      'total': bill.total,
-      'createdAt': DateTime.now().toIso8601String(),
-    };
-    final transactionId = transaction['transactionId'] as String;
-    _posting = transactionId;
-    pending.add(entry);
-    cart = emptyCart();
-    try {
-      await _saveWorkspace();
-    } catch (_) {
-      if (identical(session, s)) {
-        pending.remove(entry);
-        cart = originalCart;
-        _posting = null;
-        notifyListeners();
-      }
-      throw BillingError('Cannot save this sale on the counter. Check available storage before taking payment.');
-    }
-    if (!identical(session, s)) return null;
-    notifyListeners();
-    if (awaiting) {
-      _posting = null;
-      toast('Payment saved as pending. Confirm the provider reference in Settings › Sync & audit.');
-      return null;
-    }
-    try {
-      final invoice = await request(s.api, s.token, '/invoices', body: transaction) as Map;
-      if (!identical(session, s)) return null;
-      pending.remove(entry);
-      // The invoice is already posted even if the local cache is full.
-      // The saved copy can safely replay the same transaction after restart.
-      try {
-        await _saveWorkspace();
-      } catch (_) {
-        toast('Invoice posted. Check free space on this counter.');
-      }
-      unawaited(sync(afterMutation: true));
-      return Map<String, dynamic>.from(invoice);
-    } on ApiError catch (error) {
-      if (!identical(session, s)) rethrow;
-      if (error.rejected) {
-        pending.remove(entry);
-        cart = originalCart;
-        await _saveWorkspace();
-        notifyListeners();
-        unawaited(sync(afterMutation: true));
-        rethrow;
-      }
-      if (error.status == 401) {
-        sessionProblem = 'Sign in again to check the saved payment.';
-        await logout();
-      } else {
-        toast('Payment status is pending. Check Sync & audit before taking payment again.');
-      }
-      return null;
-    } on OfflineError {
-      if (!identical(session, s)) return null;
-      online = false;
-      notifyListeners();
-      toast('Connection lost during checkout. The payment is saved for verification. Check Sync & audit before charging again.');
-      return null;
-    } finally {
-      if (_posting == transactionId) _posting = null;
-    }
-  }
+  Future<Json?> checkout({required List<Json> tenders, required int expectedTotal, String placeOfSupply = ''}) =>
+      cartState.checkout(tenders: tenders, expectedTotal: expectedTotal, placeOfSupply: placeOfSupply);
 
-  Future<void> confirmPayment(String transactionId, Json references) async {
-    for (final item in pending) {
-      if (item['transaction']['transactionId'] != transactionId) continue;
-      item['status'] = 'pending';
-      item['transaction']['tenders'] = [
-        for (final t in item['transaction']['tenders'] as List)
-          if (t['type'] != 'Cash' && t['confirmed'] != true)
-            {...Map<String, dynamic>.from(t as Map), 'confirmed': true, 'reference': references[t['type']]}
-          else Map<String, dynamic>.from(t as Map),
-      ];
-    }
-    await _saveWorkspace();
-    await sync(afterMutation: true);
-  }
+  // ---------- catalog (forwarded) ----------
+  List<Json> photosOf(String productId) => catalogState.photosOf(productId);
+  Future<Uint8List> fileBytes(String fileId) => catalogState.fileBytes(fileId);
+  Future<Uint8List> photoBytes(String imageId) => catalogState.photoBytes(imageId);
+  List<Json> get products => catalogState.products;
+  List<Json> get saleProducts => catalogState.saleProducts;
+  List<Json> get bins => catalogState.bins;
+  List<Json> get stock => catalogState.stock;
+  List<Json> get sellableBins => catalogState.sellableBins;
+  String binName(Json? bin) => catalogState.binName(bin);
+  Json? binById(String? id) => catalogState.binById(id);
+  String locationName(String? id) => catalogState.locationName(id);
+  Json? productById(String? id) => catalogState.productById(id);
+  String productName(String? id) => catalogState.productName(id);
 
-  Future<void> discardPending(String transactionId) async {
-    pending.removeWhere((e) => e['transaction']['transactionId'] == transactionId);
-    await _saveWorkspace();
-    notifyListeners();
-  }
+  /// Stock that can be sold now: server snapshot, less sales waiting to send,
+  /// plus anything reserved by the parked sale currently on the counter.
+  int available(String productId, [String? binId]) => catalogState.available(productId, binId);
 
-  // ---------- derived data ----------
-  Json get settings => Map<String, dynamic>.from(snapshot['settings'] as Map? ?? {});
+  /// Barcodes first, then SKU, then manufacturer and cross references.
+  List<Json> findByCode(String code, {bool forSale = false}) => catalogState.findByCode(code, forSale: forSale);
+  String? uniqueProductIdForCode(String code) => catalogState.uniqueProductIdForCode(code);
+  String? binIdForCode(String code) => catalogState.binIdForCode(code);
+
+  // ---------- shifts (forwarded) ----------
+  Json? get openShift => shiftState.openShift;
+  int expectedCash(Json shift) => shiftState.expectedCash(shift);
+
+  // ---------- shop facts ----------
   Json get business => Map<String, dynamic>.from(settings['business'] as Map? ?? {});
-  List<Json> list(String key) => _jsonList(snapshot[key]);
-  List<Json> get products => list('products');
-  List<Json> get saleProducts => products.where((p) => p['salesStopped'] != true).toList();
-  List<Json> get bins => list('locations');
-  List<Json> get stock => list('stock');
-  List<Json> get sellableBins => bins.where((b) => b['kind'] == 'sellable').toList();
   String get role => session?.role ?? '';
   bool get isManager => role == 'owner' || role == 'manager';
   bool get isOwner => role == 'owner';
@@ -528,13 +203,6 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Json? get openShift {
-    for (final shift in list('shifts')) {
-      if (shift['closedAt'] == null && shift['userId'] == session?.userId) return shift;
-    }
-    return null;
-  }
-
   String money(num? minor, {String? currency}) {
     final format = NumberFormat.simpleCurrency(locale: 'en_IN', name: currency ?? '${settings['currency'] ?? 'INR'}');
     final value = (minor ?? 0) / 100;
@@ -542,27 +210,15 @@ class AppState extends ChangeNotifier {
     return format.format(value == 0 ? 0 : value);
   }
 
-  String binName(Json? bin) => bin == null
-      ? '—'
-      : [bin['area'], bin['rack'], bin['shelf'], bin['bin']].where((e) => e != null && '$e'.isNotEmpty).join(' / ');
-
-  Json? binById(String? id) {
-    for (final bin in bins) {
-      if (bin['id'] == id) return bin;
-    }
-    return null;
+  /// What we owe a supplier, or what a customer owes us (negative = advance).
+  int partyBalance(String kind, String? id) {
+    final all = snapshot['partyBalances'];
+    if (all is! Map || id == null) return 0;
+    final map = all[kind];
+    return map is Map ? ((map[id] as num?) ?? 0).toInt() : 0;
   }
 
-  String locationName(String? id) => binById(id) == null ? (id ?? '—') : binName(binById(id));
-
-  Json? productById(String? id) {
-    for (final product in products) {
-      if (product['id'] == id) return product;
-    }
-    return null;
-  }
-
-  String productName(String? id) => productById(id)?['name'] ?? id ?? '—';
+  Json? supplierById(String? id) => list('suppliers').where((s) => s['id'] == id).firstOrNull;
 
   String userName(String? id) {
     if (id == null || id.isEmpty) return '—';
@@ -585,35 +241,6 @@ class AppState extends ChangeNotifier {
       if (customer['id'] == id) return customer;
     }
     return null;
-  }
-
-  /// Stock that can be sold now: server snapshot, less sales waiting to send,
-  /// plus anything reserved by the parked sale currently on the counter.
-  int available(String productId, [String? binId]) {
-    var physical = 0;
-    for (final item in stock) {
-      if (item['productId'] != productId) continue;
-      if (binId != null ? item['binId'] != binId : binById(item['binId'])?['kind'] != 'sellable') continue;
-      physical += (item['available'] ?? ((item['quantity'] ?? 0) - (item['reserved'] ?? 0))) as int;
-    }
-    var waiting = 0;
-    for (final entry in pending) {
-      for (final line in (entry['transaction']['lines'] as List)) {
-        if (line['productId'] == productId && (binId == null || line['binId'] == binId)) {
-          waiting += line['qty'] as int;
-        }
-      }
-    }
-    var reserved = 0;
-    for (final hold in list('holds')) {
-      if (hold['id'] != cart['holdId']) continue;
-      for (final line in (hold['cart']['lines'] as List)) {
-        if (line['productId'] == productId && (binId == null || line['binId'] == binId)) {
-          reserved += line['qty'] as int;
-        }
-      }
-    }
-    return physical - waiting + reserved;
   }
 
   List<Json> returnsFor(String invoiceId) =>
@@ -645,75 +272,15 @@ class AppState extends ChangeNotifier {
     return returned >= sold ? 'Returned' : 'Partially returned';
   }
 
-  int expectedCash(Json shift) {
-    var cash = (shift['openingCash'] ?? 0) as int;
-    for (final sale in list('invoices').where((i) => i['shiftId'] == shift['id'])) {
-      for (final t in sale['tenders'] as List) {
-        if (t['type'] == 'Cash') cash += t['amount'] as int;
-      }
-      cash -= (sale['change'] ?? 0) as int;
-    }
-    for (final refund in [...list('returns'), ...list('coreReturns')]) {
-      if (refund['shiftId'] == shift['id'] && (refund['refundType'] ?? 'Cash') == 'Cash') {
-        cash -= (refund['total'] ?? 0) as int;
-      }
-    }
-    for (final movement in list('cashMovements').where((m) => m['shiftId'] == shift['id'])) {
-      final amount = movement['amount'] as int;
-      cash += movement['direction'] == 'in' ? amount : -amount;
-    }
-    for (final payment in list('partyPayments').where((p) => p['shiftId'] == shift['id'] && p['mode'] == 'Cash' && p['voided'] != true)) {
-      final amount = (payment['amount'] as num).toInt();
-      cash += payment['direction'] == 'in' ? amount : -amount;
-    }
-    return cash;
-  }
-
-  /// Barcodes first, then SKU, then manufacturer and cross references.
-  List<Json> findByCode(String code, {bool forSale = false}) {
-    final raw = code.trim();
-    if (raw.isEmpty) return [];
-    final gtin = canonicalGtin(scannedProductCode(raw));
-    final catalog = products;
-    List<Json> allowed(List<Json> matches) =>
-        forSale ? matches.where((p) => p['salesStopped'] != true).toList() : matches;
-    final barcodeMatches = catalog.where((p) => (p['barcodes'] as List? ?? const []).any((v) {
-      final stored = '$v'.trim();
-      return stored == raw || (gtin != null && canonicalGtin(stored) == gtin);
-    })).toList();
-    if (barcodeMatches.isNotEmpty) return allowed(barcodeMatches);
-    final key = normalize(code);
-    if (key.isEmpty) return [];
-    bool exact(Iterable values) => values.any((v) => normalize(v) == key);
-    final tiers = <bool Function(Json)>[
-      (p) => exact([p['sku']]),
-      (p) => exact([
-            p['partNumber'],
-            ...(p['oemReferences'] as List? ?? const []),
-            ...(p['supplierReferences'] as List? ?? const []),
-            ...(p['supersedes'] as List? ?? const []),
-            ...(p['interchanges'] as List? ?? const []),
-          ]),
-    ];
-    for (final tier in tiers) {
-      final found = catalog.where(tier).toList();
-      if (found.isNotEmpty) return allowed(found);
-    }
-    return [];
-  }
-
-  String? uniqueProductIdForCode(String code) {
-    final matches = findByCode(code);
-    return matches.length == 1 ? matches.single['id'] as String : null;
-  }
-
-  String? binIdForCode(String code) => bins.where((bin) => bin['id'] == code.trim()).firstOrNull?['id'] as String?;
-
   @override
   void dispose() {
-    _timer?.cancel();
-    _cartTimer?.cancel();
-    messages.close();
+    syncState.removeListener(_relay);
+    catalogState.removeListener(_relay);
+    shiftState.removeListener(_relay);
+    syncState.dispose();
+    cartState.dispose();
+    catalogState.dispose();
+    shiftState.dispose();
     super.dispose();
   }
 }
