@@ -11,7 +11,12 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Every commit on main gets its own web bundle, so main runs are never cancelled.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Keep in step with the Flutter used for local builds (flutter --version).
+  FLUTTER_VERSION: '3.50.0'
 
 jobs:
   verify:
@@ -19,6 +24,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check text encoding (UTF-8, no mojibake)
+        run: python3 scripts/check-encoding.py
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
@@ -26,12 +33,95 @@ jobs:
       - run: npm ci
       - run: npm run build:api
       - run: npm run test:api
-      - name: Check the committed Flutter web build
+      - name: Check the committed Flutter web build (until the CI-bundle cutover removes it)
         run: |
+          [ -d apps/flutter/release/web ] || { echo 'No committed web build; the VPS uses the CI bundle.'; exit 0; }
           for f in index.html flutter_bootstrap.js main.dart.js sw.js version.json canvaskit/canvaskit.wasm; do
             test -s "apps/flutter/release/web/$f" || { echo "Missing apps/flutter/release/web/$f"; exit 1; }
           done
       - name: Check deployment script syntax
         run: |
-          find deploy scripts -name '*.sh' -print0 | xargs -0 -r -n 1 bash -n
-          python3 -m py_compile deploy/cartunez/bin/*.py
+          find deploy scripts apps/flutter/tool -name '*.sh' -print0 | xargs -0 -r -n 1 bash -n
+          python3 -m py_compile deploy/cartunez/bin/*.py scripts/*.py
+
+  flutter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/flutter
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: subosito/flutter-action@1508160852fb97248640997f7cfb38da241df0ba # v2.9.1
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter --version
+      - run: flutter pub get
+      # Infos (such as deprecations) are reported but do not fail the build.
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
+      - name: Build the web bundle (same flags as tool/build_web.ps1)
+        run: bash tool/build_web.sh "$RUNNER_TEMP/bundle/web"
+      - name: Package the web bundle
+        working-directory: ${{ runner.temp }}/bundle
+        run: |
+          python3 - "$GITHUB_SHA" "$FLUTTER_VERSION" <<'PY'
+          import datetime, json, os, sys
+          json.dump(dict(commit=sys.argv[1], flutter=sys.argv[2],
+                         built_at=datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                         run=f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"),
+                    open('build-info.json', 'w'), indent=2)
+          PY
+          mkdir -p "$RUNNER_TEMP/dist"
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mode='u+rwX,go+rX,go-w' \
+              -czf "$RUNNER_TEMP/dist/cartunez-web.tar.gz" build-info.json web
+          cd "$RUNNER_TEMP/dist"
+          sha256sum cartunez-web.tar.gz > cartunez-web.tar.gz.sha256
+          cat cartunez-web.tar.gz.sha256
+          du -h cartunez-web.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cartunez-web-${{ github.sha }}
+          path: ${{ runner.temp }}/dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  publish-web:
+    # Publishes the bundle for the VPS as the release "web-<commit>", only for
+    # commits on main that passed every check. Releases are never overwritten.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    needs: [verify, flutter]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: web-${{ github.sha }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cartunez-web-${{ github.sha }}
+          path: dist
+      - name: Publish release web-<commit>
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; leaving it unchanged."
+          else
+            (cd dist && sha256sum --check cartunez-web.tar.gz.sha256)
+            gh release create "$TAG" dist/cartunez-web.tar.gz dist/cartunez-web.tar.gz.sha256 \
+              --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "Web bundle ${GITHUB_SHA:0:12}" \
+              --notes "Flutter web bundle built by CI from $GITHUB_SHA ($GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID). The VPS deploy fetches it with deploy/cartunez/bin/fetch-web.sh."
+          fi
+      - name: Remove web bundles beyond the newest 60
+        run: |
+          gh release list --limit 1000 --json tagName,createdAt \
+            --jq '[.[] | select(.tagName | test("^web-[0-9a-f]{40}$"))] | sort_by(.createdAt) | reverse | .[60:] | .[].tagName' |
+          while read -r old; do
+            echo "Deleting $old"
+            gh release delete "$old" --yes --cleanup-tag
+          done
