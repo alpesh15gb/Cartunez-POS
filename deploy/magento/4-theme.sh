@@ -29,7 +29,7 @@ inphp sh -c 'for f in $(find app/code/Cartunez app/design/frontend/Cartunez -nam
 
 echo '== Enabling (maintenance page for a few minutes)'
 mage maintenance:enable >/dev/null
-trap 'echo; echo "Stopped with an error. The shop is still in maintenance. After fixing, run this script again, or turn maintenance off with:"; echo "  docker compose -p cartunezshop exec -T php php bin/magento maintenance:disable"; docker compose -p cartunezshop start cron >/dev/null 2>\&1 || true' ERR
+trap 'echo; echo "Stopped with an error. The shop is still in maintenance. After fixing, run this script again, or turn maintenance off with:"; echo "  docker compose -p cartunezshop exec -T php php bin/magento maintenance:disable"; docker compose -p cartunezshop start cron >/dev/null 2>&1 || true' ERR
 mage module:enable Cartunez_Storefront >/dev/null || true
 mage setup:upgrade --keep-generated
 
