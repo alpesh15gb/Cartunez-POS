@@ -18,6 +18,8 @@ mage() { inphp php -d memory_limit=4G bin/magento "$@"; }
 inphp test -f app/etc/env.php || die 'Install Magento first (2-install.sh).'
 
 echo '== Copying the theme and storefront module'
+# Old copies kept the theme styles as LESS for Magento to compile; that file is gone now.
+inphp rm -f app/design/frontend/Cartunez/default/web/css/source/_extend.less
 dc cp "$SRC/app/." php:/var/www/magento/app/
 dc exec -T -u root php chown -R www-data:www-data app/code/Cartunez app/design/frontend/Cartunez
 
@@ -44,6 +46,7 @@ mage config:set design/footer/copyright '© Car Tunez. All prices include GST.' 
 
 echo '== Rebuilding code and theme files (5-10 minutes)'
 mage setup:di:compile
+inphp rm -rf pub/static/frontend/Cartunez var/view_preprocessed/pub/static/frontend/Cartunez
 mage setup:static-content:deploy -f en_US --jobs 1 --theme Cartunez/default --theme Magento/backend
 mage indexer:reindex design_config_grid >/dev/null || true
 mage maintenance:disable >/dev/null
@@ -52,4 +55,6 @@ trap - ERR
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' -m 20 -H 'Host: shop.cartunez.in' -H 'X-Forwarded-Proto: https' http://127.0.0.1:18600/ 2>&1 || true)
 echo "Local check: HTTP $code (200 expected)"
+n=$(inphp sh -c 'grep -c cz-slider pub/static/frontend/Cartunez/default/en_US/css/cartunez.css 2>/dev/null' || true)
+echo "Theme stylesheet: ${n:-0} slider rules (more than 0 expected)"
 echo 'Stage 4 done. Open https://shop.cartunez.in (staging login) and reload with Ctrl+F5.'

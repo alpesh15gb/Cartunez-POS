@@ -1,0 +1,7 @@
+// Wrapper used to build app/design/frontend/Cartunez/default/web/css/cartunez.css.
+// Magento's own LESS compiler is not used for the Cartunez styles: the shop
+// serves this finished CSS file, exactly as tested.
+@screen__m: 768px;
+@import "cartunez.less";
+@media (max-width: 767px) { .media-width('max', @screen__m); }
+@media (min-width: 768px) { .media-width('min', @screen__m); }
