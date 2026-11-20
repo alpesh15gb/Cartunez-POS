@@ -6,6 +6,7 @@
 # survive losing the server.
 set -euo pipefail
 DIR=/var/backups/cartunez-shop
+trap 'rm -f "$DIR"/*.part' EXIT
 KEEP_DAYS="${KEEP_DAYS:-14}"
 cd /opt/cartunez-shop
 dc() { docker compose -p cartunezshop "$@"; }
@@ -15,7 +16,8 @@ ts=$(date +%Y%m%d-%H%M)
 dc exec -T db sh -c 'mariadb-dump -umagento -p"$(cat /run/secrets/db_password)" --single-transaction --quick --routines --triggers magento' \
   | gzip > "$DIR/db-$ts.sql.gz.part"
 mv "$DIR/db-$ts.sql.gz.part" "$DIR/db-$ts.sql.gz"
-dc exec -T php tar -C /var/www/magento -czf - --exclude=pub/media/catalog/product/cache pub/media app/etc > "$DIR/files-$ts.tar.gz.part"
+# Exit code 1 from tar only means a file changed while being read (a photo uploaded meanwhile).
+dc exec -T php tar -C /var/www/magento -czf - --warning=no-file-changed --exclude=pub/media/catalog/product/cache pub/media app/etc > "$DIR/files-$ts.tar.gz.part" || [[ $? -eq 1 ]]
 mv "$DIR/files-$ts.tar.gz.part" "$DIR/files-$ts.tar.gz"
-find "$DIR" -name '*.gz' -mtime +"$KEEP_DAYS" -delete
+find "$DIR" \( -name '*.gz' -o -name '*.part' \) -mtime +"$KEEP_DAYS" -delete
 echo "$(date '+%F %T') backup ok: $(du -sh "$DIR/db-$ts.sql.gz" | cut -f1) database, $(du -sh "$DIR/files-$ts.tar.gz" | cut -f1) files"

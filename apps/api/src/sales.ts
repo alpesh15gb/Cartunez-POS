@@ -46,6 +46,9 @@ export async function finalizeSale(
     "settings",
     "settings",
   ))!;
+  // Selling when the system shows no stock (stock goes negative until the
+  // purchase is entered). On unless switched off in Settings › Modules.
+  const sellBeyondStock = currentSettings.features?.negativeStock !== false;
   const shift = await scoped(db, actor, "shift", body.shiftId);
   if (
     shift.closedAt ||
@@ -174,7 +177,7 @@ export async function finalizeSale(
             entry.productId === product.id && entry.binId === input.binId,
         )
         .reduce((sum: number, entry: any) => sum + entry.qty, 0);
-      if (!reconcile && available + ownHold < qty)
+      if (!reconcile && !(sellBeyondStock && !product.serialTracked) && available + ownHold < qty)
         fail(`Insufficient stock for ${product.sku} in the selected bin.`, 409);
       if (product.serialTracked) {
         if (
@@ -296,9 +299,20 @@ export async function finalizeSale(
     confirmed: tender.confirmed === true,
     reference: text(tender.reference || "", "payment reference", false, 200),
   }));
+  // "Credit" = sold on the customer's account (udhaar); it is always available
+  // for a named customer and is not money in the drawer.
+  const credit = tenders
+    .filter((tender: any) => tender.type === "Credit")
+    .reduce((sum: number, tender: any) => sum + tender.amount, 0);
+  if (credit) {
+    if (!body.customerId) fail("Choose the customer before selling on credit.");
+    if (body.offline) fail("Credit sales need a connection to the server.", 403);
+    for (const tender of tenders) if (tender.type === "Credit") tender.confirmed = true;
+  }
   if (
     tenders.some(
       (tender: any) =>
+        tender.type !== "Credit" &&
         !(currentSettings.tenderTypes || ["Cash", "Card", "UPI"]).includes(
           tender.type,
         ),
@@ -308,13 +322,13 @@ export async function finalizeSale(
   if (
     tenders.some(
       (tender: any) =>
-        tender.type !== "Cash" && tender.confirmed && !tender.reference,
+        !["Cash", "Credit"].includes(tender.type) && tender.confirmed && !tender.reference,
     )
   )
     fail("Record the external payment confirmation reference.");
   if (
     tenders.some(
-      (tender: any) => !["Cash", "Card", "UPI"].includes(tender.type),
+      (tender: any) => !["Cash", "Card", "UPI", "Credit"].includes(tender.type),
     )
   )
     fail("Unsupported tender type.");
@@ -425,7 +439,7 @@ export async function finalizeSale(
         -line.qty,
         "Sale",
         invoice.id,
-        reconcile,
+        reconcile || (sellBeyondStock && !line.serials?.length),
       );
     for (const serial of line.serials)
       await putRecord(
@@ -622,8 +636,12 @@ export async function returnInvoice(
   const creditNumber = settings.nextCreditNote || 1;
   settings.nextCreditNote = creditNumber + 1;
   await putRecord(db, actor.organizationId, "settings", settings);
-  if (!["Cash", "Card", "UPI"].includes(body.refundType || "Cash"))
+  if (!body.refundType && (invoice.tenders || []).some((t: any) => t.type === "Credit"))
+    body.refundType = "Credit";
+  if (!["Cash", "Card", "UPI", "Credit"].includes(body.refundType || "Cash"))
     fail("Choose a supported refund method.");
+  if (body.refundType === "Credit" && !invoice.customerId)
+    fail("Only a sale to a named customer can be refunded to their account.");
   const receipt = {
     ...invoiceProfile(
       invoice,

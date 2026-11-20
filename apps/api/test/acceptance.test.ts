@@ -59,6 +59,8 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
       403,
     );
     const tok = owner.token;
+    // These checks cover strict stock (selling beyond stock switched off).
+    await call("POST", "settings", { features: { negativeStock: false } }, tok);
     const bootstrap = await call("GET", "bootstrap", undefined, tok);
     assert.equal(bootstrap.products.length, 12);
     await migrate(db);

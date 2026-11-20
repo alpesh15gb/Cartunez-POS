@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart';
 import '../shell.dart';
 import '../theme.dart';
 import '../photos.dart';
@@ -498,7 +499,7 @@ bool setLineQuantity(BuildContext context, int index, int qty, {bool quiet = fal
     if (!quiet) app.toast('Sales are stopped for this part.');
     return false;
   }
-  if (line['binId'] != null && product?['type'] != 'service') {
+  if (line['binId'] != null && product?['type'] != 'service' && !_beyondStock(app, product)) {
     final max = app.available('${line['productId']}', '${line['binId']}');
     if (qty > max) {
       if (!quiet) app.toast('Only $max available in ${app.locationName('${line['binId']}')}.');
@@ -521,9 +522,12 @@ Future<void> addPart(BuildContext context, Json product) async {
     return;
   }
   final service = product['type'] == 'service';
-  final choices = app.sellableBins.where((b) => app.available('${product['id']}', '${b['id']}') > 0).toList();
+  final beyond = _beyondStock(app, product);
+  final stocked = app.sellableBins.where((b) => app.available('${product['id']}', '${b['id']}') > 0).toList();
+  // No stock showing: still sellable (stock goes negative until the purchase is entered).
+  final choices = stocked.isNotEmpty || !beyond ? stocked : _usualBins(app, product);
   if (!service && choices.isEmpty) {
-    app.toast('${product['name']} is out of stock.');
+    app.toast(beyond ? 'Add a sellable bin first (Inventory › Bins).' : '${product['name']} is out of stock.');
     return;
   }
   final vehicle = app.cart['vehicle'] as Map?;
@@ -562,7 +566,7 @@ Future<void> addPart(BuildContext context, Json product) async {
       final existing = lines.indexWhere((l) => l['productId'] == product['id'] && l['binId'] == binId);
       final already = existing >= 0 ? lines[existing]['qty'] as int : 0;
       if (qty + already > 9999) throw FormProblem('A sale line can contain at most 9999 units.');
-      if (binId != null && qty + already > app.available('${product['id']}', binId)) {
+      if (binId != null && !beyond && qty + already > app.available('${product['id']}', binId)) {
         throw FormProblem('Only ${app.available('${product['id']}', binId)} available in that bin.');
       }
       final serials = splitList(values['serials']);
@@ -637,9 +641,13 @@ void handleScan(BuildContext context, ShellController shell, String raw) {
     final vehicle = app.cart['vehicle'] as Map?;
     final needsOverride = vehicle != null && fitment(product, Map<String, dynamic>.from(vehicle)).needsOverride;
     final service = product['type'] == 'service';
-    final binChoices = app.sellableBins.where((bin) =>
+    var binChoices = app.sellableBins.where((bin) =>
         app.available('${product['id']}', '${bin['id']}') > 0 &&
         !lines.any((line) => line['productId'] == product['id'] && line['binId'] == bin['id'])).toList();
+    if (binChoices.isEmpty && !service && _beyondStock(app, product) &&
+        !lines.any((line) => line['productId'] == product['id'])) {
+      binChoices = _usualBins(app, product).take(1).toList();
+    }
     if (!needsOverride && (service || binChoices.length == 1)) {
       if (service && lines.any((line) => line['productId'] == product['id'])) {
         app.toast('A sale line can contain at most 9999 units.');
@@ -895,12 +903,21 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     super.initState();
     final app = context.appRead;
     tender = app.tenderTypes.contains('Cash') ? 'Cash' : app.tenderTypes.first;
-    secondTender = app.tenderTypes.firstWhere((t) => t != tender, orElse: () => tender);
+    secondTender = _types.firstWhere((t) => t != tender, orElse: () => tender);
     place = TextEditingController(
         text: '${app.customerById('${app.cart['customerId']}')?['stateCode'] ?? app.business['stateCode'] ?? ''}');
   }
 
   int _minor(String text) => parsePaymentAmount(text) ?? 0;
+
+  /// Payment types for this sale: "Credit" (on the customer's account) needs a chosen customer.
+  List<String> get _types {
+    final app = context.appRead;
+    final customer = app.customerById('${app.cart['customerId']}');
+    return [...app.tenderTypes, if (customer != null) 'Credit'];
+  }
+
+  static bool _external(String type) => type != 'Cash' && type != 'Credit';
 
   @override
   void dispose() {
@@ -916,7 +933,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     final app = context.appRead;
     final paid = _minor(amount.text) + (split ? _minor(second.text) : 0);
     final cash = (tender == 'Cash' ? _minor(amount.text) : 0) + (split && secondTender == 'Cash' ? _minor(second.text) : 0);
-    final nonCash = tender != 'Cash' || (split && secondTender != 'Cash');
+    final nonCash = _external(tender) || (split && _external(secondTender));
     setState(() => error = null);
     if (parsePaymentAmount(amount.text) == null || (split && (parsePaymentAmount(second.text) ?? 0) <= 0)) {
       return setState(() => error = 'Enter a valid amount for each payment, with up to two decimal places.');
@@ -928,7 +945,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     if (paid - widget.total > cash) return setState(() => error = 'Change can only be given from cash.');
     if (nonCash && confirmed) {
       for (final type in [tender, if (split) secondTender]) {
-        if (type != 'Cash' && references[type]!.text.trim().isEmpty) {
+        if (_external(type) && references[type]!.text.trim().isEmpty) {
           return setState(() => error = 'Enter the $type payment reference.');
         }
       }
@@ -937,9 +954,9 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
       return setState(() => error = 'Enter the two-digit place-of-supply state code.');
     }
     final tenders = [
-      {'type': tender, 'amount': _minor(amount.text), 'confirmed': tender == 'Cash' || confirmed, 'reference': references[tender]?.text.trim() ?? ''},
+      {'type': tender, 'amount': _minor(amount.text), 'confirmed': !_external(tender) || confirmed, 'reference': references[tender]?.text.trim() ?? ''},
       if (split && _minor(second.text) > 0)
-        {'type': secondTender, 'amount': _minor(second.text), 'confirmed': secondTender == 'Cash' || confirmed, 'reference': references[secondTender]?.text.trim() ?? ''},
+        {'type': secondTender, 'amount': _minor(second.text), 'confirmed': !_external(secondTender) || confirmed, 'reference': references[secondTender]?.text.trim() ?? ''},
     ];
     setState(() => busy = true);
     try {
@@ -958,7 +975,12 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
     final total = widget.total;
     final paid = _minor(amount.text) + (split ? _minor(second.text) : 0);
     final due = total - paid;
-    final nonCash = tender != 'Cash' || (split && secondTender != 'Cash');
+    final nonCash = _external(tender) || (split && _external(secondTender));
+    final types = _types;
+    if (secondTender == tender || !types.contains(secondTender)) {
+      secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
+    }
+    final customer = app.customerById('${app.cart['customerId']}');
     final quick = <int>{
       total,
       for (final step in [10000, 20000, 50000, 200000]) (total / step).ceil() * step,
@@ -978,17 +1000,17 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
               showSelectedIcon: false,
               style: SegmentedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
               segments: [
-                for (final t in app.tenderTypes)
+                for (final t in types)
                   ButtonSegment(
                     value: t,
                     label: Text(t),
-                    icon: Icon(t == 'Cash' ? Icons.payments_outlined : t == 'Card' ? Icons.credit_card : Icons.qr_code_2),
+                    icon: Icon(t == 'Cash' ? Icons.payments_outlined : t == 'Card' ? Icons.credit_card : t == 'Credit' ? Icons.menu_book_outlined : Icons.qr_code_2),
                   ),
               ],
               selected: {tender},
               onSelectionChanged: (v) => setState(() {
                 tender = v.first;
-                if (secondTender == tender) secondTender = app.tenderTypes.firstWhere((t) => t != tender, orElse: () => tender);
+                if (secondTender == tender) secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
                 confirmed = false;
                 for (final c in references.values) { c.clear(); }
               }),
@@ -1014,7 +1036,15 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
                   ),
               ]),
             ],
-            if (app.tenderTypes.length > 1)
+            if (tender == 'Credit' && customer != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  "Added to ${customer['name']}'s account (udhaar). Balance before this sale: ${app.money(app.partyBalance('customers', '${customer['id']}'))}.",
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            if (types.length > 1)
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
@@ -1033,7 +1063,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
                     key: ValueKey((tender, secondTender)),
                     initialValue: secondTender,
                     decoration: const InputDecoration(labelText: 'Second payment'),
-                    items: [for (final t in app.tenderTypes.where((t) => t != tender)) DropdownMenuItem(value: t, child: Text(t))],
+                    items: [for (final t in types.where((t) => t != tender)) DropdownMenuItem(value: t, child: Text(t))],
                     onChanged: (v) => setState(() => secondTender = v ?? secondTender),
                   ),
                 ),
@@ -1056,7 +1086,7 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
                 title: const Text('Payment confirmed by the card machine / UPI app'),
                 subtitle: const Text('If not yet confirmed, the sale waits in Sync & audit.'),
               ),
-              for (final type in {tender, if (split) secondTender}.where((type) => type != 'Cash'))
+              for (final type in {tender, if (split) secondTender}.where(_external))
                 TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference')),
             ],
             if (app.gst) ...[
@@ -1106,3 +1136,15 @@ class _CheckoutDialogState extends State<_CheckoutDialog> {
   }
 }
 
+
+/// Whether this part may be sold with no stock showing (Settings › Modules; never for serial-tracked parts).
+bool _beyondStock(AppState app, Json? product) => app.feature('negativeStock') && product?['serialTracked'] != true;
+
+/// Bins for a sale with no stock showing: where the part is usually kept, then the other sellable bins.
+List<Json> _usualBins(AppState app, Json product) {
+  final usual = app.list('stock').where((s) => s['productId'] == product['id']).map((s) => '${s['binId']}').toSet();
+  return [
+    ...app.sellableBins.where((b) => usual.contains(b['id'])),
+    ...app.sellableBins.where((b) => !usual.contains(b['id'])),
+  ];
+}

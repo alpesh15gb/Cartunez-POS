@@ -9,7 +9,7 @@ export async function shiftCashSummaries(db: Database, actor: Actor, shifts: Rec
   }]));
   const { rows } = await db.query(
     `SELECT kind, data FROM records WHERE organization_id=$1 AND branch_id=$2
-      AND kind IN ('invoice','return','coreReturn','cashMovement')
+      AND kind IN ('invoice','return','coreReturn','cashMovement','partyPayment')
       AND data->>'shiftId' = ANY($3::text[])`,
     [actor.organizationId, actor.branchId, [...totals.keys()]],
   );
@@ -20,6 +20,12 @@ export async function shiftCashSummaries(db: Database, actor: Actor, shifts: Rec
         if (tender.type === "Cash") cash.cashSales += tender.amount;
       }
       cash.cashSales -= data.change || 0;
+    } else if (kind === "partyPayment") {
+      // Cash paid to a supplier or received from a customer through this drawer.
+      if (!data.voided && data.mode === "Cash") {
+        if (data.direction === "in") cash.cashIn += data.amount;
+        else cash.cashOut += data.amount;
+      }
     } else if (kind === "cashMovement") {
       if (data.direction === "in") cash.cashIn += data.amount;
       else cash.cashOut += data.amount;

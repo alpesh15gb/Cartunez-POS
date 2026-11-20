@@ -4,7 +4,7 @@
 # the module, selects the theme and rebuilds. The shop shows Magento's
 # maintenance page for a few minutes. Only the cartunezshop project is touched.
 # Can be run again after changing the theme.
-set -euo pipefail
+set -Eeuo pipefail   # -E: the error trap also fires inside the helper functions
 die() { printf 'STOP: %s\n' "$*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die 'Run as root.'
 SRC="$(cd "$(dirname "$0")" && pwd)/storefront"

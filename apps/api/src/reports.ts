@@ -52,7 +52,7 @@ export async function report(
   const productFiltered = !!(filters.category || filters.supplierId || filters.sku);
   if (name === "tenders" && productFiltered)
     fail("Tender amounts are recorded per invoice. Remove part filters to reconcile payments.");
-  if (filters.paymentType && !["Cash", "Card", "UPI"].includes(filters.paymentType))
+  if (filters.paymentType && !["Cash", "Card", "UPI", "Credit"].includes(filters.paymentType))
     fail("Choose a supported payment method.");
   const products = await records(db, actor.organizationId, "product");
   const byProduct = new Map(products.map(p => [p.id, p]));
@@ -304,7 +304,8 @@ export async function report(
     rows = (await records(db, actor.organizationId, "cashMovement", actor.branchId))
       .filter(entry => inDate(entry.createdAt) && (!filters.cashier || entry.userId === filters.cashier));
   } else if (name === "tenders")
-    rows = ["Cash", "Card", "UPI"]
+    // "Credit" = sold on customers' accounts (not money collected).
+    rows = ["Cash", "Card", "UPI", "Credit"]
       .filter((type) => !filters.paymentType || filters.paymentType === type)
       .map((type) => {
         const collected = sales.reduce(

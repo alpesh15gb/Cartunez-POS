@@ -5,6 +5,7 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../shell.dart';
 import '../widgets.dart';
+import 'bills.dart';
 import 'labels.dart';
 
 class OrdersScreen extends StatelessWidget {
@@ -27,7 +28,7 @@ class OrdersScreen extends StatelessWidget {
       DataList(
         rows: app.list('purchaseOrders').reversed.toList(),
         empty: 'No purchase orders yet.',
-        actionWidth: 158,
+        actionWidth: 170,
         columns: [
           Col('Created', (o) => Text(formatDate(o['createdAt']))),
           Col('Supplier', (o) => Text('${app.list('suppliers').where((s) => s['id'] == o['supplierId']).firstOrNull?['name'] ?? '—'}',
@@ -37,7 +38,7 @@ class OrdersScreen extends StatelessWidget {
           Col('Status', (o) => StatusChip(titleCase('${o['status']}'))),
         ],
         actions: (o) => [
-          if (o['status'] != 'received') FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => receiveOrder(context, o), child: const Text('Receive')),
+          if (o['status'] != 'received') FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => enterBill(context, order: o), child: const Text('Enter bill')),
           if ((o['lines'] as List).any((line) => (line['received'] ?? 0) > 0))
             IconButton(tooltip: 'Print receipt labels', icon: const Icon(Icons.print_outlined),
                 onPressed: () => _receiptLabels(context, o)),

@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- Checkout runs with a strict content security policy; the storefront script is not needed there. -->
+        <referenceBlock name="cartunez.scripts" remove="true"/>
+    </body>
+</page>

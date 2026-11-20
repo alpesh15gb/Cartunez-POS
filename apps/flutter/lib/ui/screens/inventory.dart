@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
@@ -109,7 +111,8 @@ Future<void> restorePart(BuildContext context) async {
   );
 }
 
-Future<void> editProduct(BuildContext context, Json product) async {
+/// [onSaved] gets the saved part (used when a new item is created from a purchase bill).
+Future<void> editProduct(BuildContext context, Json product, {void Function(Json saved)? onSaved}) async {
   final app = context.appRead;
   final counts = <int, int>{};
   for (final p in app.products) {
@@ -121,25 +124,29 @@ Future<void> editProduct(BuildContext context, Json product) async {
   String? money(String key) => product[key] == null ? null : ((product[key] as int) / 100).toStringAsFixed(2);
   String joined(String key) => (product[key] as List? ?? []).join(', ');
   final fitmentOn = app.feature('fitment');
+  // Photos taken or chosen in the form; uploaded after the part is saved.
+  final pendingPhotos = <({Uint8List bytes, int width, int height})>[];
   await showFormDialog<void>(
     context,
     title: product['id'] == null ? 'Add part' : 'Edit ${product['name']}',
+    header: PendingPartPhotos(photos: pendingPhotos),
     fields: [
       FieldSpec('name', 'Part name', value: product['name'], required: true),
-      FieldSpec('sku', 'SKU / item code', value: product['sku'], required: true),
+      FieldSpec('sku', 'SKU / item code', value: product['sku'], required: product['id'] != null,
+          help: product['id'] == null ? 'Leave blank to create one automatically.' : null),
       if (product['id'] != null && app.isManager)
         FieldSpec('salesAction', 'New sales', kind: FieldKind.select, value: 'keep', options: [
           ('keep', product['salesStopped'] == true ? 'Sales stopped' : 'Available for sale'),
           if (product['salesStopped'] == true) ('resume', 'Resume sales') else ('stop', 'Stop new sales'),
         ]),
-      FieldSpec('brand', 'Brand', value: product['brand'], required: true),
+      FieldSpec('brand', 'Brand', value: product['brand']),
       FieldSpec('category', 'Category',
-          value: product['category'], required: true, suggestions: {...app.products.map((p) => '${p['category']}')}.toList()),
+          value: product['category'], suggestions: {...app.products.map((p) => '${p['category']}')}.toList()),
       FieldSpec('partNumber', 'Manufacturer part number', value: product['partNumber']),
       FieldSpec('barcodes', 'Barcodes', value: joined('barcodes'), help: 'Scan into this field or separate codes with commas. Leave empty to generate one.', barcodeInput: true),
       FieldSpec('retailPrice', 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
       FieldSpec('wholesalePrice', 'Wholesale price', kind: FieldKind.money, value: money('wholesalePrice'), help: 'Blank uses the retail price.'),
-      FieldSpec('cost', 'Purchase cost', kind: FieldKind.money, value: money('cost'), required: true),
+      FieldSpec('cost', 'Purchase cost', kind: FieldKind.money, value: money('cost'), help: 'Optional. Supplier bills update it.'),
       FieldSpec('taxRate', 'Tax rate (%)', kind: FieldKind.money, value: ((product['taxRate'] ?? commonRate) as int) / 100, required: true),
       FieldSpec('hsnSac', 'HSN / SAC', value: product['hsnSac'], advanced: !app.gst, required: app.gst),
       FieldSpec('reorderLevel', 'Reorder when stock falls to', kind: FieldKind.number, value: product['reorderLevel'] ?? 0),
@@ -195,7 +202,7 @@ Future<void> editProduct(BuildContext context, Json product) async {
         'barcodes': barcodes,
         'retailPrice': retail,
         'wholesalePrice': '${v['wholesalePrice']}'.isEmpty ? retail : _minor(v['wholesalePrice']),
-        'cost': _minor(v['cost']),
+        'cost': '${v['cost'] ?? ''}'.trim().isEmpty && product['id'] != null ? (product['cost'] ?? 0) : _minor(v['cost']),
         'coreCharge': _minor(v['coreCharge']),
         'taxRate': _minor(v['taxRate']),
         'reorderLevel': int.tryParse('${v['reorderLevel']}') ?? 0,
@@ -206,7 +213,18 @@ Future<void> editProduct(BuildContext context, Json product) async {
         for (final k in ['oemReferences', 'supplierReferences', 'supersedes', 'interchanges']) k: splitList(v[k]),
       }..remove('generateBarcode');
       if (body['salesAction'] == 'keep') body.remove('salesAction');
-      await app.mutate('/products', body, created == null ? 'Part saved.' : 'Part saved with barcode $created.');
+      final saved = await app.mutate('/products', body, created == null ? 'Part saved.' : 'Part saved with barcode $created.');
+      if (saved is Map) {
+        if (pendingPhotos.isNotEmpty) {
+          try {
+            await uploadPartPhotos(app, '${saved['id']}', pendingPhotos);
+            await app.sync();
+          } catch (e) {
+            app.toast('Part saved, but a photo could not be uploaded. Add it from Photos. ${errorText(e)}');
+          }
+        }
+        onSaved?.call(Map<String, dynamic>.from(saved));
+      }
     },
   );
 }

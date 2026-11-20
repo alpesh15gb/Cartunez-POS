@@ -259,8 +259,14 @@ export async function pollMagentoOrders(db: Database, options: { fetch?: Fetch; 
         const result = await magentoRequest(fetchImpl, config.baseUrl, secret.token, "GET", `/all/V1/orders?${q}`);
         const items: any[] = result?.items || [];
         for (const mg of items) {
-          await importMagentoOrder(db, org, config.branchId, mg);
-          imported++;
+          // One order that cannot be read is reported, but does not hold up the others.
+          try {
+            await importMagentoOrder(db, org, config.branchId, mg);
+            imported++;
+          } catch (e: any) {
+            const message = e instanceof MagentoError ? e.message : String(e?.message || e);
+            error = `Order ${mg.increment_id ?? mg.entity_id}: ${message}`;
+          }
           const at = isoDate(mg.updated_at);
           if (at > since) since = at;
         }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Cartunez\Storefront\Block;
 
 use Magento\Catalog\Model\Category;
+use Magento\Catalog\Model\Product;
+use Magento\Framework\App\ResourceConnection;
 use Magento\Catalog\Model\ResourceModel\Category\CollectionFactory;
 use Magento\Framework\DataObject\IdentityInterface;
 use Magento\Framework\View\Element\Template;
@@ -19,10 +21,13 @@ class BrandCards extends Template implements IdentityInterface
     /** @var array<int, array{name: string, url: string, image: ?string, count: int, id: int}>|null */
     private ?array $brands = null;
     private int $parentId = 0;
+    /** @var int[] every brand category, also those without parts (for cache tags) */
+    private array $childIds = [];
 
     public function __construct(
         Context $context,
         private readonly CollectionFactory $categories,
+        private readonly ResourceConnection $resource,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -53,11 +58,12 @@ class BrandCards extends Template implements IdentityInterface
             ->addAttributeToSelect(['name', 'image', 'url_key', 'url_path'])
             ->addIsActiveFilter()
             ->addFieldToFilter('parent_id', $this->parentId)
-            ->setLoadProductCount(true)
             ->setOrder('name', 'ASC');
+        $this->childIds = array_map('intval', $children->getAllIds());
+        $counts = $this->visibleCounts((int)$store->getId(), $this->childIds);
         /** @var Category $brand */
         foreach ($children as $brand) {
-            $count = (int)$brand->getProductCount();
+            $count = $counts[(int)$brand->getId()] ?? 0;
             if ($count < 1) {
                 continue;
             }
@@ -78,6 +84,33 @@ class BrandCards extends Template implements IdentityInterface
         return $this->brands;
     }
 
+    /**
+     * Parts shown in each brand: enabled and visible products only, from Magento's
+     * category product index for this store (updated by the indexer cron).
+     *
+     * @param int[] $categoryIds
+     * @return array<int, int>
+     */
+    private function visibleCounts(int $storeId, array $categoryIds): array
+    {
+        if (!$categoryIds) {
+            return [];
+        }
+        $db = $this->resource->getConnection();
+        $table = $this->resource->getTableName('catalog_category_product_index_store' . $storeId);
+        if (!$db->isTableExists($table)) {
+            return [];
+        }
+        $rows = $db->fetchPairs(
+            $db->select()
+                ->from($table, ['category_id', 'n' => new \Zend_Db_Expr('COUNT(DISTINCT product_id)')])
+                ->where('category_id IN (?)', $categoryIds)
+                ->where('visibility IN (?)', [2, 4])
+                ->group('category_id')
+        );
+        return array_map('intval', $rows);
+    }
+
     /** Up to two letters for a brand without a logo ("Bosch" -> "BO", "Motorline Demo" -> "MD"). */
     public function initials(string $name): string
     {
@@ -92,11 +125,10 @@ class BrandCards extends Template implements IdentityInterface
     {
         $tags = [Category::CACHE_TAG];
         $this->getBrands();
-        if ($this->parentId) {
-            $tags[] = Category::CACHE_TAG . '_' . $this->parentId;
-        }
-        foreach ($this->getBrands() as $brand) {
-            $tags[] = Category::CACHE_TAG . '_' . $brand['id'];
+        // Product assignments clean "cat_c_p_<id>"; category edits clean "cat_c_<id>".
+        foreach (array_merge($this->parentId ? [$this->parentId] : [], $this->childIds) as $categoryId) {
+            $tags[] = Category::CACHE_TAG . '_' . $categoryId;
+            $tags[] = Product::CACHE_PRODUCT_CATEGORY_TAG . '_' . $categoryId;
         }
         return $tags;
     }

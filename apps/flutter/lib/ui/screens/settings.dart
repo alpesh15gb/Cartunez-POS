@@ -13,6 +13,7 @@ const _featureLabels = {
   'transfers': 'Branch transfers',
   'warranty': 'Warranty & cores',
   'onlineStore': 'Online store (Magento)',
+  'negativeStock': 'Sell parts even when stock shows zero',
 };
 
 class SettingsScreen extends StatelessWidget {

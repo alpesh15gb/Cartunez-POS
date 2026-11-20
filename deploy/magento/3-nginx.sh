@@ -60,6 +60,15 @@ fi
 install -m 640 -o root -g www-data "$CONF/htpasswd" "$HTPASSWD"
 
 echo '== Step B: HTTPS site'
+# After launch (5-launch.sh typed LIVE) the shop stays public when this script is run again.
+if [[ -e "$CONF/live" ]]; then
+  staging="    # Live shop: no staging password."
+else
+  staging="    # Staging: private and hidden from search engines. 5-launch.sh removes these at launch.
+    add_header X-Robots-Tag \"noindex, nofollow\" always;
+    auth_basic \"Cartunez shop (staging)\";
+    auth_basic_user_file $HTPASSWD;"
+fi
 proxy="proxy_pass http://$UPSTREAM;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -83,11 +92,10 @@ server {
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
     client_max_body_size 32m;
+    # Compression settings from 6-speed.sh (the pattern matches nothing until it has run).
+    include snippets/cartunez-shop-speed*.conf;
 
-    # Staging: private and hidden from search engines. Remove these three lines at launch.
-    add_header X-Robots-Tag \"noindex, nofollow\" always;
-    auth_basic \"Cartunez shop (staging)\";
-    auth_basic_user_file $HTPASSWD;
+$staging
 
     # The POS talks to Magento's REST API with its own token, so no staging password here.
     location /rest/ {

@@ -7,7 +7,7 @@ import '../core/api.dart';
 import '../core/billing.dart';
 import '../core/store.dart';
 
-const allFeatures = ['transfers', 'fitment', 'warranty', 'onlineStore'];
+const allFeatures = ['transfers', 'fitment', 'warranty', 'onlineStore', 'negativeStock'];
 
 Json emptyCart() => {
       'transactionId': uuid(),
@@ -205,6 +205,30 @@ class AppState extends ChangeNotifier {
       list('productImages').where((i) => i['productId'] == productId).toList()..sort((a, b) => ((a['position'] as num?) ?? 0).compareTo((b['position'] as num?) ?? 0));
 
   final _photoCache = <String, Future<Uint8List>>{};
+
+  /// A supplier-bill photo or PDF, downloaded once per app session.
+  Future<Uint8List> fileBytes(String fileId) {
+    final s = session;
+    if (s == null) return Future.error(ApiError('Sign in to continue.', 401));
+    return _photoCache.putIfAbsent('file:$fileId', () async {
+      try {
+        return Uint8List.fromList(await fetchBytes(s.api, s.token, '/attachments/$fileId'));
+      } catch (e) {
+        _photoCache.remove('file:$fileId');
+        rethrow;
+      }
+    });
+  }
+
+  /// What we owe a supplier, or what a customer owes us (negative = advance).
+  int partyBalance(String kind, String? id) {
+    final all = snapshot['partyBalances'];
+    if (all is! Map || id == null) return 0;
+    final map = all[kind];
+    return map is Map ? ((map[id] as num?) ?? 0).toInt() : 0;
+  }
+
+  Json? supplierById(String? id) => list('suppliers').where((s) => s['id'] == id).firstOrNull;
 
   /// A photo's bytes, downloaded once per app session (photo IDs never change).
   Future<Uint8List> photoBytes(String imageId) {
@@ -637,6 +661,10 @@ class AppState extends ChangeNotifier {
     for (final movement in list('cashMovements').where((m) => m['shiftId'] == shift['id'])) {
       final amount = movement['amount'] as int;
       cash += movement['direction'] == 'in' ? amount : -amount;
+    }
+    for (final payment in list('partyPayments').where((p) => p['shiftId'] == shift['id'] && p['mode'] == 'Cash' && p['voided'] != true)) {
+      final amount = (payment['amount'] as num).toInt();
+      cash += payment['direction'] == 'in' ? amount : -amount;
     }
     return cash;
   }

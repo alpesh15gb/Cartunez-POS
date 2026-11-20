@@ -23,6 +23,7 @@
 
         <!-- Less clutter for a parts shop. -->
         <referenceBlock name="report.bugs" remove="true"/>
+        <referenceBlock name="privacy-policy-link" remove="true"/>
         <referenceBlock name="catalog.compare.sidebar" remove="true"/>
         <referenceBlock name="wishlist_sidebar" remove="true"/>
     </body>

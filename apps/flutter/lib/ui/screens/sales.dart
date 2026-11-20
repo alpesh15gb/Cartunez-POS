@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart';
 import '../shell.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -101,8 +102,8 @@ Future<void> returnInvoice(BuildContext context, Json invoice) async {
       FieldSpec('refundType', 'Refund by',
           kind: FieldKind.select,
           required: true,
-          value: (invoice['tenders'] as List?)?.firstOrNull?['type'] ?? 'Cash',
-          options: [for (final t in app.tenderTypes) (t, t)]),
+          value: _refundDefault(invoice),
+          options: _refundOptions(app, invoice)),
       const FieldSpec('serials', 'Serial numbers', advanced: true, help: 'Serial-tracked parts only, separated by commas.'),
       if (!app.isManager) FieldSpec('approvalId', 'Manager approval ID', required: true, help: 'Reference $transactionId'),
     ],
@@ -139,8 +140,8 @@ Future<void> voidInvoice(BuildContext context, Json invoice) async {
       FieldSpec('refundType', 'Refund by',
           kind: FieldKind.select,
           required: true,
-          value: (invoice['tenders'] as List?)?.firstOrNull?['type'] ?? 'Cash',
-          options: [for (final t in app.tenderTypes) (t, t)]),
+          value: _refundDefault(invoice),
+          options: _refundOptions(app, invoice)),
     ],
     onSubmit: (v) async {
       final result = await app.mutate('/invoices/${invoice['id']}/void', v) as Map;
@@ -265,3 +266,15 @@ Future<void> closeShift(BuildContext context, Json shift) async {
     },
   );
 }
+
+/// A sale on credit is refunded to the customer's account by default.
+String _refundDefault(Json invoice) {
+  final tenders = (invoice['tenders'] as List? ?? []);
+  if (tenders.any((t) => t['type'] == 'Credit')) return 'Credit';
+  return '${tenders.firstOrNull?['type'] ?? 'Cash'}';
+}
+
+List<(String, String)> _refundOptions(AppState app, Json invoice) => [
+      for (final t in app.tenderTypes) (t, t),
+      if (invoice['customerId'] != null) ('Credit', "Customer's account (reduce udhaar)"),
+    ];

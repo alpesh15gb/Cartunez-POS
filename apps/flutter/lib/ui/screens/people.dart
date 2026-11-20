@@ -4,6 +4,7 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../shell.dart';
 import '../widgets.dart';
+import 'bills.dart';
 
 Future<void> editContact(BuildContext context, String kind, Json contact, {void Function(Json saved)? onSaved}) async {
   final app = context.appRead;
@@ -21,8 +22,24 @@ Future<void> editContact(BuildContext context, String kind, Json contact, {void 
       FieldSpec('taxRegistrationId', 'GSTIN / tax registration', value: contact['taxRegistrationId'], advanced: !gst),
       FieldSpec('stateCode', 'State code',
           value: contact['stateCode'], advanced: !gst, help: gst ? 'Two digits, for example 27 for Maharashtra.' : null),
+      if (app.isManager)
+      FieldSpec('openingBalance', kind == 'customers' ? 'Old balance they owe you' : 'Old balance you owe them',
+          value: ((contact['openingBalance'] ?? 0) as num) % 100 == 0
+              ? '${((contact['openingBalance'] ?? 0) as num) ~/ 100}'
+              : (((contact['openingBalance'] ?? 0) as num) / 100).toStringAsFixed(2),
+          advanced: contact['id'] != null,
+          help: 'From before using the POS, in rupees. Use a minus sign for an advance.'),
     ],
     onSubmit: (values) async {
+      if (app.isManager) {
+        final opening = double.tryParse('${values['openingBalance'] ?? '0'}'.trim().isEmpty ? '0' : '${values['openingBalance']}'.trim());
+        if (opening == null) throw FormProblem('Enter the old balance as a number, for example 1500 or -200.');
+        values['openingBalance'] = (opening * 100).round();
+        // Dated once, so it stays before the bills and sales that follow.
+        if ('${contact['openingDate'] ?? ''}'.isEmpty && values['openingBalance'] != 0) {
+          values['openingDate'] = DateTime.now().toIso8601String().substring(0, 10);
+        }
+      }
       final saved = await app.mutate('/$kind', {...contact, ...values}, '${titleCase(noun)} saved.');
       onSaved?.call(Map<String, dynamic>.from(saved as Map));
     },
@@ -49,16 +66,25 @@ class ContactsScreen extends StatelessWidget {
               icon: const Icon(Icons.add),
               label: Text(kind == 'customers' ? 'Add customer' : 'Add supplier'),
             ),
+            Builder(builder: (context) {
+              final total = rows.fold<int>(0, (n, r) => n + app.partyBalance(kind, '${r['id']}'));
+              if (total == 0) return const SizedBox.shrink();
+              return Text(kind == 'customers' ? 'Customers owe you ${app.money(total)} in total' : 'You owe suppliers ${app.money(total)} in total',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: balanceColor(total)));
+            }),
           ]),
           DataList(
             rows: rows,
             empty: kind == 'customers' ? 'No customers yet. Walk-in sales need none.' : 'No suppliers yet.',
-            onTap: (row) => editContact(context, kind, row),
+            onTap: (row) => showLedger(context, kind, row),
             columns: [
               Col('Name', (r) => Text('${r['name']}'), flex: 2),
               Col('Phone', (r) => Text('${r['phone'] ?? '—'}')),
-              Col('Email', (r) => Text('${(r['email'] ?? '').toString().isEmpty ? '—' : r['email']}'), flex: 2),
               Col('GSTIN', (r) => Text('${(r['taxRegistrationId'] ?? '').toString().isEmpty ? '—' : r['taxRegistrationId']}')),
+              Col('Balance', (r) {
+                final balance = app.partyBalance(kind, '${r['id']}');
+                return Text(balanceText(app, kind, balance), style: TextStyle(color: balanceColor(balance), fontWeight: FontWeight.w700));
+              }, numeric: true),
             ],
           ),
         ]);

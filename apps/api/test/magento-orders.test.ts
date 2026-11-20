@@ -80,6 +80,8 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     };
     const login = async (email: string) => (await call("auth/login", { email, password: "MotorlineDemo123!" })).token;
     const owner = await login("owner@motorline.local");
+    // Strict stock for these checks (selling beyond stock switched off).
+    await call("settings", { features: { negativeStock: false } }, owner);
     const cashier = await login("cashier@motorline.local");
     const boot = async (token: string) =>
       (await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { authorization: "Bearer " + token } })).json();

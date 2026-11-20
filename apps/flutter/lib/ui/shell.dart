@@ -8,6 +8,7 @@ import '../state/app_state.dart';
 import 'barcode_scan.dart';
 import 'login.dart';
 import 'screens/billing.dart';
+import 'screens/bills.dart';
 import 'screens/dashboard.dart';
 import 'screens/inventory.dart';
 import 'screens/online.dart';
@@ -51,7 +52,7 @@ final areas = <Area>[
     TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', () => const ShiftsScreen()),
   ]),
   Area('Customers', Icons.people_outline, [
-    TabDef('customers', 'Customers', _sellers, 'Saved customers for receipts and GST invoices.',
+    TabDef('customers', 'Customers', _sellers, 'Customers, credit (udhaar) balances and payments received.',
         () => const ContactsScreen(kind: 'customers')),
   ]),
   Area('Inventory', Icons.inventory_2_outlined, [
@@ -70,8 +71,10 @@ final areas = <Area>[
         () => const OnlineOrdersScreen(), feature: 'onlineStore'),
   ]),
   Area('Purchasing', Icons.local_shipping_outlined, [
-    TabDef('orders', 'Orders', _stock, 'Order from suppliers and receive goods into bins.', () => const OrdersScreen()),
-    TabDef('suppliers', 'Suppliers', _stock, 'Companies you buy parts from.', () => const ContactsScreen(kind: 'suppliers')),
+    TabDef('bills', 'Supplier bills', _stock, 'Enter what suppliers deliver: items, cost, photo of their note. Adds stock and the supplier balance.',
+        () => const BillsScreen()),
+    TabDef('orders', 'Purchase orders', _stock, 'Order from suppliers; enter the bill when the goods arrive.', () => const OrdersScreen()),
+    TabDef('suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.', () => const ContactsScreen(kind: 'suppliers')),
   ]),
   Area('Dashboard', Icons.insights_outlined, [
     TabDef('dashboard', 'Dashboard', _everyone, 'Today at a glance.', () => const DashboardScreen()),

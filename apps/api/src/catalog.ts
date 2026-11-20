@@ -1,18 +1,18 @@
 import { parse } from "csv-parse/sync";
+import { randomInt } from "node:crypto";
 import { id, integer, fail, text, normalize, barcodeKey } from "./domain.js";
 import type { RecordData } from "./db.js";
 
 export function buildProduct(value: RecordData, productId = id("part")) {
   const product: any = { id: productId };
-  for (const key of [
-    "name",
-    "sku",
-    "brand",
-    "partNumber",
-    "category",
-    "unit",
-  ])
-    product[key] = text(value[key] ?? "", key, key !== "partNumber");
+  // Only the name is required. A blank SKU gets an item code (CT-12345678);
+  // brand, category and unit may be filled in later.
+  product.name = text(value.name ?? "", "name");
+  for (const key of ["sku", "brand", "partNumber", "category", "unit"])
+    product[key] = text(value[key] ?? "", key, false);
+  if (!product.sku) product.sku = `CT-${randomInt(10000000, 100000000)}`;
+  if (!product.unit) product.unit = "Each";
+  if (!product.category) product.category = "General";
   product.description = text(
     value.description || "",
     "description",
@@ -27,7 +27,8 @@ export function buildProduct(value: RecordData, productId = id("part")) {
     "coreCharge",
     "reorderLevel",
   ])
-    product[key] = integer(value[key] ?? 0, key);
+    // Blank (for example an unknown purchase price) counts as zero.
+    product[key] = integer(value[key] === "" || value[key] == null ? 0 : value[key], key);
   product.taxRate = integer(value.taxRate ?? 1800, "Tax rate", 0, 10000);
   product.packSize = integer(value.packSize ?? 1, "Pack size", 1, 9999);
   for (const key of [
@@ -61,6 +62,8 @@ export class CatalogCodes {
   private skus = new Map<string, string>();
   private barcodes = new Map<string, string>();
   private normalizedBarcodes = new Map<string, string>();
+  /** Name + brand, to stop a CSV without SKUs from adding the same parts twice. */
+  readonly names = new Map<string, string>();
 
   constructor(products: RecordData[]) {
     for (const product of products) this.add(product);
@@ -68,6 +71,7 @@ export class CatalogCodes {
 
   add(product: RecordData) {
     this.skus.set(normalize(product.sku), product.name);
+    this.names.set(normalize(`${product.name}|${product.brand || ""}`), product.sku);
     for (const code of product.barcodes || []) {
       this.barcodes.set(barcodeKey(code), product.name);
       this.normalizedBarcodes.set(normalize(code), product.name);
@@ -87,8 +91,8 @@ export class CatalogCodes {
   }
 }
 
-const required = ["sku", "name", "brand", "category", "unit", "cost", "retailPrice", "taxPercent"];
-const optional = ["barcodes", "wholesalePrice", "hsnSac", "partNumber", "reorderLevel", "serialTracked", "universal", "type"];
+const required = ["name", "retailPrice"];
+const optional = ["sku", "brand", "category", "unit", "cost", "taxPercent", "barcodes", "wholesalePrice", "hsnSac", "partNumber", "reorderLevel", "serialTracked", "universal", "type"];
 const headerNames = new Map([...required, ...optional].map((name) => [name.toLowerCase(), name]));
 
 function hundredths(value: string, label: string) {
@@ -135,17 +139,21 @@ export function previewCatalog(csv: unknown, codes: CatalogCodes, gst: boolean) 
       for (const code of barcodes) {
         if (/^\d{13}$/.test(code) && barcodeKey(code).length !== 14) fail("Invalid EAN-13 check digit.");
       }
+      if (!input.sku) {
+        const existing = codes.names.get(normalize(`${input.name}|${input.brand || ""}`));
+        if (existing) fail(`${input.name} already exists (SKU ${existing}). Add a sku column to update parts, or remove this row.`, 409);
+      }
       const product = buildProduct({
-        ...input, barcodes, cost: hundredths(input.cost, "cost"), retailPrice: hundredths(input.retailPrice, "retail price"),
+        ...input, barcodes, cost: input.cost ? hundredths(input.cost, "cost") : 0, retailPrice: hundredths(input.retailPrice, "retail price"),
         wholesalePrice: hundredths(input.wholesalePrice || input.retailPrice, "wholesale price"),
-        taxRate: hundredths(input.taxPercent, "tax rate"), reorderLevel: input.reorderLevel || 0,
+        taxRate: input.taxPercent ? hundredths(input.taxPercent, "tax rate") : undefined, reorderLevel: input.reorderLevel || 0,
         serialTracked: flag(input.serialTracked, "serial tracking"), universal: flag(input.universal, "universal fit"),
       });
       if (product.type === "service" && product.serialTracked) fail("A service cannot track serial numbers.");
       codes.check(product);
       codes.add(product);
       products.push(product);
-      rows.push({ ...row, retailPrice: product.retailPrice });
+      rows.push({ ...row, sku: product.sku, retailPrice: product.retailPrice });
     } catch (error: any) {
       if (![400, 409].includes(error.statusCode)) throw error;
       rows.push({ ...row, error: error.message });

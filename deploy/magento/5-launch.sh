@@ -7,7 +7,7 @@
 #              you type LIVE) the staging password removed.
 # Safe to run again: it asks before changing what you set last time.
 # Only the cartunezshop project and its own Nginx site are touched.
-set -euo pipefail
+set -Eeuo pipefail
 die() { printf 'STOP: %s\n' "$*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die 'Run as root.'
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -82,16 +82,19 @@ set_ carriers/tablerate/sallowspecific 0
 set_ carriers/tablerate/sort_order 1
 website=$(sql "SELECT website_id FROM store_website WHERE code='base'" | tr -d '[:space:]')
 [[ -n "$website" ]] || die 'The main website was not found.'
-sql "DELETE FROM shipping_tablerate WHERE website_id=${website};
+sql "START TRANSACTION;
+DELETE FROM shipping_tablerate WHERE website_id=${website};
 INSERT INTO shipping_tablerate (website_id,dest_country_id,dest_region_id,dest_zip,condition_name,condition_value,price,cost) VALUES
  (${website},'IN',0,'*','package_value_with_discount',0,${DELIVERY_FEE},0),
- (${website},'IN',0,'*','package_value_with_discount',${FREE_ABOVE},0,0);"
+ (${website},'IN',0,'*','package_value_with_discount',${FREE_ABOVE},0,0);
+COMMIT;"
 
 echo "== Email through Gmail as ${MAIL_FROM}"
 set_ system/smtp/disable 0
 set_ system/smtp/transport smtp
 set_ system/smtp/host smtp.gmail.com
-set_ system/smtp/port 587
+# Magento's "ssl tls" is implicit TLS (SMTPS), which Gmail serves on port 465.
+set_ system/smtp/port 465
 set_ system/smtp/auth login
 set_ system/smtp/ssl tls
 set_ system/smtp/username "$MAIL_FROM"
@@ -120,7 +123,7 @@ mage cache:flush >/dev/null
 
 echo '== Nightly shop backup (database, photos, settings) at 02:30'
 install -m 755 "$HERE/backup.sh" /usr/local/sbin/cartunez-shop-backup
-printf '30 2 * * * root /usr/local/sbin/cartunez-shop-backup >>/var/log/cartunez-shop-backup.log 2>&1\n' > /etc/cron.d/cartunez-shop-backup
+printf 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\n30 2 * * * root /usr/local/sbin/cartunez-shop-backup >>/var/log/cartunez-shop-backup.log 2>&1\n' > /etc/cron.d/cartunez-shop-backup
 chmod 644 /etc/cron.d/cartunez-shop-backup
 /usr/local/sbin/cartunez-shop-backup || die 'The first backup failed; see the message above.'
 
@@ -134,6 +137,8 @@ if grep -q 'auth_basic_user_file' "$SITE"; then
       -e '/auth_basic_user_file /d' -e '/# Staging: private/d' "$SITE"
     if nginx -t; then
       systemctl reload nginx
+      # Remembered so 3-nginx.sh never puts the staging password back.
+      touch "$CONF/live"
       echo 'The shop is open to everyone: https://shop.cartunez.in'
     else
       cp "$CONF/nginx-staging.conf.bak" "$SITE"

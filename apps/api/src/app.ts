@@ -38,6 +38,7 @@ import { buildProduct, CatalogCodes, previewCatalog } from "./catalog.js";
 import { magentoRoutes } from "./magento.js";
 import { magentoOrderRoutes } from "./magento-orders.js";
 import { productImageRoutes, productImages } from "./product-images.js";
+import { partyBalances, purchasingRoutes } from "./purchasing.js";
 import { magentoCheckRoutes } from "./magento-check.js";
 import { queueMagentoSync } from "./online-queue.js";
 import { runtimeConfig } from "./config.js";
@@ -290,6 +291,21 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       ? await records(db, actor.organizationId, "onlineListing")
       : [];
     data.productImages = await productImages(db, actor.organizationId);
+    // Purchasing and party balances (customer balances are for everyone who sells).
+    const stockRole = actor.role !== "cashier";
+    data.purchaseBills = stockRole
+      ? (await records(db, actor.organizationId, "purchaseBill", actor.branchId)).slice(-500)
+      : [];
+    data.purchaseReturns = stockRole
+      ? (await records(db, actor.organizationId, "purchaseReturn", actor.branchId)).slice(-300)
+      : [];
+    data.partyPayments = (await records(db, actor.organizationId, "partyPayment"))
+      .filter((p) => stockRole || p.partyKind === "customer")
+      .slice(-500);
+    data.partyBalances = {
+      customers: await partyBalances(db, actor.organizationId, "customer"),
+      suppliers: stockRole ? await partyBalances(db, actor.organizationId, "supplier") : {},
+    };
     data.onlineOrders = ["owner", "manager"].includes(actor.role)
       ? (await records(db, actor.organizationId, "onlineOrder", actor.branchId)).slice(-300)
       : [];
@@ -483,6 +499,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   magentoRoutes(app, db, post, () => options.fetch || globalThis.fetch);
   magentoOrderRoutes(app, db, post, () => options.fetch || globalThis.fetch);
   productImageRoutes(app, db, post);
+  purchasingRoutes(app, db, post);
   magentoCheckRoutes(app, db, () => options.fetch || globalThis.fetch);
   post("settings", async (tx, actor, body) => {
     allow(actor, ["owner"]);
@@ -621,7 +638,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         fail("Choose which modules are switched on.");
       const features: Record<string, boolean> = { ...(settings.features || {}) };
       for (const [key, value] of Object.entries(body.features)) {
-        if (!["transfers", "fitment", "offline", "warranty", "onlineStore"].includes(key))
+        if (!["transfers", "fitment", "offline", "warranty", "onlineStore", "negativeStock"].includes(key))
           fail("Unknown module.");
         if (typeof value !== "boolean") fail("Module switches must be on or off.");
         features[key] = value;
@@ -657,7 +674,10 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     const existing = body.id
       ? await scoped(tx, actor, "product", body.id)
       : undefined;
-    const product = buildProduct({ ...existing, ...body }, existing?.id);
+    // A blank SKU only creates a new item code for a new part; edits keep the existing SKU.
+    const input = { ...existing, ...body };
+    if (existing && !String(body.sku ?? "").trim()) input.sku = existing.sku;
+    const product = buildProduct(input, existing?.id);
     // Only an explicit manager action changes sale status, including on older-client edits.
     if (existing?.salesStopped) product.salesStopped = true;
     if (body.salesAction !== undefined) {
@@ -775,7 +795,16 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         stateCode: text(body.stateCode || "", "state code", false, 50),
         vehicle: body.vehicle || null,
       };
-      if (body.id) await scoped(tx, actor, kind, body.id);
+      const saved = body.id ? await scoped(tx, actor, kind, body.id) : null;
+      // Old balance from before the POS (positive: we owe the supplier / the customer owes us).
+      // Only owners and managers may set it; other edits keep the saved value.
+      const mayEdit = ["owner", "manager"].includes(actor.role);
+      Object.assign(entity, {
+        openingBalance: mayEdit && body.openingBalance !== undefined
+          ? integer(body.openingBalance, "Opening balance", -100000000000)
+          : Number(saved?.openingBalance || 0),
+        openingDate: (mayEdit && body.openingDate ? String(body.openingDate).slice(0, 10) : "") || saved?.openingDate || "",
+      });
       return putRecord(tx, actor.organizationId, kind, entity);
     });
   post("locations", async (tx, actor, body) => {
@@ -1356,6 +1385,9 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       ).some((item) => item.invoiceId === invoice.id)
     )
       fail("Use line credit notes after a prior core refund.");
+    // A sale made on the customer's account is reversed on that account unless told otherwise.
+    if (!body.refundType && (invoice.tenders || []).some((t: any) => t.type === "Credit"))
+      body.refundType = "Credit";
     const credit = await returnInvoice(
       tx,
       actor,
@@ -1439,7 +1471,10 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
             entry.productId === line.productId && entry.binId === line.binId,
         )
         .reduce((sum: number, entry: any) => sum + entry.qty, 0);
+      const settingsNow = await getRecord(tx, actor.organizationId, "settings", "settings");
       if (
+        (settingsNow?.features?.negativeStock === false ||
+          (await getRecord(tx, actor.organizationId, "product", line.productId))?.serialTracked) &&
         (stock.find(
           (item) =>
             item.productId === line.productId && item.binId === line.binId,
@@ -1931,8 +1966,10 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         originals.reduce((sum: number, line: any) => sum + line.qty, 0) -
           previous,
       );
-      if (!["Cash", "Card", "UPI"].includes(body.refundType || "Cash"))
+      if (!["Cash", "Card", "UPI", "Credit"].includes(body.refundType || "Cash"))
         fail("Choose a supported refund method.");
+      if (body.refundType === "Credit" && !invoice.customerId)
+        fail("Only a sale to a named customer can be refunded to their account.");
       const entry = {
         id: id("core"),
         branchId: actor.branchId,

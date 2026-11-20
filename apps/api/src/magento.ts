@@ -75,6 +75,13 @@ const slug = (value: string) =>
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
 
+/** Name then SKU, trimmed so the SKU is never cut off (keeps url_keys unique). */
+function urlKey(name: unknown, sku: unknown) {
+  const code = slug(String(sku ?? "")).slice(0, 40);
+  const words = slug(String(name ?? "")).slice(0, Math.max(0, 79 - code.length)).replace(/-+$/, "");
+  return [words, code].filter(Boolean).join("-");
+}
+
 const token = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 /**
@@ -117,7 +124,7 @@ export function magentoProduct(
   const custom: { attribute_code: string; value: string }[] = [
     // Special price equal to the price shows a single price (no strike-through).
     { attribute_code: "special_price", value: (prices.selling / 100).toFixed(2) },
-    { attribute_code: "url_key", value: slug(`${product.name}-${product.sku}`) },
+    { attribute_code: "url_key", value: urlKey(product.name, product.sku) },
     { attribute_code: "cz_fitment", value: fitmentText(product) },
   ];
   if (listing.description) custom.push({ attribute_code: "description", value: listing.description });
@@ -208,6 +215,8 @@ export async function magentoRequest(
     parsed = null;
   }
   if (!response.ok) throw new MagentoError(magentoMessage(parsed, response.status), response.status);
+  if (raw && parsed === null)
+    throw new MagentoError("Magento answered with a web page instead of data (maintenance or a redirect). Will retry.", 503);
   return parsed;
 }
 
@@ -300,16 +309,23 @@ export async function syncPhotos(
     const full = await productImageData(db, org, image.id);
     if (!full) continue;
     const ext = full.contentType === "image/png" ? "png" : full.contentType === "image/webp" ? "webp" : "jpg";
-    const entryId = await magentoRequest(fetchImpl, baseUrl, token, "POST", `/all/V1/products/${sku}/media`, {
-      entry: {
-        media_type: "image",
-        label: product.name,
-        position: image.position,
-        disabled: false,
-        types: image.id === main ? roles : [],
-        content: { base64_encoded_data: full.data, type: full.contentType, name: `${slug(product.sku)}-${image.id}.${ext}` },
-      },
-    });
+    let entryId: unknown;
+    try {
+      entryId = await magentoRequest(fetchImpl, baseUrl, token, "POST", `/all/V1/products/${sku}/media`, {
+        entry: {
+          media_type: "image",
+          label: product.name,
+          position: image.position,
+          disabled: false,
+          types: image.id === main ? roles : [],
+          content: { base64_encoded_data: full.data, type: full.contentType, name: `${slug(product.sku)}-${image.id}.${ext}` },
+        },
+      });
+    } catch (e: any) {
+      // The photos already uploaded are kept by the caller.
+      e.media = { ...media };
+      throw e;
+    }
     media[image.id] = Number(entryId);
   }
   for (const [imageId, entryId] of Object.entries(media)) {
@@ -396,6 +412,7 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
       sent++;
     } catch (e: any) {
       error = e instanceof MagentoError ? e.message : `Sync failed: ${e?.message || e}`;
+      if (e?.media) photos = { ...photos, media: e.media };
       // A category removed in Magento's admin: look it up again on the retry.
       if (e instanceof MagentoError && /categor/i.test(e.message)) await forgetCategories(db, org);
       failed++;
@@ -408,7 +425,7 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
         await putRecord(tx, org, "onlineListing", {
           ...latest,
           sync: error
-            ? { ...(latest.sync || {}), state: "error", error, at: new Date().toISOString() }
+            ? { ...(latest.sync || {}), ...photos, state: "error", error, at: new Date().toISOString() }
             : {
                 ...(latest.sync || {}),
                 state: changedMeanwhile ? "pending" : latest.published ? "synced" : "unpublished",
