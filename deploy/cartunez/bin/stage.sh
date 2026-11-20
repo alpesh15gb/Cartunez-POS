@@ -3,7 +3,12 @@ source "$(dirname "$0")/common.sh"
 [[ $# -eq 2 ]] || die 'Usage: stage.sh /absolute/source/root release-id'
 source_root="$(realpath "$1")"; release_id="$2"
 [[ "$release_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ && "$release_id" != *..* ]] || die 'Invalid release ID.'
-[[ -f "$source_root/apps/flutter/release/web/index.html" && -f "$source_root/deploy/api.Dockerfile" ]] || die 'Missing the Flutter web build (apps/flutter/release/web).'
+# CARTUNEZ_WEB_DIR (set by git-release.sh) names a checked web build, such as the
+# CI bundle; otherwise the build committed at apps/flutter/release/web is used.
+web_dir="${CARTUNEZ_WEB_DIR:-$source_root/apps/flutter/release/web}"
+web_origin="${CARTUNEZ_WEB_ORIGIN:-committed}"
+[[ "$web_dir" = /* && "$web_origin" =~ ^[A-Za-z0-9\ :._-]{1,200}$ ]] || die 'Invalid web build source.'
+[[ -f "$web_dir/index.html" && ! -L "$web_dir" && -f "$source_root/deploy/api.Dockerfile" ]] || die "Missing the Flutter web build ($web_dir)."
 lock
 mkdir -p "$CARTUNEZ_ROOT/releases"
 chmod 755 "$CARTUNEZ_ROOT/releases"
@@ -13,7 +18,8 @@ image_tag="$CARTUNEZ_PROJECT-api:$release_id"
 docker build --tag "$image_tag" --file "$source_root/deploy/api.Dockerfile" "$source_root"
 docker image inspect postgres:17-alpine >/dev/null 2>&1 || docker pull postgres:17-alpine
 mkdir -m 755 "$destination"
-cp -a "$source_root/apps/flutter/release/web" "$destination/web"
+cp -a "$web_dir" "$destination/web"
+printf '%s\n' "$web_origin" > "$destination/web-source"
 chmod -R a+rX "$destination/web"
 python3 - "$destination/web/installation.json" <<'PY'
 import json, os, sys

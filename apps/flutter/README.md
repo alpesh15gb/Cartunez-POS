@@ -84,8 +84,11 @@ powershell -ExecutionPolicy Bypass -File tool\build_web.ps1
 ```
 
 This builds the web app with every resource bundled locally (no Google CDN) and refreshes
-`release/web`. **Commit `release/web` with the change**: the VPS release copies it as the site and
-does not build Flutter itself. `tool/serve_web.py` serves the build with `/api` forwarded to a local
+`release/web`. `tool/build_web.sh` does the same on Linux/macOS and is what CI runs. CI publishes
+the bundle for every commit on `main` as the GitHub Release `web-<commit>`. While the VPS still uses
+`WEB_BUNDLE=committed` (the default), **commit `release/web` with the change**: the VPS release copies it
+as the site and does not build Flutter itself. After the cutover in `docs/CARTUNEZ-DEPLOYMENT.md`,
+`release/web` is git-ignored and is only for local testing. `tool/serve_web.py` serves the build with `/api` forwarded to a local
 API, the same way the VPS does. On the web the app reads `/installation.json` to fill in the shop's
 organization and branch, and stores the register in IndexedDB, migrating older browser-local data on the next visit.
 

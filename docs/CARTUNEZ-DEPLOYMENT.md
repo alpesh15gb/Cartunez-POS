@@ -18,7 +18,7 @@ The new Compose project is `cartunezpos`. Its API is published only at `127.0.0.
 | `/var/www/cartunez-pos-acme` | Public ACME challenge files only |
 | `/etc/nginx/sites-enabled/cartunezpos.conf` | The only application vhost this workflow manages |
 
-Commands below run as root and work independently of the shell's current directory, including when the current directory is `/opt/safar-crm`. The VPS needs Git, Bash, Docker/Compose, host Nginx, Python 3, OpenSSL, curl, util-linux and coreutils. Certbot is needed only for certificate issuance. No host Node.js or Flutter installation is required: the API builds in Docker from the committed lockfile, and the web app is the Flutter build committed at `apps/flutter/release/web`, which is copied into each release unchanged. Runtime data and private configuration remain outside Git.
+Commands below run as root and work independently of the shell's current directory, including when the current directory is `/opt/safar-crm`. The VPS needs Git, Bash, Docker/Compose, host Nginx, Python 3, OpenSSL, curl, util-linux and coreutils. Certbot is needed only for certificate issuance. No host Node.js or Flutter installation is required: the API builds in Docker from the committed lockfile, and the web app is either the Flutter build committed at `apps/flutter/release/web` or the bundle CI published for the same commit (see [Web bundle from CI](#web-bundle-from-ci)), copied into each release unchanged. Runtime data and private configuration remain outside Git.
 
 ## 1. DNS and read-only checks
 
@@ -62,7 +62,7 @@ bash "$BIN/git-release.sh" prepare "$SOURCE" && \
   bash /opt/cartunez-pos/current/bin/status.sh
 ```
 
-The Git wrapper checks that the clone is root-owned, clean, on `main`, uses exactly the expected GitHub origin, and matches `origin/main`. It refuses local edits, untracked files, unexpected remotes, detached checkouts, or local-only commits; it never resets, stashes or cleans them. It checks the committed Flutter web build, stages a uniquely tagged API image, records full source commit plus exact API/PostgreSQL image IDs, writes public connection defaults, and makes the release files read-only. Release identifiers contain the package version, UTC build time and short commit SHA. Staging does not change a running service.
+The Git wrapper checks that the clone is root-owned, clean, on `main`, uses exactly the expected GitHub origin, and matches `origin/main`. It refuses local edits, untracked files, unexpected remotes, detached checkouts, or local-only commits; it never resets, stashes or cleans them. It checks the Flutter web build (committed, or fetched from CI for the same commit), stages a uniquely tagged API image, records full source commit plus exact API/PostgreSQL image IDs, writes public connection defaults, and makes the release files read-only. Release identifiers contain the package version, UTC build time and short commit SHA. Staging does not change a running service.
 
 Activation uses only the `cartunezpos` Compose project and waits for database/API health. The first activation starts an empty business and creates the configured owner. Demo seeding is disabled and rejected by the production API. Keep business settings in the application and secrets in `/etc/cartunez-pos/config.json` so Git updates remain clean.
 
@@ -161,6 +161,73 @@ bash /opt/cartunez-pos/current/bin/rollback.sh OLD_RELEASE /var/lib/cartunez-pos
 Rollback verifies the backup checksum/release match, stops the API, preserves the current database as an emergency dump, restores the matching prior database in one transaction, starts the matching image, waits for health and switches the web pointer. It stays in maintenance on failure. Post-backup sales and counter outboxes must be reconciled before reopening; restoring a database is not a way to merge later financial records. The emergency dump is marked `unknown-before-rollback` so it cannot be mistaken for a known schema-compatible release.
 
 Keep at least the previous release and its Docker images. Do not use `docker compose down --volumes` on `cartunezpos`. The only automated volume deletion in these scripts is for a newly created, explicitly named disposable restore-drill project.
+
+## Web bundle from CI
+
+The VPS has no Flutter SDK. The web app it serves comes from one of two places, chosen by the optional `WEB_BUNDLE` key in `/etc/cartunez-pos/config.json`:
+
+| `WEB_BUNDLE` | Web build staged by `git-release.sh` |
+| --- | --- |
+| absent or `committed` | `apps/flutter/release/web` committed in the checkout (the original behaviour) |
+| `auto` | The CI bundle for the exact commit being released; if none is usable, the committed copy with a warning |
+| `ci` | The CI bundle for the exact commit; staging stops with an error if it is missing. No fallback |
+
+On every push to `main`, the `Build and test` workflow runs the API tests, the encoding check, `flutter analyze` and `flutter test`, then builds the web app with `apps/flutter/tool/build_web.sh` (the same flags as `build_web.ps1`: `--no-web-resources-cdn --no-source-maps`, scanner files from `web/scanner`). If every job passes it publishes the GitHub Release `web-<full commit SHA>` (a pre-release, never marked latest) with `cartunez-web.tar.gz` and `cartunez-web.tar.gz.sha256`. The archive holds `web/` and `build-info.json` naming the commit. Releases are never overwritten. The workflow keeps the newest 60 and deletes older `web-*` releases and their tags. Pull-request runs build the bundle as a 14-day workflow artifact only.
+
+`deploy/cartunez/bin/fetch-web.sh` downloads the release for the commit `git-release.sh` is staging. It checks the SHA-256 sidecar, GitHub's recorded asset digest, that the archive holds only regular files under `web/`, and that `build-info.json` names the same commit. `build-web.sh` then runs its usual completeness check, and the release records where its web build came from in `releases/<release>/web-source`, which `status.sh` prints. If CI has not published the bundle yet (a run takes about 10 minutes after the push), staging stops before anything changes. `update` has already pulled, so wait for the workflow to finish, then run `bash /opt/cartunez-pos/current/bin/git-release.sh prepare /opt/cartunez-pos-source`.
+
+**Private repository.** A public repository needs no token. If the repository is made private, the VPS needs read access for both `git pull` and the release download. Create a fine-grained personal access token limited to this one repository with only **Contents: Read-only**, and give it an expiry you will track. Store it on the VPS, root-only:
+
+```bash
+install -m 600 -o root -g root /dev/null /etc/cartunez-pos/github-token
+nano /etc/cartunez-pos/github-token   # paste the token on one line, save
+```
+
+`fetch-web.sh` refuses the file unless it is root-owned with mode 0600, and sends it only as a request header to `api.github.com`. Curl drops it when GitHub redirects the download to its storage host. It never appears on a command line. For `git pull` of a private repository, add a credential store outside the checkout's working tree, so the guarded origin URL stays unchanged:
+
+```bash
+install -m 600 -o root -g root /dev/null /etc/cartunez-pos/git-credentials
+printf 'https://x-access-token:%s@github.com\n' "$(tr -d '[:space:]' < /etc/cartunez-pos/github-token)" > /etc/cartunez-pos/git-credentials
+git -C /opt/cartunez-pos-source config credential.helper 'store --file=/etc/cartunez-pos/git-credentials'
+```
+
+Replace both files when the token is rotated. Keep them out of recovery bundles that leave the host. The CI side needs no secret: it publishes with the workflow's own `GITHUB_TOKEN`.
+
+### Cutover from the committed web build
+
+Production keeps working on the committed build until you finish step 4. Each step can be reversed by setting `WEB_BUNDLE` back to `committed`, up to step 6.
+
+1. Merge this change to `main`. Wait for `Build and test` to pass and check that the Releases page shows `web-<that commit SHA>`.
+2. Do a normal update and activation as in **Upgrades and rollback**, with `WEB_BUNDLE` still absent. This puts `fetch-web.sh` and the new `git-release.sh` into the current release. `status.sh` should print `Web build: committed`.
+3. Private repository only: create `/etc/cartunez-pos/github-token` and the Git credential store as above.
+4. Check the download without staging anything. Compare its file list with the committed copy:
+   ```bash
+   SOURCE=/opt/cartunez-pos-source
+   bash "$SOURCE/deploy/cartunez/bin/fetch-web.sh" "$(git -C "$SOURCE" rev-parse HEAD)" /root/web-check && \
+     diff <(cd /root/web-check && find . -type f | sort) <(cd "$SOURCE/apps/flutter/release/web" && find . -type f | sort) && \
+     echo 'Same files'
+   rm -rf /root/web-check /root/web-check.sha256
+   ```
+   File contents can differ because the build machine differs. The file list should match.
+5. Set `WEB_BUNDLE` to `auto`, keeping the file root-owned with mode 0600:
+   ```bash
+   python3 - auto <<'PY'
+   import json, os, pathlib, sys
+   p = pathlib.Path('/etc/cartunez-pos/config.json'); c = json.loads(p.read_text()); c['WEB_BUNDLE'] = sys.argv[1]
+   t = p.with_name('.config.json.tmp'); fd = os.open(t, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+   with os.fdopen(fd, 'w') as f: json.dump(c, f, indent=2); f.write('\n')
+   os.replace(t, p)
+   PY
+   ```
+   On the next update, check `cat /opt/cartunez-pos/releases/$RELEASE/web-source` before activating. It must start with `ci web-`. After activation, open the site, sign in, make a test bill and try camera scanning in a browser.
+6. Run the same command with `ci` in place of `auto`. From now on a missing CI bundle stops staging instead of falling back.
+7. Stop committing the build. On the developer PC, in a commit on `main`:
+   ```bash
+   git rm -r --cached apps/flutter/release/web
+   ```
+   In `.gitignore`, delete the two lines `# The committed Flutter web build that VPS releases copy as the site.` and `!apps/flutter/release/`, so `release/` is ignored again. Commit and push. Wait for CI, then update the VPS as usual. `git pull` removes the old copy from the checkout. Releases already staged keep their own web copy, so `rollback.sh` is unaffected.
+
+After step 7, `WEB_BUNDLE=committed` no longer works, because no committed copy exists. To recover from a missing or bad CI bundle, re-run the workflow on `main` from the Actions tab (`workflow_dispatch` also publishes). You can also roll back to a retained release. The repository history is not rewritten, so the old bundles stay in Git history; shrinking the clone would need a separate, coordinated history rewrite.
 
 ## Appendix: deployment archive instead of Git
 
