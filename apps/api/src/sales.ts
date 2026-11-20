@@ -1,4 +1,4 @@
-import type { Database, RecordData } from "./db.js";
+import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
 import {
   type Actor,
@@ -25,13 +25,43 @@ import {
   splitTax,
   taxTotals,
 } from "./settings.js";
+import type { InvoiceDraft, SaleContext, SaleLine, SaleTender } from "./sale-types.js";
+import { runStage, runValidateLine } from "./sale-pipeline.js";
 
+/**
+ * Checkout. Runs in explicit stages; the extension points between them are the
+ * hooks in sale-pipeline.ts (see SaleHook in sale-types.ts):
+ *   prepare -> lines (+validateLine) -> expandLines -> totals -> tenders
+ *   (+validateTenders) -> numbering -> beforePersist -> write -> afterPersist
+ */
 export async function finalizeSale(
   db: Database,
   actor: Actor,
   body: any,
   reconcile = false,
 ) {
+  const ctx = await prepareSale(db, actor, body, reconcile);
+  await buildLines(ctx);
+  await runStage("expandLines", ctx);
+  await computeTotals(ctx);
+  normaliseTenders(ctx);
+  await runStage("validateTenders", ctx);
+  checkTenderCoverage(ctx);
+  const number = await allocateInvoiceNumber(ctx);
+  ctx.invoice = draftInvoice(ctx, number);
+  await runStage("beforePersist", ctx);
+  await putRecord(db, actor.organizationId, "invoice", ctx.invoice, actor.branchId);
+  await runStage("afterPersist", ctx);
+  return ctx.invoice;
+}
+
+/** Permissions, shift, settings, offline snapshot, invoice profile, customer, place of supply. */
+async function prepareSale(
+  db: Database,
+  actor: Actor,
+  body: any,
+  reconcile: boolean,
+): Promise<SaleContext> {
   allow(actor, ["owner", "manager", "cashier"]);
   if (body.offline !== undefined && typeof body.offline !== "boolean")
     fail("Offline mode must be a boolean.");
@@ -65,8 +95,6 @@ export async function finalizeSale(
   const hold = body.holdId
     ? await scoped(db, actor, "hold", body.holdId)
     : undefined;
-  const used = new Set<string>();
-  const lines: any[] = [];
   let catalog: any;
   if (body.offline) {
     catalog = await getRecord(
@@ -124,10 +152,39 @@ export async function finalizeSale(
       if (!customer.address) fail("Enter the registered customer address.");
     }
   }
-  const inclusive = profile.taxMode === "inclusive";
-  let subtotal = 0,
-    coreTotal = 0;
-  let requiresFitmentApproval = false;
+  return {
+    db,
+    actor,
+    body,
+    reconcile,
+    currentSettings,
+    settings,
+    branch,
+    profile,
+    shift,
+    hold,
+    catalog,
+    stock,
+    sellBeyondStock,
+    customer,
+    placeOfSupply,
+    lines: [],
+    tenders: [],
+    requiresFitmentApproval: false,
+    subtotal: 0,
+    coreTotal: 0,
+    discount: 0,
+    tax: 0,
+    rounding: 0,
+    total: 0,
+    state: {},
+  };
+}
+
+/** Prices each input line, checks stock, serials and fitment, then runs validateLine hooks. */
+async function buildLines(ctx: SaleContext) {
+  const { db, actor, body, profile, catalog, stock, hold, reconcile, sellBeyondStock } = ctx;
+  const used = new Set<string>();
   for (const input of body.lines) {
     const currentProduct = await scoped(db, actor, "product", input.productId);
     const product = body.offline
@@ -161,7 +218,7 @@ export async function finalizeSale(
     );
     if (["incompatible", "unverified"].includes(decision.status)) {
       text(input.overrideReason, "fitment override reason");
-      requiresFitmentApproval = true;
+      ctx.requiresFitmentApproval = true;
     }
     if (product.type !== "service") {
       const bin = await scoped(db, actor, "location", input.binId);
@@ -203,10 +260,9 @@ export async function finalizeSale(
         ? product.wholesalePrice
         : product.retailPrice;
     const lineSubtotal = integer(price * qty, "Line amount");
-    subtotal += lineSubtotal;
-    coreTotal += integer((product.coreCharge || 0) * qty, "Line core charge");
+    integer((product.coreCharge || 0) * qty, "Line core charge");
     integer(product.cost * qty, "Line cost");
-    lines.push({
+    const line: SaleLine = {
       id: id("line"),
       productId: product.id,
       sku: product.sku,
@@ -226,12 +282,25 @@ export async function finalizeSale(
       fitment: decision,
       overrideReason: input.overrideReason || "",
       type: product.type,
-    });
+    };
+    await runValidateLine(ctx, input, line);
+    ctx.lines.push(line);
   }
+}
+
+/** Discount approval, per-line discount/tax allocation, rounding and the quoted-total check. */
+async function computeTotals(ctx: SaleContext) {
+  const { db, actor, body, lines, profile, settings, currentSettings, placeOfSupply } = ctx;
+  const inclusive = profile.taxMode === "inclusive";
+  const subtotal = lines.reduce((sum, line) => sum + line.subtotal, 0);
+  const coreTotal = lines.reduce(
+    (sum, line) => sum + (line.coreCharge || 0) * line.qty,
+    0,
+  );
   integer(subtotal, "Invoice subtotal");
   integer(coreTotal, "Invoice core charges");
   const discount = integer(body.discount ?? 0, "Discount", 0, subtotal);
-  if (requiresFitmentApproval)
+  if (ctx.requiresFitmentApproval)
     await approved(db, actor, "fitment", body.approvalId, body.transactionId);
   if (discount > currentSettings.cashierDiscountLimit) {
     text(body.discountReason, "discount reason");
@@ -249,26 +318,28 @@ export async function finalizeSale(
   for (const line of lines) {
     cumulative += line.subtotal;
     const next = subtotal ? roundRatio(discount, cumulative, subtotal) : 0;
-    line.discount = next - allocated;
+    const lineDiscount = next - allocated;
+    line.discount = lineDiscount;
     allocated = next;
-    line.tax = inclusive
+    const lineTax = inclusive
       ? line.subtotal -
-        line.discount -
-        roundRatio(line.subtotal - line.discount, 10000, 10000 + line.taxRate)
-      : roundRatio(line.subtotal - line.discount, line.taxRate, 10000);
+        lineDiscount -
+        roundRatio(line.subtotal - lineDiscount, 10000, 10000 + line.taxRate)
+      : roundRatio(line.subtotal - lineDiscount, line.taxRate, 10000);
+    line.tax = lineTax;
     line.taxMode = profile.taxMode;
     line.taxComponents = splitTax(
-      line.tax,
+      lineTax,
       line.taxRate,
       profile,
       placeOfSupply,
     );
     line.total =
       line.subtotal -
-      line.discount +
-      (inclusive ? 0 : line.tax) +
+      lineDiscount +
+      (inclusive ? 0 : lineTax) +
       line.coreCharge * line.qty;
-    tax += line.tax;
+    tax += lineTax;
   }
   const unrounded = subtotal - discount + (inclusive ? 0 : tax) + coreTotal;
   const total =
@@ -281,73 +352,44 @@ export async function finalizeSale(
   let remainingRounding = rounding;
   for (const line of [...lines].reverse()) {
     if (!remainingRounding) break;
-    line.rounding = Math.max(remainingRounding, -(line.total - line.coreCharge * line.qty));
-    line.total += line.rounding;
+    const lineTotal = line.total!;
+    line.rounding = Math.max(remainingRounding, -(lineTotal - line.coreCharge * line.qty));
+    line.total = lineTotal + line.rounding;
     remainingRounding -= line.rounding;
   }
   if (remainingRounding)
     fail("Invoice rounding would reduce the refundable core deposit. Use a smaller rounding increment.", 409);
+  Object.assign(ctx, { subtotal, coreTotal, discount, tax, rounding, total });
+}
+
+function normaliseTenders(ctx: SaleContext) {
+  const { body } = ctx;
   if (
     !Array.isArray(body.tenders) ||
     !body.tenders.length ||
     body.tenders.length > 10
   )
     fail("Choose a payment method.");
-  const tenders = body.tenders.map((tender: any) => ({
+  ctx.tenders = body.tenders.map((tender: any): SaleTender => ({
     type: text(tender.type, "tender type"),
     amount: integer(tender.amount, "Tender amount"),
     confirmed: tender.confirmed === true,
     reference: text(tender.reference || "", "payment reference", false, 200),
   }));
-  // "Credit" = sold on the customer's account (udhaar); it is always available
-  // for a named customer and is not money in the drawer.
-  const credit = tenders
-    .filter((tender: any) => tender.type === "Credit")
-    .reduce((sum: number, tender: any) => sum + tender.amount, 0);
-  if (credit) {
-    if (!body.customerId) fail("Choose the customer before selling on credit.");
-    if (body.offline) fail("Credit sales need a connection to the server.", 403);
-    for (const tender of tenders) if (tender.type === "Credit") tender.confirmed = true;
-  }
-  if (
-    tenders.some(
-      (tender: any) =>
-        tender.type !== "Credit" &&
-        !(currentSettings.tenderTypes || ["Cash", "Card", "UPI"]).includes(
-          tender.type,
-        ),
-    )
-  )
-    fail("This payment type is disabled in Settings.");
-  if (
-    tenders.some(
-      (tender: any) =>
-        !["Cash", "Credit"].includes(tender.type) && tender.confirmed && !tender.reference,
-    )
-  )
-    fail("Record the external payment confirmation reference.");
-  if (
-    tenders.some(
-      (tender: any) => !["Cash", "Card", "UPI", "Credit"].includes(tender.type),
-    )
-  )
-    fail("Unsupported tender type.");
-  if (
-    tenders.some((tender: any) => tender.type !== "Cash" && !tender.confirmed)
-  )
-    fail(
-      "Provider-confirmed payments must remain pending until confirmation.",
-      409,
-    );
-  const paid = tenders.reduce(
-    (sum: number, tender: any) => sum + tender.amount,
-    0,
-  );
-  const cash = tenders
-    .filter((tender: any) => tender.type === "Cash")
-    .reduce((sum: number, tender: any) => sum + tender.amount, 0);
-  if (paid < total || paid - total > cash)
+}
+
+function checkTenderCoverage(ctx: SaleContext) {
+  const paid = ctx.tenders.reduce((sum, tender) => sum + tender.amount, 0);
+  const cash = ctx.tenders
+    .filter((tender) => tender.type === "Cash")
+    .reduce((sum, tender) => sum + tender.amount, 0);
+  if (paid < ctx.total || paid - ctx.total > cash)
     fail("Payments must cover the total. Change can only come from cash.");
+}
+
+/** Offline: validates the device's reserved range. Online: next free invoice number. */
+async function allocateInvoiceNumber(ctx: SaleContext) {
+  const { db, actor, body, settings, tenders } = ctx;
   let number: number;
   if (body.offline) {
     const device = await scoped(db, actor, "device", body.deviceId);
@@ -361,7 +403,7 @@ export async function finalizeSale(
       occurredAt > Date.now() + 300000
     )
       fail("Offline authorization was invalid at the sale time.", 403);
-    if (tenders.some((tender: any) => !device.tenders.includes(tender.type)))
+    if (tenders.some((tender) => !device.tenders.includes(tender.type)))
       fail("Tender is unavailable offline.", 403);
     number = integer(
       body.invoiceNumber,
@@ -393,7 +435,13 @@ export async function finalizeSale(
     number = settings.nextInvoice++;
     await putRecord(db, actor.organizationId, "settings", settings);
   }
-  const invoice = {
+  return number;
+}
+
+function draftInvoice(ctx: SaleContext, number: number): InvoiceDraft {
+  const { actor, body, settings, profile, shift, customer, placeOfSupply, lines, tenders } = ctx;
+  const paid = tenders.reduce((sum, tender) => sum + tender.amount, 0);
+  return {
     ...profile,
     id: id("invoice"),
     branchId: actor.branchId,
@@ -416,63 +464,18 @@ export async function finalizeSale(
     vehicle: body.vehicle || null,
     priceLevel: body.priceLevel || "retail",
     lines,
-    subtotal,
-    discount,
+    subtotal: ctx.subtotal,
+    discount: ctx.discount,
     discountReason: body.discountReason || "",
-    tax,
+    tax: ctx.tax,
     taxComponents: taxTotals(lines),
-    coreTotal,
-    rounding,
-    total,
+    coreTotal: ctx.coreTotal,
+    rounding: ctx.rounding,
+    total: ctx.total,
     tenders,
-    change: paid - total,
+    change: paid - ctx.total,
     cost: lines.reduce((sum, line) => sum + line.cost * line.qty, 0),
   };
-  if (body.customerId) await scoped(db, actor, "customer", body.customerId);
-  for (const line of lines) {
-    if (line.type !== "service")
-      await adjust(
-        db,
-        actor,
-        line.productId,
-        line.binId,
-        -line.qty,
-        "Sale",
-        invoice.id,
-        reconcile || (sellBeyondStock && !line.serials?.length),
-      );
-    for (const serial of line.serials)
-      await putRecord(
-        db,
-        actor.organizationId,
-        "serial",
-        {
-          id: line.productId + ":" + serial,
-          branchId: actor.branchId,
-          productId: line.productId,
-          serial,
-          binId: line.binId,
-          status: "sold",
-          invoiceId: invoice.id,
-        },
-        actor.branchId,
-      );
-  }
-  if (hold)
-    await db.query(
-      "DELETE FROM records WHERE organization_id=$1 AND kind=$2 AND id=$3",
-      [actor.organizationId, "hold", hold.id],
-    );
-  await putRecord(db, actor.organizationId, "invoice", invoice, actor.branchId);
-  await audit(
-    db,
-    actor,
-    "sale",
-    invoice.id,
-    body.discountReason || "Checkout",
-    { total, override: requiresFitmentApproval, reconciled: reconcile },
-  );
-  return invoice;
 }
 
 export async function returnInvoice(
