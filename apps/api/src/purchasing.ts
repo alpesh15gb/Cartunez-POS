@@ -12,11 +12,8 @@ import type { FastifyInstance } from "fastify";
 import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
 import { adjust, allow, audit, fail, id, integer, multiline, now, scoped, text, roundRatio, type Actor } from "./domain.js";
+import type { Post } from "./routes/types.js";
 
-type Post = (
-  path: string,
-  handler: (db: Database, actor: Actor, body: any, params: any) => Promise<any>,
-) => unknown;
 
 export const PAYMENT_MODES = ["Cash", "UPI", "Bank transfer", "Cheque", "Card"];
 const STOCK_ROLES = ["owner", "manager", "inventory"];
