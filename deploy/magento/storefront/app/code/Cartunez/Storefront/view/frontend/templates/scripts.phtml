@@ -25,6 +25,7 @@
             dots.appendChild(b);
         });
         root.appendChild(dots);
+        root.classList.add('cz-ready');
         function restart() { clearInterval(timer); timer = setInterval(function () { show(index + 1); }, 6000); }
         root.addEventListener('mouseenter', function () { clearInterval(timer); });
         root.addEventListener('mouseleave', restart);

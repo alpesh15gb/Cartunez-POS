@@ -381,6 +381,10 @@ button.action.secondary {
   opacity: 1;
   z-index: 1;
 }
+.cz-slider .cz-slide:first-child {
+  opacity: 1;
+  z-index: 1;
+}
 .cz-slider .cz-slide:before {
   content: '';
   position: absolute;
@@ -389,6 +393,10 @@ button.action.secondary {
   bottom: 0;
   left: 0;
   background: linear-gradient(90deg, rgba(10, 11, 13, 0.92) 0%, rgba(10, 11, 13, 0.6) 45%, rgba(10, 11, 13, 0.1) 100%);
+}
+.cz-slider.cz-ready .cz-slide:first-child:not(.is-active) {
+  opacity: 0;
+  z-index: 0;
 }
 .cz-slider .cz-slide-content {
   position: relative;
