@@ -357,6 +357,13 @@ class _ShellState extends State<Shell> {
   /// wherever the cursor is, unless the user is typing into a field.
   bool _onKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+    // WS-A: on the counter, CounterKeyboard owns the keys (F1 search, F2
+    // customer/vehicle, F6 pay, ...) and the scanner guard. Elsewhere F2 still
+    // focuses the search box.
+    if (controller.section == 'billing' && CounterKeyboard.active > 0) {
+      _buffer.clear();
+      return false;
+    }
     if (event.synthesized || Navigator.of(context).canPop() ||
         HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isAltPressed ||
         HardwareKeyboard.instance.isMetaPressed) {
@@ -801,7 +808,7 @@ class _TopBar extends StatelessWidget {
               focusNode: controller.searchFocus,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: controller.section == 'billing' ? (narrow ? 'Find a part' : 'Search or scan parts  (F2)') : 'Search this list',
+                hintText: controller.section == 'billing' ? (narrow ? 'Find a part' : 'Search or scan parts  (F1)' /* WS-A: F1 on the counter */) : 'Search this list',
                 prefixIcon: const Icon(Icons.search, size: 20),
                 suffixIcon: ValueListenableBuilder(
                   valueListenable: controller.search,

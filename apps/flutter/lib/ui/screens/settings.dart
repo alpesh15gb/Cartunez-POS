@@ -5,6 +5,7 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../counter/counter_settings.dart'; // WS-A
 import 'labels.dart';
 import 'online.dart';
 
@@ -72,6 +73,8 @@ class SettingsScreen extends StatelessWidget {
             if (app.magentoConnected) OutlinedButton(onPressed: () => testMagento(context), child: const Text('Test connection')),
           ]),
         ]),
+      // WS-A: UPI QR and receipt printer.
+      if (app.canSell || app.isOwner) _Card(title: 'Counter payments & receipts', children: counterSettingsRows(context)),
       _Card(title: 'Barcode labels', children: [
         Text(labelPrinterSummary(app), style: const TextStyle(fontWeight: FontWeight.w700)),
         Text('Shows ${labelDesignSummary(app)}.', style: Theme.of(context).textTheme.bodySmall),

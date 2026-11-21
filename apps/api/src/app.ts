@@ -20,6 +20,8 @@ import { inventoryRoutes, transferRoutes } from "./routes/inventory.js";
 import { purchaseOrderRoutes } from "./routes/purchase-orders.js";
 import { shiftRoutes } from "./routes/shifts.js";
 import { salesRoutes } from "./routes/sales.js";
+// WS-A: parked sales (holds) with label / customer name / vehicle reg no.
+import { holdRoutes } from "./routes/holds.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -219,6 +221,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   purchaseOrderRoutes(app, db, post);
   shiftRoutes(app, db, post);
   salesRoutes(app, db, post);
+  holdRoutes(app, db, post); // WS-A
   deviceRoutes(app, db, post);
   transferRoutes(app, db, post);
   warrantyRoutes(app, db, post);

@@ -45,7 +45,7 @@ void main() {
   });
 
   testWidgets('scanning a barcode on the counter adds the line and leaves the catalog grid alone', (tester) async {
-    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.physicalSize = const Size(1100, 900); // WS-A: >= 1200 shows the parts list (see counter_test.dart)
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final app = AppState()
