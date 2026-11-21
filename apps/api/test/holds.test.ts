@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { connectDatabase, migrate } from "../src/db.js";
+import { connectDatabase, migrate, getRecord, putRecord } from "../src/db.js";
+import { holdReserves } from "../src/domain.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
 
@@ -60,6 +61,20 @@ test("Holds: label, customer name, reg no and expiry; UPI ID setting", async () 
 
     assert.deepEqual(await call(`holds/${hold.id}`, undefined, cashier, 200, "DELETE"), { deleted: true });
     assert.equal((await call("bootstrap", undefined, cashier, 200, "GET")).holds.length, 1);
+
+    // Integration: once a hold's expiry passes it stops reserving stock (it stays listed until discarded).
+    const filterStock = async () =>
+      (await call("bootstrap", undefined, cashier, 200, "GET")).stock.find((s: any) => s.productId === "filter" && s.binId === "bin-a1");
+    const reservedBefore = await filterStock();
+    assert.equal(reservedBefore.reserved, 2, "the expiring hold still reserves its 2 filters");
+    const stored = (await getRecord(db, "demo", "hold", expiring.id))!;
+    await putRecord(db, "demo", "hold", { ...stored, expiresAt: new Date(Date.now() - 60000).toISOString() }, stored.branchId);
+    const released = await filterStock();
+    assert.equal(released.reserved, 0);
+    assert.equal(released.available, reservedBefore.available + 2);
+    assert.equal((await call("bootstrap", undefined, cashier, 200, "GET")).holds.length, 1);
+    assert.equal(holdReserves({ expiresAt: null }), true);
+    assert.equal(holdReserves({ expiresAt: new Date(Date.now() - 1).toISOString() }), false);
 
     // The shop's UPI ID for the counter QR.
     await call("settings", { upiVpa: "cartunez@okhdfcbank", upiPayeeName: "Cartunez" }, cashier, 403);

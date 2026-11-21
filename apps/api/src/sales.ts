@@ -3,6 +3,7 @@ import { getRecord, putRecord, records } from "./db.js";
 import {
   type Actor,
   allow,
+  holdReserves,
   integer,
   text,
   fail,
@@ -34,6 +35,12 @@ import { runStage, runValidateLine } from "./sale-pipeline.js";
  *   prepare -> lines (+validateLine) -> expandLines -> totals -> tenders
  *   (+validateTenders) -> numbering -> beforePersist -> write -> afterPersist
  */
+/**
+ * Marks a checkout built on the server by jobs/:id/invoice. Request JSON cannot
+ * carry a symbol, so only that route may bill a job card's parked reservation.
+ */
+export const JOB_INVOICE = Symbol("job-invoice");
+
 export async function finalizeSale(
   db: Database,
   actor: Actor,
@@ -95,6 +102,9 @@ async function prepareSale(
   const hold = body.holdId
     ? await scoped(db, actor, "hold", body.holdId)
     : undefined;
+  // Integration: a job card's stock reservation is billed only from the job (jobs/:id/invoice).
+  if (hold?.jobId && !body[JOB_INVOICE])
+    fail("These parts are reserved for a job card. Bill them from the job card.", 409);
   let catalog: any;
   if (body.offline) {
     catalog = await getRecord(
@@ -230,7 +240,8 @@ async function buildLines(ctx: SaleContext) {
           (entry) =>
             entry.productId === product.id && entry.binId === input.binId,
         )?.available || 0;
-      const ownHold = (hold?.cart.lines || [])
+      // An expired hold no longer reserves stock, so it adds nothing back.
+      const ownHold = (hold && holdReserves(hold) ? hold.cart.lines || [] : [])
         .filter(
           (entry: any) =>
             entry.productId === product.id && entry.binId === input.binId,

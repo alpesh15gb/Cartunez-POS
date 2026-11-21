@@ -899,8 +899,8 @@ class _TopBar extends StatelessWidget {
         if (app.canSell) ...[
           const SizedBox(width: 6),
           Badge(
-            isLabelVisible: app.list('holds').isNotEmpty,
-            label: Text('${app.list('holds').length}'),
+            isLabelVisible: counterHolds(app).isNotEmpty, // Integration: job reservations are not counter bills
+            label: Text('${counterHolds(app).length}'),
             child: IconButton(
               tooltip: 'Parked sales',
               onPressed: () => showParked(context, controller),

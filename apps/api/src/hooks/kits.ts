@@ -13,9 +13,9 @@
 // its bin ("Kit sale" stock movements against the invoice). Labour included in
 // a kit is a service component: recorded, no stock movement.
 //
-// Limitations: kits cannot contain serial-tracked parts or other kits, and a
-// sales return of a kit line credits the money but does not put the
-// components back into stock (do a stock adjustment if they come back).
+// Limitations: kits cannot contain serial-tracked parts or other kits. A sales
+// return of a kit line (returns.ts) puts its stocked components back into the
+// chosen restock or damaged bin, in proportion to the kits returned.
 import { getRecord, records, type RecordData } from "../db.js";
 import { adjust, fail, integer } from "../domain.js";
 import { registerSaleHook } from "../sale-pipeline.js";

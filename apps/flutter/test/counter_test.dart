@@ -68,6 +68,12 @@ _Register _fill(_Register app) => app
         'cart': {'transactionId': 't2', 'priceLevel': 'retail', 'customerId': '', 'discount': 0, 'vehicle': null,
           'lines': [{'productId': 's', 'qty': 1, 'binId': null, 'serials': <String>[]}]},
       },
+      // Integration: a job card's stock reservation; never a counter held bill.
+      {
+        'id': 'h3', 'userId': 'c', 'jobId': 'job-1', 'customerName': 'Workshop', 'createdAt': '2026-11-21T11:00:00Z',
+        'cart': {'transactionId': 't3', 'jobId': 'job-1', 'customerId': '', 'discount': 0,
+          'lines': [{'productId': 'p', 'qty': 1, 'binId': 'bin', 'serials': <String>[]}]},
+      },
     ],
   };
 
@@ -187,7 +193,8 @@ void main() {
 
   test('held bills are found by name, reg no and item', () {
     final app = _register();
-    final holds = app.list('holds');
+    expect(app.list('holds').length, 3);
+    final holds = counterHolds(app); // the job card's reservation (h3) is not offered
     List<String> find(String q) => [for (final h in holds) if (holdMatches(app, h, q)) '${h['id']}'];
     expect(find(''), ['h1', 'h2']);
     expect(find('ravi'), ['h1']);
@@ -203,6 +210,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.f5);
     await tester.pumpAndSettle();
     expect(find.text('Held bills (2)'), findsOneWidget);
+    expect(find.text('Workshop'), findsNothing, reason: 'job card reservations are billed from the job card');
     await tester.enterText(find.widgetWithText(TextField, 'Name, reg no or item'), 'MH12');
     await tester.pumpAndSettle();
     expect(find.text('Meena'), findsNothing);

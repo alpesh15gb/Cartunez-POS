@@ -18,10 +18,10 @@ import { randomUUID } from "node:crypto";
 import type { Database, RecordData } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
-import { type Actor, allow, audit, fail, id, integer, inventory, multiline, now, roundRatio, scoped, text } from "../domain.js";
+import { type Actor, allow, audit, fail, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text } from "../domain.js";
 import { nextNumber } from "../number-series.js";
 import { invoiceProfile } from "../settings.js";
-import { finalizeSale } from "../sales.js";
+import { finalizeSale, JOB_INVOICE } from "../sales.js";
 import { queueMagentoSync } from "../online-queue.js";
 import { registerSaleHook } from "../sale-pipeline.js";
 import type { SaleHook } from "../sale-types.js";
@@ -56,7 +56,7 @@ async function documentLines(
   // Serials another open job has already reserved.
   const reservedSerials = new Set<string>();
   if (options.job)
-    for (const hold of await records(db, actor.organizationId, "hold", actor.branchId))
+    for (const hold of await reservingHolds(db, actor.organizationId, actor.branchId))
       if (hold.id !== ownHold?.id)
         for (const line of hold.cart?.lines || [])
           for (const serial of line.serials || []) reservedSerials.add(line.productId + ":" + serial);
@@ -520,6 +520,7 @@ export function jobRoutes(_app: FastifyInstance, _db: Database, post: Post) {
     }
     const hold = job.holdId ? await getRecord(tx, actor.organizationId, "hold", job.holdId) : undefined;
     return finalizeSale(tx, actor, {
+      [JOB_INVOICE]: true,
       transactionId: body.transactionId || randomUUID(),
       shiftId: body.shiftId,
       tenders: body.tenders,

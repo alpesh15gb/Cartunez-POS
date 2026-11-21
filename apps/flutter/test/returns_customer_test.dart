@@ -8,6 +8,7 @@ import 'package:cartunez_pos/ui/orders/invoice_code.dart';
 import 'package:cartunez_pos/ui/orders/returns.dart';
 import 'package:cartunez_pos/ui/people/account_actions.dart';
 import 'package:cartunez_pos/ui/people/customer_360.dart';
+import 'package:cartunez_pos/ui/screens/receipt.dart';
 import 'package:cartunez_pos/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -170,6 +171,48 @@ void main() {
     // The reminder link carries the amount due.
     expect(reminderLink(app, phone: '90000 00101', name: 'Arjun', amount: 90000),
         allOf(startsWith('https://wa.me/919000000101?text='), contains(Uri.encodeComponent(app.money(90000)))));
+    app.dispose();
+  });
+
+  // Integration: registered vehicles (WS-C) replace the legacy vehicle field and link to their page.
+  testWidgets('customer 360 lists registered vehicles with links', (tester) async {
+    tester.view.physicalSize = const Size(390, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _app('manager');
+    app.snapshot = {
+      ...app.snapshot,
+      'customerVehicles': [
+        {'id': 'veh-1', 'customerId': 'c1', 'regNo': 'MH 12 AB 1234', 'make': 'Maruti Suzuki', 'model': 'Swift'},
+        {'id': 'veh-2', 'customerId': 'other', 'regNo': 'KA 01 X 9999', 'make': 'Honda', 'model': 'City'},
+      ],
+    };
+    final opened = <String>[];
+    final shell = ShellController()..navigate = opened.add;
+    final summary = {
+      'customer': {'id': 'c1', 'name': 'Arjun', 'phone': '9000000101'},
+      'balance': 0,
+      'vehicles': [{'make': 'Legacy', 'model': 'Car'}],
+      'stats': {'bills': 0, 'spent': 0},
+    };
+    await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: ShellScope(controller: shell,
+        child: Scaffold(body: SingleChildScrollView(child: Customer360View(summary: summary)))))));
+    expect(find.text('MH 12 AB 1234 Maruti Suzuki Swift'), findsOneWidget);
+    expect(find.textContaining('Honda'), findsNothing);
+    expect(find.text('Legacy Car'), findsNothing);
+    await tester.tap(find.text('MH 12 AB 1234 Maruti Suzuki Swift'));
+    expect(opened, ['/people/vehicles/veh-1']);
+    expect(tester.takeException(), isNull);
+    app.dispose();
+  });
+
+  // Integration: the receipt PDF carries the scannable bill code (and credit notes do not).
+  test('receipt PDF prints the invoice code below the totals', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final app = _app('cashier');
+    final bytes = await buildReceiptPdf(app, {..._invoice, 'lines': const [], 'tax': 0});
+    expect(bytes.length, greaterThan(1000));
+    expect(receiptInvoiceCode(_invoice), 'ML-PUNE-1000');
     app.dispose();
   });
 }

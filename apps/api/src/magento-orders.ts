@@ -12,7 +12,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
-import { adjust, allow, fail, id, type Actor } from "./domain.js";
+import { adjust, allow, fail, id, reservingHolds, type Actor } from "./domain.js";
 import { magentoConfig } from "./online-queue.js";
 import { magentoRequest, MagentoError } from "./magento.js";
 import type { Post } from "./routes/types.js";
@@ -76,7 +76,7 @@ async function binStock(db: Database, actor: Actor, productId: string) {
       [actor.organizationId, actor.branchId, productId],
     )
   ).rows as { bin_id: string; quantity: number }[];
-  const holds = await records(db, actor.organizationId, "hold", actor.branchId);
+  const holds = await reservingHolds(db, actor.organizationId, actor.branchId);
   return bins
     .map((bin) => {
       const onHand = Number(rows.find((r) => r.bin_id === bin.id)?.quantity || 0);

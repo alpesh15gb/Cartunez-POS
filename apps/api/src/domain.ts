@@ -198,8 +198,19 @@ export async function adjust(
   // Keep the website's stock in step (only for the branch that sells online).
   await queueMagentoSync(db, actor.organizationId, [productId], reason, actor.branchId);
 }
+/**
+ * Integration: a counter hold past its `expiresAt` no longer reserves stock
+ * (it stays listed until resumed or discarded). Job-card holds never expire.
+ */
+export function holdReserves(hold: RecordData, at = Date.now()) {
+  return !hold.expiresAt || !(Date.parse(hold.expiresAt) <= at);
+}
+/** Parked sales (of a branch) that still reserve stock. */
+export async function reservingHolds(db: Database, organizationId: string, branchId?: string) {
+  return (await records(db, organizationId, "hold", branchId)).filter((hold) => holdReserves(hold));
+}
 export async function inventory(db: Database, actor: Actor) {
-  const holds = await records(db, actor.organizationId, "hold", actor.branchId);
+  const holds = await reservingHolds(db, actor.organizationId, actor.branchId);
   const rows = (
     await db.query(
       "SELECT product_id,bin_id,quantity FROM stock WHERE organization_id=$1 AND branch_id=$2 ORDER BY product_id,bin_id",

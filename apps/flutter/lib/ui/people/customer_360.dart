@@ -80,6 +80,7 @@ class Customer360View extends StatelessWidget {
     final limit = summary['creditLimit'] as int?;
     final stats = Map<String, dynamic>.from(summary['stats'] as Map? ?? {});
     final vehicles = [for (final v in summary['vehicles'] as List? ?? const []) if (v is Map) Map<String, dynamic>.from(v)];
+    final registered = app.list('customerVehicles').where((v) => v['customerId'] == customer['id']).toList();
     List<Json> rows(String key) => [for (final r in summary[key] as List? ?? const []) Map<String, dynamic>.from(r as Map)];
     Future<void> then(Future<bool> action) async {
       if (await action) onChanged?.call();
@@ -130,8 +131,20 @@ class Customer360View extends StatelessWidget {
         _Figure('Last visit', stats['lastVisit'] == null ? '—' : formatDate(stats['lastVisit'])),
       ]),
       SectionTitle('Vehicles'),
-      // Slot for the vehicle registry: shows the customer's saved vehicle(s) until then.
-      if (vehicles.isEmpty)
+      // Integration: the customer's vehicles from the vehicle registry (WS-C), each
+      // opening its page; the legacy saved vehicle shows only when none is registered.
+      if (registered.isNotEmpty)
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final v in registered)
+            ActionChip(
+              avatar: const Icon(Icons.directions_car_outlined, size: 18),
+              tooltip: 'Open vehicle',
+              label: Text([v['regNo'], v['make'], v['model'], v['variant'], v['year']]
+                  .where((e) => e != null && '$e'.isNotEmpty).join(' ')),
+              onPressed: () => ShellScope.of(context).open('/people/vehicles/${v['id']}'),
+            ),
+        ])
+      else if (vehicles.isEmpty)
         const Text('No vehicle saved. Add one when editing the customer or at the counter.')
       else
         Wrap(spacing: 8, runSpacing: 8, children: [

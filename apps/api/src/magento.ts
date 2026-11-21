@@ -4,7 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
-import { allow, fail, integer, text, type Actor } from "./domain.js";
+import { allow, fail, integer, reservingHolds, text, type Actor } from "./domain.js";
 import { magentoConfig, queueAllListings, queueMagentoSync } from "./online-queue.js";
 import { productImageData, productImages } from "./product-images.js";
 import type { Post } from "./routes/types.js";
@@ -52,7 +52,7 @@ export async function onlineQuantity(
       )
     ).rows[0]?.q || 0,
   );
-  const holds = await records(db, organizationId, "hold", branchId);
+  const holds = await reservingHolds(db, organizationId, branchId);
   const parked = holds.reduce(
     (sum, hold) =>
       sum +

@@ -46,6 +46,8 @@ test("Workshop: vehicle registry, estimate -> job card -> invoice, kits, serial 
     assert.equal(found.rows[0].id, swift.id);
     assert.equal(found.rows[0].customerName, "Arjun Demo");
     assert.equal((await get("customer-vehicles?q=1234", cashier)).rows[0].id, swift.id);
+    assert.deepEqual((await get("customer-vehicles?customerId=customer-1", cashier)).rows.map((v: any) => v.id), [swift.id]);
+    assert.equal((await get("customer-vehicles?customerId=nobody", cashier)).rows.length, 0);
     assert.equal((await get("customer-vehicles?q=9000000101", cashier)).rows[0].id, swift.id);
     assert.equal((await get("customer-vehicles/by-reg/MH12AB1234", cashier)).id, swift.id);
     await get("customer-vehicles/by-reg/XX00", cashier, 404);
@@ -133,12 +135,19 @@ test("Workshop: vehicle registry, estimate -> job card -> invoice, kits, serial 
     assert.equal(history.invoices[0].id, invoice.id);
     assert.equal(history.jobs[0].id, job.id);
 
-    // A direct job card; the counter can bill it (resuming its parked reservation) at catalog prices.
+    // A direct job card. Its parked reservation cannot be resumed, re-parked,
+    // discarded or billed at the counter: it is billed from the job card.
     const walkIn = await call("jobs", { vehicleId: swift.id, lines: [{ productId: "wiper", qty: 1 }] }, cashier);
     assert.equal(walkIn.number, "JOB-PUNE-2");
     const hold = (await get("bootstrap", cashier)).holds.find((h: any) => h.jobId === walkIn.id);
-    const counter = await call("invoices", {
-      ...hold.cart, holdId: hold.id, shiftId: shift.id, tenders: [{ type: "Cash", amount: walkIn.total, confirmed: true }],
+    const refused = await call("invoices", {
+      ...hold.cart, holdId: hold.id, shiftId: shift.id, transactionId: randomUUID(), tenders: [{ type: "Cash", amount: walkIn.total, confirmed: true }],
+    }, cashier, 409);
+    assert.match(refused.error, /job card/);
+    await call("holds", { id: hold.id, cart: hold.cart }, cashier, 409);
+    await call(`holds/${hold.id}`, undefined, cashier, 409, "DELETE");
+    const counter = await call(`jobs/${walkIn.id}/invoice`, {
+      transactionId: randomUUID(), shiftId: shift.id, tenders: [{ type: "Cash", amount: walkIn.total, confirmed: true }],
     }, cashier);
     assert.equal(counter.jobId, walkIn.id);
     assert.equal(counter.vehicleId, swift.id);
@@ -180,6 +189,26 @@ test("Workshop: vehicle registry, estimate -> job card -> invoice, kits, serial 
     assert.equal((await stockOf("brake-fluid")).quantity, fluidBefore.quantity - 4);
     const ledger = (await db.query("SELECT quantity FROM stock_ledger WHERE reference_id=$1 AND reason='Kit sale'", [kitSale.id])).rows;
     assert.equal(ledger.length, 2);
+    // Integration: returning kits puts their stocked components back, per kit returned.
+    await call("shifts/open", { openingCash: 0 }, manager);
+    const kitBack = await call(`invoices/${kitSale.id}/returns`, {
+      transactionId: randomUUID(), reason: "Not fitted", refundType: "Cash",
+      lines: [{ lineId: kitLine.id, quantity: 1, disposition: "restock", binId: "bin-a1" }],
+    }, manager);
+    assert.equal(kitBack.total, 320000);
+    assert.deepEqual(kitBack.lines[0].components.map((c: any) => [c.productId, c.qty, c.binId]).sort(),
+      [["brake", 1, "bin-a1"], ["brake-fluid", 2, "bin-a1"]]);
+    assert.equal((await stockOf("brake")).quantity, brakeBefore.quantity - 1);
+    assert.equal((await stockOf("brake-fluid")).quantity, fluidBefore.quantity - 2);
+    const kitDamaged = await call(`invoices/${kitSale.id}/returns`, {
+      transactionId: randomUUID(), reason: "Box crushed", refundType: "Cash",
+      lines: [{ lineId: kitLine.id, quantity: 1, disposition: "damaged" }],
+    }, manager);
+    const damagedBin = kitDamaged.lines[0].binId;
+    assert.ok(damagedBin);
+    assert.equal((await stockOf("brake")).quantity, brakeBefore.quantity - 1, "damaged parts are not back on the shelf");
+    assert.equal((await stockOf("brake-fluid", damagedBin)).quantity, 2);
+    assert.equal((await stockOf("brake", damagedBin)).quantity, 1);
     // Without selling beyond stock, missing components stop the sale.
     const settings = (await getRecord(db, "demo", "settings", "settings"))!;
     await putRecord(db, "demo", "settings", { ...settings, features: { ...(settings.features || {}), negativeStock: false } });

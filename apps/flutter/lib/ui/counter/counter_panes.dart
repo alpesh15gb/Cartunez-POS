@@ -447,8 +447,8 @@ class PaymentDock extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Badge(
-                isLabelVisible: app.list('holds').isNotEmpty,
-                label: Text('${app.list('holds').length}'),
+                isLabelVisible: counterHolds(app).isNotEmpty,
+                label: Text('${counterHolds(app).length}'),
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
                   onPressed: shell == null ? null : () => showParked(context, shell),

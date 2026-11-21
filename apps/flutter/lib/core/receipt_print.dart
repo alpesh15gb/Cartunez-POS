@@ -4,7 +4,9 @@
 // (or the Windows default printer). Web and Android: the normal print dialog.
 // The per-device choice is kept in local storage, never on the server.
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'store.dart';
 import 'receipt_print_io.dart' if (dart.library.js_interop) 'receipt_print_web.dart' as platform;
@@ -92,6 +94,21 @@ Uri whatsappUri(String? phone, String text) {
   if (digits.length == 11 && digits.startsWith('0')) digits = digits.substring(1);
   if (digits.length == 10) digits = '91$digits';
   return Uri.parse('https://wa.me/${digits.length >= 11 ? digits : ''}?text=${Uri.encodeComponent(text)}');
+}
+
+/// The one way the app opens WhatsApp (receipts, collection reminders, estimates):
+/// the wa.me link goes to the WhatsApp app on Android, a new tab on web and the
+/// default browser on Windows. Only if that fails is the link copied, and
+/// [toast] says so.
+Future<void> openWhatsApp(Uri uri, void Function(String message) toast,
+    {String copied = 'Could not open WhatsApp, so the link was copied. Paste it in a browser or chat.'}) async {
+  var opened = false;
+  try {
+    opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {}
+  if (opened) return;
+  await Clipboard.setData(ClipboardData(text: uri.toString()));
+  toast(copied);
 }
 
 /// UPI payment link for a static QR: the shop's UPI ID, payee name and amount.

@@ -163,6 +163,10 @@ export function vehicleRoutes(app: FastifyInstance, db: Database, post: Post) {
     const actor: Actor = request.actor;
     allow(actor, ANYONE);
     const q = typeof request.query?.q === "string" ? request.query.q.slice(0, 60) : "";
+    // Integration: `?customerId=` lists one customer's registered vehicles (Customer 360).
+    const customerId = typeof request.query?.customerId === "string" ? request.query.customerId : "";
+    if (customerId)
+      return { rows: (await searchVehicles(db, actor, q, Infinity)).filter((vehicle: RecordData) => vehicle.customerId === customerId).slice(0, 100) };
     return { rows: await searchVehicles(db, actor, q) };
   });
 
