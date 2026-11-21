@@ -1,9 +1,44 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "../db.js";
 import type { Post } from "./types.js";
-import { records, putRecord } from "../db.js";
-import { allow, scoped, integer, text, fail, id, now, audit, idempotent } from "../domain.js";
+import { records, putRecord, getRecord } from "../db.js";
+import { type Actor, allow, scoped, integer, text, fail, id, now, audit, idempotent, normalize } from "../domain.js";
 import { shiftCashSummaries, shiftSummary, countDenominations } from "../shift-cash.js";
+
+// Security: what each approval must be bound to.
+const approvalRules: Record<string, { amount: boolean; amountLabel: string; subject: boolean; subjectLabel: string }> = {
+  fitment: { amount: false, amountLabel: "", subject: false, subjectLabel: "" },
+  discount: { amount: true, amountLabel: "largest discount", subject: false, subjectLabel: "customer" },
+  return: { amount: false, amountLabel: "largest refund", subject: true, subjectLabel: "invoice number" },
+  adjustment: { amount: false, amountLabel: "largest quantity", subject: false, subjectLabel: "part SKU" },
+  "credit-limit": { amount: true, amountLabel: "most that may go on credit", subject: true, subjectLabel: "customer phone" },
+  "advance-refund": { amount: true, amountLabel: "most that may be given back", subject: true, subjectLabel: "customer phone" },
+};
+
+/** The record an approval is for: an invoice (id or number), a customer (id or phone) or a part (id or SKU). */
+async function approvalSubject(tx: Database, actor: Actor, action: string, value: string) {
+  const key = normalize(value);
+  if (action === "return") {
+    const invoice = (await getRecord(tx, actor.organizationId, "invoice", value)) ||
+      (await records(tx, actor.organizationId, "invoice", actor.branchId)).find((entry) => normalize(entry.number) === key);
+    if (!invoice || invoice.branchId !== actor.branchId) fail(`No invoice ${value} in this branch.`, 404);
+    return { id: invoice.id, label: String(invoice.number || invoice.id) };
+  }
+  if (action === "adjustment") {
+    const product = (await getRecord(tx, actor.organizationId, "product", value)) ||
+      (await records(tx, actor.organizationId, "product")).find((entry) => normalize(entry.sku) === key);
+    if (!product) fail(`No part with SKU ${value}.`, 404);
+    return { id: product.id, label: String(product.sku || product.name) };
+  }
+  if (action === "fitment") fail("A fitment approval is not tied to a customer or part.");
+  const digits = value.replace(/\D/g, "");
+  const customer = (await getRecord(tx, actor.organizationId, "customer", value)) ||
+    (digits.length >= 6
+      ? (await records(tx, actor.organizationId, "customer")).find((entry) => String(entry.phone || "").replace(/\D/g, "").endsWith(digits))
+      : undefined);
+  if (!customer) fail(`No customer with phone ${value}.`, 404);
+  return { id: customer.id, label: String(customer.name || customer.phone) };
+}
 
 export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("shifts/open", async (tx, actor, body) => {
@@ -74,18 +109,38 @@ export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
     // WS-B: credit-limit (sell on credit above the limit), advance-refund (give an advance back).
     if (!["fitment", "discount", "return", "adjustment", "credit-limit", "advance-refund"].includes(body.action))
       fail("Unknown approval action.");
+    // Security: an approval is bound to what it approves — the most it covers
+    // (paise; units for a stock adjustment) and the invoice / customer / part.
+    const rule = approvalRules[body.action as string];
+    const amount =
+      body.amount === undefined || body.amount === null || body.amount === ""
+        ? rule.amount
+          ? fail(`Enter the ${rule.amountLabel} this approval covers.`)
+          : null
+        : integer(body.amount, rule.amountLabel || "Amount", 0, 100000000000);
+    const subjectText = String(body.subjectId ?? body.subject ?? "").trim();
+    const subject = subjectText
+      ? await approvalSubject(tx, actor, body.action, subjectText)
+      : rule.subject
+        ? fail(`Enter the ${rule.subjectLabel} this approval is for.`)
+        : null;
     const approval = {
       id: id("approval"),
       branchId: actor.branchId,
       action: body.action,
       transactionId: text(body.transactionId, "transaction ID"),
       reason: text(body.reason, "reason"),
+      amount,
+      subjectId: subject?.id ?? null,
+      subjectLabel: subject?.label ?? null,
       approvedBy: actor.id,
       used: false,
       expiresAt: new Date(Date.now() + 900000).toISOString(),
     };
     await audit(tx, actor, "approval", approval.id, approval.reason, {
       action: approval.action,
+      amount: approval.amount,
+      subjectId: approval.subjectId,
     });
     return putRecord(
       tx,

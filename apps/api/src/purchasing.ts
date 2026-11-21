@@ -21,6 +21,32 @@ const STOCK_ROLES = ["owner", "manager", "inventory"];
 // Base64 adds a third, and requests are limited to 4 MiB.
 const MAX_ATTACHMENT = 2_900_000;
 const MAX_BILL_PHOTOS = 6;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const EXTENSIONS: Record<string, string> = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "application/pdf": ".pdf" };
+
+/** A header-safe download name: letters, digits, dot, dash and underscore, with the right extension. */
+function safeFileName(file: Record<string, any>) {
+  const extension = EXTENSIONS[file.contentType] || "";
+  const base = String(file.name || "").replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80);
+  return (base || "file") + extension;
+}
+
+/** Security: a cashier sees a photo on a job card of their branch or a vehicle, or their own upload — never a bill's. */
+async function sellerMaySee(db: Database, actor: Actor, file: Record<string, any>) {
+  const photo = JSON.stringify([{ id: file.id }]);
+  const onBill = await db.query(
+    "SELECT 1 FROM records WHERE organization_id=$1 AND kind IN ('purchaseBill','purchaseReturn') AND data->'photos' @> $2::jsonb LIMIT 1",
+    [actor.organizationId, photo],
+  );
+  if (onBill.rows.length) return false;
+  if (file.userId === actor.id) return true;
+  const shown = await db.query(
+    "SELECT 1 FROM records WHERE organization_id=$1 AND ((kind='job' AND branch_id=$3) OR kind='customerVehicle') " +
+      "AND data->'photos' @> $2::jsonb LIMIT 1",
+    [actor.organizationId, photo, actor.branchId],
+  );
+  return shown.rows.length > 0;
+}
 
 const day = (value: unknown, label: string) => {
   const s = String(value ?? "").slice(0, 10);
@@ -242,19 +268,26 @@ export async function payment(db: Database, actor: Actor, body: any, partyKind: 
 
 export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post) {
   // ---------- Attachments (photos of supplier notes and bills) ----------
+  // Security: stock roles handle every attachment. Cashiers may upload photos
+  // (job card and vehicle photos) and read only photos on a job card of their
+  // branch or a vehicle, or their own uploads — never a supplier bill.
   post("attachments", async (tx, actor, body) => {
     allow(actor, ["owner", "manager", "inventory", "cashier"]);
     const contentType = String(body.contentType || "");
-    if (!["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(contentType))
+    const photoTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (actor.role === "cashier" && !photoTypes.includes(contentType))
+      fail("Use a photo (JPEG, PNG or WebP).", 403);
+    if (![...photoTypes, "application/pdf"].includes(contentType))
       fail("Use a photo (JPEG, PNG, WebP) or a PDF.");
     if (typeof body.data !== "string" || body.data.length > MAX_ATTACHMENT * 1.4) fail("The file is too large (about 2.9 MB at most). Photos are shrunk automatically; split large PDFs.");
     const bytes = Buffer.from(body.data, "base64");
     if (!bytes.length || bytes.length > MAX_ATTACHMENT) fail("The file is too large (about 2.9 MB at most).");
+    const ascii = (start: number, end: number) => bytes.subarray(start, end).toString("latin1");
     const looksRight =
-      contentType === "application/pdf" ? bytes.subarray(0, 4).toString("ascii") === "%PDF"
-      : contentType === "image/jpeg" ? bytes[0] === 0xff && bytes[1] === 0xd8
-      : contentType === "image/png" ? bytes[0] === 0x89 && bytes[1] === 0x50
-      : bytes.subarray(0, 4).toString("ascii") === "RIFF";
+      contentType === "application/pdf" ? ascii(0, 5) === "%PDF-"
+      : contentType === "image/jpeg" ? bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      : contentType === "image/png" ? bytes.subarray(0, 8).equals(PNG_SIGNATURE)
+      : bytes.length >= 16 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP";
     if (!looksRight) fail("That file is not a valid photo or PDF.");
     const attachment = {
       id: id("file"),
@@ -274,7 +307,10 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     const actor: Actor = request.actor;
     const file = await getRecord(db, actor.organizationId, "attachment", String(request.params.id));
     if (!file) fail("File not found.", 404);
+    if (!STOCK_ROLES.includes(actor.role) && !(await sellerMaySee(db, actor, file!))) fail("File not found.", 404);
     reply.header("Content-Type", file!.contentType);
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Content-Disposition", `inline; filename="${safeFileName(file!)}"`);
     reply.header("Cache-Control", "private, max-age=31536000, immutable");
     return reply.send(Buffer.from(file!.data, "base64"));
   });

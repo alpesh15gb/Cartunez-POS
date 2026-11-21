@@ -94,6 +94,7 @@ export function inventoryRoutes(app: FastifyInstance, db: Database, post: Post) 
         "adjustment",
         body.approvalId,
         body.transactionId || body.productId + body.binId,
+        { amount: Math.abs(Number(body.quantity)), subjectId: body.productId }, // Security: bound approval
       );
       const stock = (await inventory(tx, actor)).find(
         (item) =>

@@ -25,7 +25,8 @@ registerSaleHook({
           `Take more of the payment now, or ask a manager to approve (reference ${ctx.body.transactionId}).`,
         403,
       );
-    await approved(ctx.db, ctx.actor, "credit-limit", ctx.body.creditApprovalId, ctx.body.transactionId);
+    await approved(ctx.db, ctx.actor, "credit-limit", ctx.body.creditApprovalId, ctx.body.transactionId,
+      { amount: credit, subjectId: ctx.customer.id }); // Security: bound approval
     ctx.state.creditLimitOverride = { limit, balanceBefore: balance, balanceAfter: after, approvalId: ctx.body.creditApprovalId || null };
   },
   beforePersist(ctx) {

@@ -116,7 +116,7 @@ export async function searchVehicles(db: Database, actor: Actor, query: string, 
       else if (vehicle.regKey.endsWith(key)) score = 60; // the last digits people remember
       else if (vehicle.regKey.includes(key)) score = 50;
       else if (vehicle.vin && normalize(vehicle.vin).includes(key)) score = 40;
-      else if (normalize(`${customer?.phone || ""}`).includes(key)) score = 30;
+      else if (actor.role !== "inventory" && normalize(`${customer?.phone || ""}`).includes(key)) score = 30;
       else if (normalize(`${vehicle.make} ${vehicle.model} ${customer?.name || ""}`).includes(key)) score = 20;
       return { vehicle, customer, score };
     })
@@ -125,7 +125,8 @@ export async function searchVehicles(db: Database, actor: Actor, query: string, 
   return scored.slice(0, limit).map(({ vehicle, customer }) => ({
     ...vehicle,
     customerName: customer?.name || "",
-    customerPhone: customer?.phone || "",
+    // Security: the stock (inventory) role does not get customer phone numbers.
+    customerPhone: actor.role === "inventory" ? "" : customer?.phone || "",
   }));
 }
 
@@ -195,7 +196,9 @@ export function vehicleRoutes(app: FastifyInstance, db: Database, post: Post) {
       .map(({ id, number, createdAt, total, lines }) => ({ id, number, createdAt, total, lines: lines.length }));
     const jobs = (await byVehicle("job")).map(({ id, number, status, createdAt, invoiceId, odoIn }) => ({ id, number, status, createdAt, invoiceId, odoIn }));
     const estimates = (await byVehicle("estimate")).map(({ id, number, status, createdAt, total }) => ({ id, number, status, createdAt, total }));
-    const customer = vehicle.customerId ? await getRecord(db, actor.organizationId, "customer", vehicle.customerId) : null;
+    const owner = vehicle.customerId ? await getRecord(db, actor.organizationId, "customer", vehicle.customerId) : null;
+    // Security: the stock (inventory) role sees who owns it, not how to reach them.
+    const customer = owner && actor.role === "inventory" ? { id: owner.id, name: owner.name } : owner;
     return { vehicle, customer, invoices, jobs, estimates };
   });
 }

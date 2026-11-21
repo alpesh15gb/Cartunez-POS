@@ -30,8 +30,8 @@ test("Returns, exchanges, credit limit and advances", async () => {
     const boot = (token: string) => get("bootstrap", token);
     const stockOf = async (productId: string, binId: string) =>
       (await boot(manager)).stock.filter((s: any) => s.productId === productId && s.binId === binId).reduce((n: number, s: any) => n + s.quantity, 0);
-    const approval = async (action: string, transactionId: string) =>
-      (await call("approvals", { action, transactionId, reason: "Test" }, manager)).id;
+    const approval = async (action: string, transactionId: string, bound: any = {}) =>
+      (await call("approvals", { action, transactionId, reason: "Test", ...bound }, manager)).id;
     const shift = await call("shifts/open", { openingCash: 0 }, cashier);
     await call("shifts/open", { openingCash: 0 }, manager);
     const cash = (amount: number) => [{ type: "Cash", amount, confirmed: true }];
@@ -97,7 +97,7 @@ test("Returns, exchanges, credit limit and advances", async () => {
     });
     // Cashier needs a manager's return approval.
     await call("invoices", exchangeBody(cash(brakePrice - old.total)), cashier, 403);
-    const returnApprovalId = await approval("return", exchangeId);
+    const returnApprovalId = await approval("return", exchangeId, { subjectId: old.id });
     // Not enough paid: everything rolls back (no credit note, no stock change).
     const creditsBefore = (await records(db, "demo", "return", "pune")).length;
     await call("invoices", exchangeBody(cash(brakePrice - old.total - 100), { returnApprovalId }), cashier, 400);
@@ -121,7 +121,7 @@ test("Returns, exchanges, credit limit and advances", async () => {
     assert.equal((await call("invoices", exchangeBody(cash(brakePrice - old.total), { returnApprovalId }), cashier)).id, swapped.id);
     // The wiper on that bill is now fully returned.
     await call("invoices", {
-      ...exchangeBody(cash(brakePrice), { returnApprovalId: await approval("return", "x") }),
+      ...exchangeBody(cash(brakePrice), { returnApprovalId: await approval("return", "x", { subjectId: old.id }) }),
       transactionId: "x",
     }, cashier, 400);
 
@@ -138,7 +138,7 @@ test("Returns, exchanges, credit limit and advances", async () => {
       returns: [{ kind: "returnRef", invoiceId: big.id, lineId: big.lines[0].id, qty: 1 }],
       tenders: cash(0),
       exchangeRefundType: "Cash",
-      returnApprovalId: await approval("return", cheapId),
+      returnApprovalId: await approval("return", cheapId, { subjectId: big.id }),
     }, cashier);
     assert.equal(cheap.exchange.applied, cheap.total);
     assert.equal(cheap.exchange.refund, big.total - cheap.total);
@@ -167,7 +167,7 @@ test("Returns, exchanges, credit limit and advances", async () => {
     const blockedId = randomUUID();
     const blocked = await onCredit(blockedId, { status: 403 });
     assert.match(blocked.error, /above their credit limit/);
-    const overridden = await onCredit(blockedId, { creditApprovalId: await approval("credit-limit", blockedId) });
+    const overridden = await onCredit(blockedId, { creditApprovalId: await approval("credit-limit", blockedId, { subjectId: "9876500002", amount: brakePrice }) });
     assert.equal(overridden.creditLimitOverride.limit, 100000);
     // Within the limit no approval is needed.
     await call(`customers/${buyer.id}/credit-limit`, { creditLimit: 10000000 }, manager);
@@ -201,7 +201,7 @@ test("Returns, exchanges, credit limit and advances", async () => {
     const refundId = randomUUID();
     await call(`customers/${booker.id}/advances/refund`, {
       transactionId: refundId, amount: 10000, mode: "Cash", reason: "Cancelled",
-      approvalId: await approval("advance-refund", refundId),
+      approvalId: await approval("advance-refund", refundId, { subjectId: booker.id, amount: 10000 }),
     }, cashier);
     await call(`customers/${booker.id}/advances/refund`, { amount: 9999999, mode: "Cash", reason: "Too much" }, manager, 409);
     await call(`customers/${booker.id}/advances/refund`, { amount: 240000, mode: "UPI", reason: "Cancelled" }, manager);

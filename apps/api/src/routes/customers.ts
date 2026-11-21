@@ -106,7 +106,8 @@ export function customerRoutes(app: FastifyInstance, db: Database, post: Post) {
     text(body.reason, "reason");
     if (!MANAGERS.includes(actor.role) && !body.approvalId)
       fail("A manager must approve giving an advance back.", 403);
-    await approved(tx, actor, "advance-refund", body.approvalId, String(body.transactionId || ""));
+    await approved(tx, actor, "advance-refund", body.approvalId, String(body.transactionId || ""),
+      { amount: Number(body.amount), subjectId: customer.id }); // Security: bound approval
     const available = await availableAdvance(tx, actor.organizationId, customer.id);
     const amount = integer(body.amount, "Amount", 1);
     if (amount > available)
