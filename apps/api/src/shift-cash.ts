@@ -30,7 +30,8 @@ export async function shiftCashSummaries(db: Database, actor: Actor, shifts: Rec
       if (data.direction === "in") cash.cashIn += data.amount;
       else cash.cashOut += data.amount;
     } else if ((data.refundType ?? "Cash") === "Cash") {
-      cash.cashRefunds += data.total;
+      // WS-B: an exchange credit note pays back only its refundTotal.
+      cash.cashRefunds += data.refundTotal ?? data.total;
     }
   }
   return shifts.map(shift => {

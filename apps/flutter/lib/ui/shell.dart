@@ -9,6 +9,10 @@ import '../main.dart';
 import '../state/app_state.dart';
 import 'barcode_scan.dart';
 import 'login.dart';
+// WS-B: returns desk, customer 360 and collections.
+import 'orders/returns.dart';
+import 'people/collections.dart';
+import 'people/customer_360.dart';
 import 'prefs.dart';
 import 'screens/billing.dart';
 import 'screens/bills.dart';
@@ -121,6 +125,11 @@ final workspaces = <Workspace>[
     TabDef('invoices', 'Invoices & returns', _sellers, 'Reprint receipts, take returns, void invoices and see credit notes.',
         (_, _) => const InvoicesScreen(),
         path: '/orders/invoices', detail: _openInvoice),
+    // WS-B
+    TabDef('sales-returns', 'Returns & exchange', _sellers,
+        'Find a bill by number, receipt barcode, phone or serial; refund, exchange or give store credit.',
+        (_, _) => const ReturnsPage(),
+        path: '/orders/returns'),
     TabDef('online-orders', 'Online orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
         (_, _) => const OnlineOrdersScreen(),
         path: '/orders/online', feature: 'onlineStore', detail: _openOnlineOrder),
@@ -158,9 +167,13 @@ final workspaces = <Workspace>[
         path: '/purchasing/suppliers', detail: _openLedger('suppliers')),
   ]),
   Workspace('/people', 'People & vehicles', 'People', Icons.people_outline, [
+    // WS-B: /people/customers/:id opens the customer 360 page.
     TabDef('customers', 'Customers', _sellers, 'Customers, credit (udhaar) balances and payments received.',
-        (_, _) => const ContactsScreen(kind: 'customers'),
-        path: '/people/customers', detail: _openLedger('customers')),
+        (_, id) => id == null ? const ContactsScreen(kind: 'customers') : Customer360Page(id: id),
+        path: '/people/customers', takesArg: true),
+    TabDef('collections', 'Collections', _sellers, 'Customers who owe you: collect payments and send WhatsApp reminders.',
+        (_, _) => const CollectionsPage(),
+        path: '/people/collections'),
     TabDef('people-suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
         (_, _) => const ContactsScreen(kind: 'suppliers'),
         path: '/people/suppliers', detail: _openLedger('suppliers')),

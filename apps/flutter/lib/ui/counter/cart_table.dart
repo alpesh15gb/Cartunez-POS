@@ -8,6 +8,7 @@ import '../widgets.dart';
 import '../screens/people.dart';
 import 'counter_actions.dart';
 import 'tender_sheet.dart';
+import '../orders/exchange.dart' show ExchangeReturnsPanel; // WS-B
 
 const _figures = [FontFeature.tabularFigures()];
 
@@ -104,6 +105,7 @@ class CartPanel extends StatelessWidget {
                 itemBuilder: (context, index) => _CartLine(index: index, line: bill?.lines.elementAtOrNull(index)),
               ),
       ),
+      const ExchangeReturnsPanel(), // WS-B: items coming back in an exchange
       if (billError != null)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),

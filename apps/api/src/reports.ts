@@ -320,7 +320,7 @@ export async function report(
         const refunded =
           returns
             .filter((item) => item.refundType === type)
-            .reduce((sum, item) => sum + item.total, 0) +
+            .reduce((sum, item) => sum + (item.refundTotal ?? item.total), 0) + // WS-B: exchange part is not a refund
           coreRefunds
             .filter((item) => item.refundType === type)
             .reduce((sum, item) => sum + item.total, 0);

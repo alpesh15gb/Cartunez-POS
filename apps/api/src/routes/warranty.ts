@@ -8,7 +8,9 @@ export function warrantyRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("warranty-claims", async (tx, actor, body) => {
     allow(actor, ["owner", "manager", "inventory"]);
     const returned = await scoped(tx, actor, "return", body.returnId);
-    if (returned.condition !== "warranty") fail("Choose a warranty return.");
+    // WS-B: a return can send some lines to the warranty bin (disposition "rma").
+    if (returned.condition !== "warranty" && !(returned.lines || []).some((line: any) => line.disposition === "rma"))
+      fail("Choose a warranty return.");
     await scoped(tx, actor, "supplier", body.supplierId);
     const previous = body.id
       ? await scoped(tx, actor, "warranty", body.id)

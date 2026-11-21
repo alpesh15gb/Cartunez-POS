@@ -8,6 +8,8 @@ import '../../main.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../screens/receipt.dart';
+import '../orders/exchange.dart' show exchangeReturns, exchangeCheckout; // WS-B
+import '../people/account_actions.dart' show AccountTenderNote, availableAdvance; // WS-B
 
 // ---------------- checkout ----------------
 
@@ -27,6 +29,12 @@ Future<void> startCheckout(BuildContext context) async {
     bill = app.currentQuote();
   } catch (error) {
     app.toast(errorText(error));
+    return;
+  }
+  // WS-B: a bill with items coming back (exchange) settles only the difference.
+  if (exchangeReturns(app.cart).isNotEmpty) {
+    final swapped = await exchangeCheckout(context, bill);
+    if (swapped != null && context.mounted) await showReceipt(context, swapped);
     return;
   }
   final invoice = await showDialog<Json>(
@@ -90,10 +98,15 @@ class CheckoutDialogState extends State<CheckoutDialog> {
   List<String> get _types {
     final app = context.appRead;
     final customer = app.customerById('${app.cart['customerId']}');
-    return [...app.tenderTypes, if (customer != null) 'Credit'];
+    return [
+      ...app.tenderTypes,
+      if (customer != null) 'Credit',
+      // WS-B: offered when money is held for the customer (advance or store credit).
+      if (customer != null && availableAdvance(app, '${customer['id']}') > 0) 'Advance',
+    ];
   }
 
-  static bool _external(String type) => type != 'Cash' && type != 'Credit';
+  static bool _external(String type) => type != 'Cash' && type != 'Credit' && type != 'Advance'; // WS-B: Advance
 
   @override
   void dispose() {
@@ -186,6 +199,13 @@ class CheckoutDialogState extends State<CheckoutDialog> {
               selected: {tender},
               onSelectionChanged: (v) => setState(() {
                 tender = v.first;
+                // WS-B: offer the customer's advance, up to the bill total.
+                if (tender == 'Advance') {
+                  final held = availableAdvance(app, '${app.cart['customerId']}');
+                  amount.text = (min(held, total) / 100).toStringAsFixed(2);
+                  if (held < total) split = true;
+                  second.text = (max(0, total - held) / 100).toStringAsFixed(2);
+                }
                 if (secondTender == tender) secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
                 confirmed = false;
                 for (final c in references.values) { c.clear(); }
@@ -220,6 +240,9 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
+            // WS-B: credit limit and advance notes.
+            for (final t in {tender, if (split) secondTender})
+              AccountTenderNote(tender: t, amount: t == tender ? _minor(amount.text) : _minor(second.text), total: total),
             if (types.length > 1)
               Align(
                 alignment: Alignment.centerLeft,

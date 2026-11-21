@@ -345,6 +345,9 @@ Future<void> issueApproval(BuildContext context) async {
         ('return', 'Return or refund'),
         ('fitment', 'Part that may not fit the vehicle'),
         ('adjustment', 'Stock adjustment'),
+        // WS-B
+        ('credit-limit', 'Sale on credit above the customer\'s limit'),
+        ('advance-refund', 'Giving a customer advance back'),
       ]),
       FieldSpec('transactionId', 'Reference shown on the cashier\'s screen', required: true),
       FieldSpec('reason', 'Reason', required: true),

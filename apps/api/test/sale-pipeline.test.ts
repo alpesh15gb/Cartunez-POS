@@ -36,7 +36,8 @@ test("Checkout pipeline: hooks, staff on lines, Advance tender, number series", 
     const oil = { productId: "oil", qty: 1, binId: "bin-a1" };
 
     // Built-in behaviour is registered as ordered hooks.
-    assert.deepEqual(saleHooks().map((hook) => hook.name), [
+    // (Feature hooks from other modules, such as WS-B's "ws-b-*", sit among them.)
+    assert.deepEqual(saleHooks().map((hook) => hook.name).filter((name) => !name.startsWith("ws-")), [
       "account-tender-gate", "line-staff", "credit-tender", "tender-rules",
       "customer-check", "stock-and-serials", "release-hold", "audit",
     ]);
@@ -54,9 +55,9 @@ test("Checkout pipeline: hooks, staff on lines, Advance tender, number series", 
     const refused = await call("invoices", sale([{ ...oil, staffId: "user-nobody" }]), cashier, 400);
     assert.match(refused.error || refused.message, /staff member/);
 
-    // Advance is a recognised tender but rejected until a hook enables it.
+    // Advance is enabled by WS-B's hooks/advance.ts: it needs a customer with money held.
     const advance = await call("invoices", sale([oil], [{ type: "Advance", amount: 10000000, confirmed: true }]), cashier, 400);
-    assert.match(advance.error || advance.message, /advance is not available/);
+    assert.match(advance.error || advance.message, /customer before paying from their advance/);
 
     // A hook can validate lines and add lines before totals.
     const remove = registerSaleHook({

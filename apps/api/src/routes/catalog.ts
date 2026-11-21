@@ -124,14 +124,10 @@ export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
       return { id: part.id };
     });
   }
-  for (const kind of ["customer", "supplier"] as const)
+  // WS-B: customers are saved by routes/customers.ts (keeps credit limits).
+  for (const kind of ["supplier"] as const)
     post(kind + "s", async (tx, actor, body) => {
-      allow(
-        actor,
-        kind === "customer"
-          ? ["owner", "manager", "cashier"]
-          : ["owner", "manager", "inventory"],
-      );
+      allow(actor, ["owner", "manager", "inventory"]);
       const entity = {
         id: body.id || id(kind),
         name: text(body.name, "name"),
