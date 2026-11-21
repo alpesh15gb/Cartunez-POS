@@ -9,7 +9,8 @@ import { connectDatabase, migrate, getRecord } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
 import { pollMagentoOrders } from "../src/magento-orders.js";
-import { runMagentoShipments, gstStateCode, isCashOnDelivery } from "../src/fulfilment.js";
+import { runMagentoShipments, runMagentoInvoices, gstStateCode, isCashOnDelivery, paymentKind, shares } from "../src/fulfilment.js";
+import { fakeMagento } from "./fake-magento-shop.js";
 
 test("delivery state and payment method helpers", () => {
   assert.equal(gstStateCode("MH"), "27");
@@ -17,58 +18,16 @@ test("delivery state and payment method helpers", () => {
   assert.equal(gstStateCode("XX", "Nowhere"), "");
   assert.equal(isCashOnDelivery({ method: "cashondelivery" }), true);
   assert.equal(isCashOnDelivery({ method: "razorpay", title: "Pay online" }), false);
+  // Only gateway methods named in the settings are paid; bank transfer / UPI is paid later.
+  assert.equal(paymentKind({ method: "banktransfer" }), "bank");
+  assert.equal(paymentKind({ method: "razorpay" }), "bank");
+  assert.equal(paymentKind({ method: "razorpay" }, { prepaidMethods: ["razorpay"] }), "prepaid");
+  assert.equal(paymentKind({ method: "cashondelivery" }, { prepaidMethods: ["razorpay"] }), "cod");
+  // Row totals shared over bins: the last share takes the residual paise.
+  assert.deepEqual(shares(10000, [1, 1, 1]), [3333, 3334, 3333]);
+  assert.deepEqual(shares(10001, [2, 1]), [6667, 3334]);
 });
 
-/** Magento with editable orders and a ship endpoint that can be made to fail. */
-function fakeMagento() {
-  const orders: any[] = [];
-  const shipments: any[] = [];
-  let shipFailures = 0;
-  const fetch = (async (url: string | URL, init: any = {}) => {
-    const u = new URL(String(url));
-    const reply = (status: number, data: unknown) =>
-      new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
-    if (init.headers?.Authorization !== "Bearer test-token") return reply(401, { message: "Unauthorized" });
-    if (u.pathname === "/rest/V1/store/storeConfigs") return reply(200, [{ base_currency_code: "INR" }]);
-    if (u.pathname === "/rest/all/V1/orders") {
-      const since = u.searchParams.get("searchCriteria[filter_groups][0][filters][0][value]")!;
-      const items = orders.filter((o) => o.updated_at >= since);
-      return reply(200, { items, total_count: items.length });
-    }
-    const ship = u.pathname.match(/^\/rest\/V1\/order\/(\d+)\/ship$/);
-    if (ship && init.method === "POST") {
-      if (shipFailures > 0) {
-        shipFailures--;
-        return reply(500, { message: "Magento is busy." });
-      }
-      shipments.push({ orderId: Number(ship[1]), body: JSON.parse(init.body) });
-      return reply(200, 900 + shipments.length);
-    }
-    if (u.pathname.startsWith("/rest/all/V1/products/")) return reply(200, { id: 1, sku: "x" });
-    return reply(404, { message: "Not found" });
-  }) as typeof globalThis.fetch;
-  let clock = Date.now();
-  const stamp = () => new Date((clock = Math.max(Date.now(), clock + 1000))).toISOString().slice(0, 19).replace("T", " ");
-  const order = (n: number, items: [string, number][], extra: any = {}) => {
-    const o = {
-      entity_id: n, increment_id: `10000000${n}`, state: "new", status: "pending",
-      created_at: stamp(), updated_at: stamp(),
-      customer_firstname: "Asha", customer_lastname: "Rao", customer_email: `asha${n}@example.com`,
-      grand_total: 300, order_currency_code: "INR",
-      payment: { method: "razorpay", additional_information: ["Razorpay"] },
-      extension_attributes: { shipping_assignments: [{ shipping: { address: { street: ["12 MG Road"], city: "Pune", postcode: "411001", region: "Maharashtra", region_code: "MH", telephone: "98000000" + n } } }] },
-      items: items.map(([sku, qty], i) => ({ item_id: n * 10 + i, sku, name: sku, qty_ordered: qty, qty_invoiced: 0, qty_canceled: 0, qty_refunded: 0, price_incl_tax: 100, row_total_incl_tax: 100 * qty, discount_amount: 0 })),
-      ...extra,
-    };
-    orders.push(o);
-    return o;
-  };
-  const update = (o: any, change: (item: any) => void) => {
-    o.items.forEach(change);
-    o.updated_at = stamp();
-  };
-  return { fetch, order, update, shipments, failShipments: (n: number) => (shipFailures = n) };
-}
 
 test("Online fulfilment: pick, invoice & pack without a shift, ship with retries, COD collected on delivery", async () => {
   const db = await connectDatabase({ memory: true });
@@ -92,7 +51,7 @@ test("Online fulfilment: pick, invoice & pack without a shift, ship with retries
       (await boot(owner)).stock.filter((s: any) => s.productId === productId).reduce((n: number, s: any) => n + s.available, 0);
     const poll = () => pollMagentoOrders(db, { fetch: magento.fetch, organizationId: "demo" });
     const online = (n: number) => getRecord(db, "demo", "onlineOrder", `mg-${n}`);
-    await call("integrations/magento", { baseUrl: "http://magento.test", token: "test-token", branchId: "pune", enabled: true }, owner);
+    await call("integrations/magento", { baseUrl: "http://magento.test", token: "test-token", branchId: "pune", enabled: true, prepaidMethods: "razorpay" }, owner);
 
     // A prepaid order: stock reserved, and a Magento invoice no longer takes it.
     const o1 = magento.order(1, [["ML-FILTER-01", 3]]);
@@ -144,12 +103,6 @@ test("Online fulfilment: pick, invoice & pack without a shift, ship with retries
     assert.equal(after.shifts.length, 0);
     assert.ok(after.invoices.some((i: any) => i.id === invoice.id));
 
-    // Magento invoices and ships later: no second deduction.
-    magento.update(o1, (i) => (i.qty_shipped = 3));
-    await poll();
-    assert.equal(await onHand("filter"), 21);
-    assert.equal((await online(1))!.lines[0].reserved, 0);
-
     // The counter cannot use the online till or the Online tender.
     const shift = await call("shifts/open", { openingCash: 0 }, cashier);
     const counterSale = (shiftId: string, type: string, token = cashier, status = 400) =>
@@ -171,7 +124,10 @@ test("Online fulfilment: pick, invoice & pack without a shift, ship with retries
     // Backed off: not retried straight away.
     assert.deepEqual(await runMagentoShipments(db, { fetch: magento.fetch }), { sent: 0, failed: 0 });
     await call("online-orders/mg-1/shipment/retry", {}, owner);
-    assert.deepEqual(await call("online-orders/shipments/push", {}, owner), { sent: 1, failed: 0 });
+    // o1 was invoiced on Magento already (gateway), so the queued Magento invoice is skipped.
+    assert.deepEqual(await call("online-orders/shipments/push", {}, owner), { sent: 1, failed: 0, invoices: { sent: 1, failed: 0 } });
+    assert.equal(magento.invoices.length, 0);
+    assert.equal((await online(1))!.fulfilment.magentoInvoice.state, "skipped");
     order = await online(1);
     assert.equal(order!.fulfilment.shipment.state, "sent");
     assert.equal(order!.fulfilment.status, "shipped");
@@ -180,6 +136,11 @@ test("Online fulfilment: pick, invoice & pack without a shift, ship with retries
     assert.deepEqual(magento.shipments[0].body.items, [{ order_item_id: 10, qty: 3 }]);
     assert.equal(magento.shipments[0].orderId, 1);
     await call("online-orders/mg-1/ship", { courier: "Delhivery", tracking: "AGAIN" }, owner, 409);
+    // Magento shipped it: reading the order again takes no stock a second time.
+    await poll();
+    assert.equal(await onHand("filter"), 21);
+    assert.equal((await online(1))!.lines[0].reserved, 0);
+    assert.equal((await online(1))!.lines[0].shipped, 3);
     const delivered = await call("online-orders/mg-1/delivered", {}, owner);
     assert.equal(delivered.payment, null);
 
@@ -199,6 +160,11 @@ test("Online fulfilment: pick, invoice & pack without a shift, ship with retries
     assert.equal(paid.order.fulfilment.codDue, 0);
     assert.equal((await boot(owner)).partyBalances.customers[customerId], 0);
     await call("online-orders/mg-2/delivered", {}, owner, 409);
+    // COD delivered: the Magento invoice is made (no capture, no email).
+    assert.equal(paid.order.fulfilment.magentoInvoice.state, "queued");
+    assert.deepEqual(await runMagentoInvoices(db, { fetch: magento.fetch }), { sent: 1, failed: 0 });
+    assert.deepEqual(magento.invoices, [{ orderId: 2, body: { capture: false, notify: false } }]);
+    assert.equal((await online(2))!.fulfilment.magentoInvoice.state, "sent");
   } finally {
     await app.close();
     await db.close();

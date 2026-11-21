@@ -544,6 +544,12 @@ Future<void> editMagento(BuildContext context) async {
       FieldSpec('websiteId', 'Magento website ID', kind: FieldKind.number, value: m['websiteId'] ?? 1, advanced: true),
       FieldSpec('rootCategoryId', 'Magento root category ID', kind: FieldKind.number, value: m['rootCategoryId'] ?? 2, advanced: true,
           help: 'Part categories are created under this one (2 = Default Category).'),
+      // WS-E: MSI source shipments come from, and the payment methods a gateway collects.
+      FieldSpec('sourceCode', 'MSI source code', value: m['sourceCode'] ?? '', advanced: true,
+          help: 'The Magento inventory source orders ship from (Stores › Sources). Leave empty for the default source.'),
+      FieldSpec('prepaidMethods', 'Prepaid payment method codes', value: ((m['prepaidMethods'] as List?) ?? []).join(', '), advanced: true,
+          help: 'Magento payment codes a gateway has already collected, for example razorpay. Others (bank transfer / UPI, '
+              'cash on delivery) stay on the customer\'s account until the money is recorded.'),
     ],
     onSubmit: (v) async {
       final token = '${v['token'] ?? ''}'.trim();
@@ -562,6 +568,8 @@ Future<void> editMagento(BuildContext context) async {
         'attributeSetId': int.tryParse('${v['attributeSetId']}') ?? 4,
         'websiteId': int.tryParse('${v['websiteId']}') ?? 1,
         'rootCategoryId': int.tryParse('${v['rootCategoryId']}') ?? 2,
+        'sourceCode': '${v['sourceCode'] ?? ''}'.trim(),
+        'prepaidMethods': '${v['prepaidMethods'] ?? ''}',
         'enabled': v['enabled'] == 'on',
       }, v['enabled'] == 'on' ? 'Magento connected. Published parts are being sent.' : 'Magento settings saved. Sync is paused.');
     },

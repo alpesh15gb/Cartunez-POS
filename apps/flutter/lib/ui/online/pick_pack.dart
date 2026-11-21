@@ -1,12 +1,14 @@
 // WS-E: pick & pack one online order: scan items (and serials), invoice & pack
 // (a GST invoice from the POS), packing slip, courier + tracking to Magento,
-// delivered (cash on delivery collected).
+// delivered (cash on delivery collected), bank transfer / UPI payment received,
+// and the credit note when the website cancelled or refunded after invoicing.
 import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
 import '../barcode_scan.dart';
+import '../orders/returns.dart' show findReturnable, startReturn;
 import '../purchasing/common.dart' show paymentModes, amountMinor, plainAmount;
 import '../theme.dart';
 import '../widgets.dart';
@@ -165,10 +167,63 @@ class _PickPackPageState extends State<PickPackPage> {
         await _push();
       });
 
+  /// Bank transfer / UPI: the customer's money arrived; recorded with its reference.
+  Future<void> _paymentReceived(Json o) async {
+    final app = context.appRead;
+    final f = fulfilmentOf(o);
+    await showFormDialog<void>(
+      context,
+      title: 'Payment received',
+      submit: 'Record payment',
+      fields: [
+        FieldSpec('amount', 'Amount received', kind: FieldKind.money, required: true, value: plainAmount(paymentDue(f)),
+            help: 'For invoice ${f['invoiceNumber']}. It is recorded on the customer\'s account, then Magento is invoiced.'),
+        FieldSpec('mode', 'Received by', kind: FieldKind.select, value: 'UPI', options: const [('UPI', 'UPI'), ('Bank transfer', 'Bank transfer')]),
+        const FieldSpec('reference', 'UPI / bank reference (UTR)', required: true),
+      ],
+      onSubmit: (v) async {
+        await app.mutate('/online-orders/${o['id']}/payment-received', {
+          'amount': amountMinor(v['amount']),
+          'mode': v['mode'],
+          'reference': '${v['reference']}'.trim(),
+        }, 'Payment recorded. Magento will be invoiced.');
+        await _push();
+      },
+    );
+  }
+
+  /// Opens the return form for the order's invoice (Orders › Returns & exchange).
+  Future<void> _makeCreditNote(Map flag) => _run(() async {
+        final app = context.appRead;
+        final rows = await findReturnable(app, '${flag['invoiceNumber']}');
+        final row = rows.where((r) => r['id'] == flag['invoiceId']).firstOrNull;
+        if (row == null) throw FormProblem('Invoice ${flag['invoiceNumber']} was not found. Open Orders › Returns & exchange.');
+        if (!mounted) return;
+        await startReturn(context, row);
+      });
+
+  Future<void> _resolveCreditNote(Json o, {bool notNeeded = false}) async {
+    final app = context.appRead;
+    if (!notNeeded) {
+      return _run(() async {
+        await app.mutate('/online-orders/${o['id']}/credit-note/resolve', {}, 'Credit note recorded. The shipment can go now.');
+      });
+    }
+    await showFormDialog<void>(
+      context,
+      title: 'No credit note needed',
+      submit: 'Save',
+      fields: [const FieldSpec('reason', 'Why no credit note is needed', required: true)],
+      onSubmit: (v) async {
+        await app.mutate('/online-orders/${o['id']}/credit-note/resolve', {'reason': '${v['reason']}'.trim()}, 'Saved.');
+      },
+    );
+  }
+
   Future<void> _delivered(Json o) async {
     final app = context.appRead;
     final f = fulfilmentOf(o);
-    final cod = f['cod'] == true && ((f['codDue'] as num?) ?? 0) > 0;
+    final cod = f['cod'] == true && ((f['codDue'] as num?) ?? 0) > 0 && f['invoiceVoided'] == null;
     await showFormDialog<void>(
       context,
       title: 'Mark delivered',
@@ -228,6 +283,34 @@ class _PickPackPageState extends State<PickPackPage> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(message!, style: TextStyle(color: messageIsError ? Brand.danger : Brand.forest, fontWeight: FontWeight.w600)),
+                ),
+              if (creditNoteNeeded(o) case final flag?)
+                Container(
+                  key: const ValueKey('credit-note-needed'),
+                  margin: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: const Color(0xFFFBEBE7), borderRadius: BorderRadius.circular(10)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Credit note needed', style: TextStyle(color: Brand.danger, fontWeight: FontWeight.w800)),
+                    Text('The website cancelled or refunded ${[
+                      for (final l in (flag['lines'] as List? ?? []).cast<Map>()) '${l['qty']} × ${l['name'] ?? l['sku']}',
+                    ].join(', ')} after invoice ${flag['invoiceNumber']} was made. Make the credit note for those items; the shipment waits until then.'),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      FilledButton.icon(
+                          onPressed: busy ? null : () => _makeCreditNote(flag),
+                          icon: const Icon(Icons.assignment_return_outlined),
+                          label: const Text('Make credit note')),
+                      OutlinedButton(onPressed: busy ? null : () => _resolveCreditNote(o), child: const Text('Credit note made')),
+                      TextButton(onPressed: busy ? null : () => _resolveCreditNote(o, notNeeded: true), child: const Text('Not needed')),
+                    ]),
+                  ]),
+                ),
+              if (f['invoiceVoided'] != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text('Invoice ${(f['invoiceVoided'] as Map)['invoiceNumber']} was voided after the goods left. Nothing can be collected against it.',
+                      style: const TextStyle(color: Brand.danger)),
                 ),
               if (o['mode'] != 'pos' && f['invoiceId'] == null)
                 const Padding(
@@ -292,9 +375,23 @@ class _PickPackPageState extends State<PickPackPage> {
               ],
               if (f['invoiceId'] != null) ...[
                 const SectionTitle('Invoice & packing slip'),
-                Text('Invoice ${f['invoiceNumber']} · ${app.money(f['invoiceTotal'] as num?)}${f['cod'] == true ? ' · cash on delivery' : ' · paid online'}'),
+                Text('Invoice ${f['invoiceNumber']} · ${app.money(f['invoiceTotal'] as num?)} · ${paymentLabel(f)}'
+                    '${paymentDue(f) > 0 ? ' · ${app.money(paymentDue(f))} not received yet' : f['paymentKind'] == 'bank' ? ' · received' : ''}'),
+                if (f['magentoInvoice'] is Map)
+                  Text(switch ((f['magentoInvoice'] as Map)['state']) {
+                    'sent' => 'Magento invoice made.',
+                    'skipped' => 'Magento was already invoiced.',
+                    'queued' => 'Magento invoice waiting to be made.',
+                    _ => 'Magento invoice not made yet: ${(f['magentoInvoice'] as Map)['error'] ?? ''}',
+                  }, style: small),
                 const SizedBox(height: 8),
                 Wrap(spacing: 8, runSpacing: 8, children: [
+                  if (paymentDue(f) > 0)
+                    FilledButton.tonalIcon(
+                      onPressed: busy ? null : () => _paymentReceived(o),
+                      icon: const Icon(Icons.currency_rupee),
+                      label: const Text('Payment received'),
+                    ),
                   OutlinedButton.icon(
                     onPressed: () async {
                       try {
@@ -326,24 +423,27 @@ class _PickPackPageState extends State<PickPackPage> {
                 const SectionTitle('Shipment'),
                 Text('${shipment['courier']} · ${shipment['tracking']}'),
                 Text(switch (shipment['state']) {
+                  'sent' when shipment['note'] != null => 'On Magento. ${shipment['note']}',
                   'sent' => 'On Magento. The customer was notified.',
                   'queued' => 'Waiting to send to Magento.',
+                  'held' => '${shipment['error']}',
+                  'cancelled' => '${shipment['error'] ?? 'Nothing is left to ship on Magento.'}',
                   'failed' => 'Magento did not accept it after several tries: ${shipment['error']}',
                   _ => 'Not sent yet (${shipment['attempts'] ?? 0} tries): ${shipment['error']}. It is retried automatically.',
                 }, style: TextStyle(color: shipment['state'] == 'sent' ? Brand.forest : shipment['state'] == 'queued' ? null : Brand.danger)),
-                if (shipment['state'] != 'sent')
+                if (shipment['state'] != 'sent' && shipment['state'] != 'cancelled' && creditNoteNeeded(o) == null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: OutlinedButton.icon(onPressed: busy ? null : () => _retry(o), icon: const Icon(Icons.refresh), label: const Text('Send again now')),
                   ),
               ],
               // ---------- 4. Delivered ----------
-              if (shipment != null && f['status'] != 'delivered') ...[
+              if (shipment != null && shipment['state'] != 'cancelled' && f['status'] != 'delivered') ...[
                 const SectionTitle('4. Delivery'),
                 FilledButton.tonalIcon(
                   onPressed: busy ? null : () => _delivered(o),
                   icon: const Icon(Icons.done_all),
-                  label: Text(f['cod'] == true ? 'Delivered · record COD payment' : 'Mark delivered'),
+                  label: Text(f['cod'] == true && f['invoiceVoided'] == null ? 'Delivered · record COD payment' : 'Mark delivered'),
                 ),
               ],
               if (f['status'] == 'delivered')

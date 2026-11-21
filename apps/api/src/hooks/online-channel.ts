@@ -5,10 +5,14 @@
 //   - it runs on the branch's "online" till, which is not a cash drawer: the
 //     till record has no branchId column, so it never appears in shift lists,
 //     shift cash or the drawer reports;
-//   - lines are priced at what the customer paid on the website;
-//   - the payment is the "Online" tender (paid on the website, not drawer money)
-//     or, for cash on delivery, "Credit" on the customer's account until the
-//     courier's money is recorded;
+//   - lines are priced at what the customer paid on the website: each line is
+//     given its Magento row total (onlineRowTotal, GST included) and the last
+//     line takes any residual paise, so the POS total equals Magento's
+//     grand_total (body.onlineTotal);
+//   - the payment is the "Online" tender only for methods a payment gateway has
+//     already collected (Magento settings › prepaidMethods). Cash on delivery
+//     and bank transfer / UPI are "Credit" on the customer's account until the
+//     courier's money or the customer's transfer is recorded;
 //   - the invoice is marked channel "online" with the website order it bills.
 // Counter sales cannot use the online till or the "Online" tender.
 import { fail, roundRatio } from "../domain.js";
@@ -46,7 +50,27 @@ export const onlineChannelHook: SaleHook = {
   tenderTypes: [ONLINE_TENDER],
   validateLine(ctx, input, line) {
     checkTill(ctx);
-    if (!isOnlineSale(ctx) || input.onlinePrice === undefined) return;
+    if (!isOnlineSale(ctx)) return;
+    if (input.onlineRowTotal !== undefined) {
+      // The Magento row total (GST included) for these units.
+      const target = Math.max(0, Math.round(Number(input.onlineRowTotal) || 0));
+      const rate = line.taxRate || 0;
+      let subtotal = target;
+      if (ctx.profile.taxMode !== "inclusive") {
+        // Exclusive tax: the amount before GST whose total with GST is closest to the row total.
+        const base = roundRatio(target, 10000, 10000 + rate);
+        let best = Infinity;
+        for (const s of [base, base - 1, base + 1, base - 2, base + 2]) {
+          if (s < 0) continue;
+          const off = Math.abs(s + roundRatio(s, rate, 10000) - target);
+          if (off < best) [best, subtotal] = [off, s];
+        }
+      }
+      line.subtotal = subtotal;
+      line.unitPrice = Math.round(subtotal / line.qty);
+      return;
+    }
+    if (input.onlinePrice === undefined) return;
     // The website price includes GST. Exclusive-tax invoices carry the price before GST.
     const paid = Math.max(0, Math.round(Number(input.onlinePrice) || 0));
     line.unitPrice = ctx.profile.taxMode === "inclusive" ? paid : roundRatio(paid, 10000, 10000 + (line.taxRate || 0));
@@ -60,7 +84,27 @@ export const onlineChannelHook: SaleHook = {
       return;
     }
     if (ctx.tenders.length !== 1 || ![ONLINE_TENDER, "Credit"].includes(ctx.tenders[0].type))
-      fail("A website order is paid online, or on delivery (cash on delivery).");
+      fail("A website order is paid online, or later on the customer's account (cash on delivery, bank transfer or UPI).");
+    // The POS total equals the website's grand total: residual paise (rounding
+    // of per-line GST) go on the last line as rounding.
+    const target = ctx.body.onlineTotal;
+    if (target !== undefined && ctx.lines.length) {
+      const diff = Math.round(Number(target)) - ctx.total;
+      const allowed = Math.max(200, Number(ctx.settings.roundingIncrement || 1));
+      if (Math.abs(diff) > allowed)
+        fail(
+          `The POS invoice comes to ₹${(ctx.total / 100).toFixed(2)} but the website order total is ₹${(Number(target) / 100).toFixed(2)}. ` +
+            "Check the order's prices, discounts and extra charges in Magento.",
+          409,
+        );
+      if (diff) {
+        const last = ctx.lines[ctx.lines.length - 1];
+        last.rounding = (last.rounding || 0) + diff;
+        last.total = (last.total || 0) + diff;
+        ctx.rounding += diff;
+        ctx.total += diff;
+      }
+    }
     // The customer already paid (or will pay) the invoice total.
     ctx.tenders[0].amount = ctx.total;
     ctx.tenders[0].confirmed = true;
@@ -73,7 +117,8 @@ export const onlineChannelHook: SaleHook = {
       onlineOrderId: order.id,
       onlineOrderNumber: order.number,
       paymentMethod: order.paymentMethod || "",
-      cashOnDelivery: ctx.tenders[0].type === "Credit",
+      paymentKind: order.paymentKind || (ctx.tenders[0].type === "Credit" ? "cod" : "prepaid"),
+      cashOnDelivery: ctx.tenders[0].type === "Credit" && (order.paymentKind || "cod") === "cod",
     });
   },
 };
