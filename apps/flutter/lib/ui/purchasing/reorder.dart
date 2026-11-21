@@ -92,7 +92,15 @@ class _ReorderScreenState extends State<ReorderScreen> {
         TextButton(onPressed: () => ShellScope.of(context).open('orders'), child: const Text('Go to purchase orders')),
       ]),
       if (rows.isEmpty)
-        const EmptyState(message: 'No part is at or below its reorder level. Set a reorder level on a part to get alerts.', icon: Icons.check_circle_outline),
+        EmptyState(
+          message: 'No part is at or below its reorder level. Set a reorder level on a part to get alerts.',
+          icon: Icons.check_circle_outline,
+          action: OutlinedButton.icon(
+            onPressed: () => ShellScope.of(context).open('/catalog/parts'),
+            icon: const Icon(Icons.tune),
+            label: const Text('Set reorder levels'),
+          ),
+        ),
       for (final entry in bySupplier.entries) ...[
         SectionTitle(entry.key.isEmpty ? 'No usual supplier' : (app.supplierById(entry.key)?['name'] as String? ?? 'Supplier')),
         if (entry.key.isEmpty)

@@ -27,6 +27,7 @@ import { queueMagentoSync } from "../online-queue.js";
 import { registerSaleHook } from "../sale-pipeline.js";
 import type { SaleHook } from "../sale-types.js";
 import { fitmentVehicle } from "./vehicles.js";
+import { advanceMovement } from "./customers.js";
 
 const SELLERS = ["owner", "manager", "cashier"];
 const WORKSHOP = ["owner", "manager", "cashier", "inventory"];
@@ -543,7 +544,24 @@ export function jobRoutes(_app: FastifyInstance, _db: Database, post: Post) {
     return job;
   });
 
+  // UI polish: an advance taken against this job. It is an ordinary customer
+  // advance (routes/customers.ts) that also records the job, so the job card can
+  // show it; billing the job then uses it through the "Advance" tender.
+  post("jobs/:id/advances", async (tx, actor, body, params) => {
+    allow(actor, SELLERS);
+    const job = await scoped(tx, actor, "job", params.id);
+    openJob(job);
+    if (!job.customerId) fail("Choose the customer on the job before taking an advance.");
+    const customer = await scoped(tx, actor, "customer", job.customerId);
+    const record = await advanceMovement(tx, actor, body, customer.id, false);
+    const notes = String(body.notes || "").trim();
+    Object.assign(record, { jobId: job.id, jobNumber: job.number, notes: `Advance · Job ${job.number}${notes ? ` · ${notes}` : ""}` });
+    await putRecord(tx, actor.organizationId, "partyPayment", record, actor.branchId);
+    return record;
+  });
+
   // One-click GST invoice from the job card, through the normal checkout.
+  // A customer advance is used by sending an "Advance" tender (hooks/advance.ts).
   post("jobs/:id/invoice", async (tx, actor, body, params) => {
     allow(actor, SELLERS);
     const job = await scoped(tx, actor, "job", params.id);

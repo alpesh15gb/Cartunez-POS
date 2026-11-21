@@ -113,6 +113,7 @@ class EstimatesScreen extends StatelessWidget {
       DataList(
         rows: rows,
         empty: 'No estimates yet. Make one to quote parts and labour for a vehicle.',
+        emptyAction: FilledButton.icon(onPressed: () => context.go('/orders/estimates/new'), icon: const Icon(Icons.add), label: const Text('New estimate')),
         onTap: (row) => context.go('/orders/estimates/${row['id']}'),
         columns: [
           Col('Estimate', (r) => Text('${r['number']}')),
@@ -236,7 +237,7 @@ class _EstimateEditorState extends State<EstimateEditor> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         TextButton.icon(onPressed: () => context.go('/orders/estimates'), icon: const Icon(Icons.arrow_back), label: const Text('Estimates')),
-        Text(id == null ? 'New estimate' : 'Estimate ${widget.estimate['number']}', style: Theme.of(context).textTheme.headlineSmall),
+        Text(id == null ? 'New estimate' : 'Estimate ${widget.estimate['number']}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
         if (id != null) StatusChip(estimateStatusLabels[status] ?? status),
       ]),
       if (widget.estimate['validUntil'] != null) Text('Valid until ${widget.estimate['validUntil']}'),

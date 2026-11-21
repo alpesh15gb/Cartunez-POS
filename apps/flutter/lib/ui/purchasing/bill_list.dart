@@ -34,7 +34,10 @@ class BillsScreen extends StatelessWidget {
           ]),
           DataList(
             rows: rows,
-            empty: 'No supplier bills yet. When goods arrive, press "Enter supplier bill" and photograph the supplier\'s note.',
+            empty: 'No supplier bills yet. When goods arrive, enter the bill and photograph the supplier\'s note.',
+            emptyAction: q.isEmpty
+                ? FilledButton.icon(onPressed: () => enterBill(context), icon: const Icon(Icons.add), label: const Text('Enter supplier bill'))
+                : null,
             onTap: (b) => showBill(context, b),
             actionWidth: 60,
             columns: [

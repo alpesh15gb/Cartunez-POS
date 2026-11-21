@@ -65,6 +65,17 @@ void main() {
         try {
           await state.mutate('/settings', {'upiVpa': 'motorline@okhdfcbank', 'upiPayeeName': 'Motorline Auto Parts'});
         } catch (_) {}
+        // Online store on, so the Online tab and the dashboard's online tile render.
+        // No online order is seeded: orders only arrive through the Magento order
+        // poller (magento-orders.ts), which the demo server does not run, and the
+        // API has no route to create one, so pick & pack is not captured here.
+        try {
+          await state.mutate('/settings', {'features': {...?(state.settings['features'] as Map?)?.cast<String, dynamic>(), 'onlineStore': true}});
+          await state.sync();
+        } catch (e) {
+          // ignore: avoid_print
+          print('online store switch failed: $e');
+        }
         if (state.list('customerVehicles').isEmpty && state.list('customers').isNotEmpty) {
           try {
             await state.mutate('/customer-vehicles', {'regNo': 'MH12AB1234', 'make': 'Maruti Suzuki', 'model': 'Swift',

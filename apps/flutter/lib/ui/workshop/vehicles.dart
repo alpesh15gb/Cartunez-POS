@@ -264,7 +264,7 @@ class _VehicleDetailState extends State<VehicleDetail> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         TextButton.icon(onPressed: () => context.go('/people/vehicles'), icon: const Icon(Icons.arrow_back), label: const Text('Vehicles')),
-        Text('${v['regNo']}', style: Theme.of(context).textTheme.headlineSmall),
+        Text('${v['regNo']}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
       ]),
       const SizedBox(height: 8),
       Text(vehicleTitle(v).split(' · ').skip(1).join()),

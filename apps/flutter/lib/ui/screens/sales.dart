@@ -30,7 +30,10 @@ class InvoicesScreen extends StatelessWidget {
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           DataList(
             rows: invoices,
-            empty: 'No invoices yet. Completed sales appear here.',
+            empty: q.isEmpty ? 'No invoices yet. Completed sales appear here.' : 'No invoice matches.',
+            emptyAction: q.isEmpty && app.canSell
+                ? FilledButton.icon(onPressed: () => shell.open('/counter'), icon: const Icon(Icons.point_of_sale_outlined), label: const Text('Go to Counter'))
+                : null,
             onTap: (row) => showReceipt(context, row),
             columns: [
               Col('Invoice', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
