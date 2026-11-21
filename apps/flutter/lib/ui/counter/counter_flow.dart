@@ -119,7 +119,16 @@ class SaleDoneDialog extends StatelessWidget {
       },
       child: AlertDialog(
         icon: const Icon(Icons.check_circle, size: 40),
-        title: Text('Sale complete · ${invoice['number'] ?? ''}'),
+        // The invoice number on its own line, never broken at a hyphen.
+        title: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Sale complete'),
+          if ('${invoice['number'] ?? ''}'.isNotEmpty)
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text('${invoice['number']}',
+                  maxLines: 1, softWrap: false, style: Theme.of(context).textTheme.titleMedium?.copyWith(letterSpacing: 0.4)),
+            ),
+        ]),
         content: SizedBox(
           width: 420,
           child: Column(mainAxisSize: MainAxisSize.min, children: [

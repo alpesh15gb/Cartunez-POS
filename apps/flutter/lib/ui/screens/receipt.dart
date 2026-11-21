@@ -47,9 +47,10 @@ class ReceiptView {
   List<(String, String)> get payments => [
         // WS-B: an exchange credit note is set against the new bill; only any excess is paid back.
         if (credit && doc['exchangeApplied'] != null) ('Set against new bill', money(doc['exchangeApplied'] as num?)),
-        if (credit && doc['exchangeApplied'] == null) ('Refund · ${doc['refundType'] ?? 'Cash'}', money(doc['total'] as num?)),
-        if (credit && doc['exchangeApplied'] != null && ((doc['refundTotal'] ?? 0) as int) > 0)
-          ('Refund · ${doc['refundType']}', money(doc['refundTotal'] as num?)),
+        // Paid back per method (refunds breakdown; older notes have one refundType).
+        if (credit)
+          for (final part in refundParts(doc))
+            (part.type == 'Credit' ? 'Refund · to customer account' : 'Refund · ${part.type}', money(part.amount)),
         if (doc['exchange'] is Map)
           ('Exchange · credit note ${doc['exchange']['creditNoteNumber']} (bill ${doc['exchange']['originalInvoiceNumber']})',
               '−${money(doc['exchange']['applied'] as num?)}'),
@@ -80,7 +81,12 @@ Future<void> showReceipt(BuildContext context, Json doc) {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(r.kind, style: const TextStyle(color: Brand.forest, fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 1.2)),
           const SizedBox(height: 4),
-          Text('${doc['number'] ?? 'Pending'}', style: Theme.of(context).textTheme.headlineMedium),
+          // One line: invoice numbers (MT-2026-00012) must not break at the hyphen.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text('${doc['number'] ?? 'Pending'}', maxLines: 1, softWrap: false, style: Theme.of(context).textTheme.headlineMedium),
+          ),
           Text('${r.business['legalName'] ?? r.business['tradingName'] ?? ''}', style: Theme.of(context).textTheme.titleMedium),
           for (final line in r.header) Text(line, style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 8),

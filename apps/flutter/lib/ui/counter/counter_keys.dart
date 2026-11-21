@@ -56,6 +56,10 @@ class CounterScope extends InheritedNotifier<CounterController> {
       context.getInheritedWidgetOfExactType<CounterScope>()?.notifier;
 }
 
+/// Keyboard hints (F-keys, Ctrl shortcuts) are shown only at desktop widths;
+/// phones and tablets are touch first.
+bool showKeyHints(BuildContext context) => MediaQuery.sizeOf(context).width >= 1200;
+
 /// A small keycap badge ("F9") for buttons. Shown on desktop only.
 class KeyCap extends StatelessWidget {
   const KeyCap(this.label, {super.key, this.onDark = false});
@@ -63,7 +67,7 @@ class KeyCap extends StatelessWidget {
   final bool onDark;
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.sizeOf(context).width < 1200) return const SizedBox.shrink();
+    if (!showKeyHints(context)) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
     final fg = onDark ? scheme.onPrimary : scheme.onSurfaceVariant;
     return Container(

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../counter/cart_table.dart';
 import '../counter/catalog_grid.dart';
 import '../counter/counter_keys.dart';
 import '../counter/counter_panes.dart';
-import '../theme.dart';
 
 export '../counter/cart_table.dart' show CartPanel;
 export '../counter/counter_actions.dart';
@@ -20,7 +18,7 @@ final billingKey = GlobalKey();
 /// * Desktop (>= 1200): 60/40. Left: dense parts list, photo grid or service
 ///   tiles; right: cart table, customer / vehicle chip and the payment dock.
 ///   Keyboard first (F-keys, ↑/↓, +/−, Del, ? for help) with a scanner guard.
-/// * 1000–1199: photo grid with the classic cart panel.
+/// * 840–1199 (tablet): the same left pane with a touch cart side pane.
 /// * Narrower: compact rows (phone) or the grid, with a sticky cart pill.
 ///
 /// Rebuild scopes: the catalog listens to the search box, catalog/shift data and
@@ -35,6 +33,7 @@ class BillingScreen extends StatefulWidget {
 class _BillingScreenState extends State<BillingScreen> {
   final category = ValueNotifier('All parts');
   final counter = CounterController();
+  bool _tabletPaneSet = false;
 
   @override
   void dispose() {
@@ -62,13 +61,22 @@ class _BillingScreenState extends State<BillingScreen> {
           ),
         ),
       ]);
-    } else if (width >= 1000) {
+    } else if (width >= 840) {
+      // Touch tablets open on the photo grid (the switcher still offers the list).
+      if (!_tabletPaneSet) {
+        _tabletPaneSet = true;
+        counter.pane = 'grid';
+      }
+      // UI polish: tablets keep the cart on screen as a side pane (no bottom sheet).
+      final scheme = Theme.of(context).colorScheme;
       body = Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(child: CounterCatalog(category: category, wide: true)),
+        Expanded(
+          child: ListenableBuilder(listenable: counter, builder: (_, _) => CounterLeftPane(category: category, compact: false)),
+        ),
         Container(
-          width: 380,
-          decoration: const BoxDecoration(color: Colors.white, border: Border(left: BorderSide(color: Brand.line))),
-          child: const CartPanel(),
+          width: width >= 1000 ? 400 : 360,
+          decoration: BoxDecoration(color: scheme.surface, border: Border(left: BorderSide(color: Theme.of(context).dividerColor))),
+          child: const TabletCartPane(),
         ),
       ]);
     } else {

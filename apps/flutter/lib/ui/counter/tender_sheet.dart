@@ -156,10 +156,60 @@ class CheckoutDialogState extends State<CheckoutDialog> {
     }
   }
 
+  /// UI polish: a centred dialog on tablets and desktops; on phones a
+  /// full-screen sheet with a spaced title row and the actions pinned below.
+  Widget _frame({required bool phone, required String amountText, required Widget content, required List<Widget> actions}) {
+    const figures = [FontFeature.tabularFigures()];
+    if (!phone) {
+      return AlertDialog(
+        title: Row(children: [
+          const Expanded(child: Text('Take payment')),
+          const SizedBox(width: 16),
+          Text(amountText, style: const TextStyle(fontWeight: FontWeight.w800, fontFeatures: figures)),
+        ]),
+        scrollable: true,
+        content: content,
+        actions: actions,
+      );
+    }
+    final theme = Theme.of(context);
+    return Dialog.fullscreen(
+      key: const ValueKey('checkout-fullscreen'),
+      backgroundColor: theme.colorScheme.surface,
+      child: SafeArea(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 16, 4),
+            child: Row(children: [
+              IconButton(tooltip: 'Cancel', onPressed: busy ? null : () => Navigator.pop(context), icon: const Icon(Icons.close)),
+              const SizedBox(width: 4),
+              Expanded(child: Text('Take payment', style: theme.textTheme.titleLarge)),
+              const SizedBox(width: 12),
+              Text(amountText, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, fontFeatures: figures)),
+            ]),
+          ),
+          const Divider(height: 1),
+          Expanded(child: SingleChildScrollView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 16), child: content)),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              for (var i = 0; i < actions.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                i == actions.length - 1 ? Expanded(child: actions[i]) : actions[i],
+              ],
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final total = widget.total;
+    final phone = MediaQuery.sizeOf(context).width < 600;
     final paid = _minor(amount.text) + (split ? _minor(second.text) : 0);
     final due = total - paid;
     final nonCash = _external(tender) || (split && _external(secondTender));
@@ -174,12 +224,9 @@ class CheckoutDialogState extends State<CheckoutDialog> {
     }.where((v) => v >= total).take(4).toList();
     return CallbackShortcuts(
       bindings: {const SingleActivator(LogicalKeyboardKey.enter, control: true): _complete},
-      child: PopScope(canPop: !busy, child: AlertDialog(
-        title: Row(children: [
-          const Expanded(child: Text('Take payment')),
-          Text(app.money(total), style: const TextStyle(fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
-        ]),
-        scrollable: true,
+      child: PopScope(canPop: !busy, child: _frame(
+        phone: phone,
+        amountText: app.money(total),
         content: SizedBox(
           width: 460,
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -190,8 +237,8 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 for (final t in types)
                   ButtonSegment(
                     value: t,
-                    label: Text(t),
-                    icon: Icon(t == 'Cash' ? Icons.payments_outlined : t == 'Card' ? Icons.credit_card : t == 'Credit' ? Icons.menu_book_outlined : Icons.qr_code_2),
+                    label: Text(t, maxLines: 1, softWrap: false),
+                    icon: phone && types.length > 3 ? null : Icon(t == 'Cash' ? Icons.payments_outlined : t == 'Card' ? Icons.credit_card : t == 'Credit' ? Icons.menu_book_outlined : Icons.qr_code_2),
                   ),
               ],
               selected: {tender},
@@ -299,8 +346,10 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 contentPadding: EdgeInsets.zero,
                 value: confirmed,
                 onChanged: (v) => setState(() => confirmed = v),
-                title: const Text('Payment confirmed by the card machine / UPI app'),
-                subtitle: const Text('If not yet confirmed, the sale waits in Sync & audit.'),
+                title: Text(phone ? 'Payment confirmed' : 'Payment confirmed by the card machine / UPI app'),
+                subtitle: Text(phone
+                    ? 'The card machine or UPI app shows it paid. If not, the sale waits in Sync & audit.'
+                    : 'If not yet confirmed, the sale waits in Sync & audit.'),
               ),
               for (final type in {tender, if (split) secondTender}.where(_external))
                 TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference')),

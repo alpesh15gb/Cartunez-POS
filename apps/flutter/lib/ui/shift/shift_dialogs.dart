@@ -260,6 +260,11 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
     final expected = widget.expected ?? app.expectedCash(widget.shift);
     final cash = counted;
     final variance = cash == null ? null : cash - expected;
+    // UI polish: the difference appears once counting starts, not as a scary
+    // "short by the whole drawer" before anything is entered.
+    final started = byNotes
+        ? notes.values.any((c) => c.text.trim().isNotEmpty) || coins.text.trim().isNotEmpty
+        : total.text.trim().isNotEmpty;
     void changed(String _) => setState(() {});
     final numberField = [FilteringTextInputFormatter.digitsOnly];
     Widget noteRow(int value) => Padding(
@@ -332,14 +337,22 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
               ),
             const Divider(height: 28),
             _Line('Expected in drawer', app.money(expected)),
-            _Line('Counted', cash == null ? '—' : app.money(cash), key: const ValueKey('counted-cash')),
-            _Line(
-              'Difference',
-              variance == null ? '—' : '${variance > 0 ? '+' : ''}${app.money(variance)}${variance == 0 ? '' : variance > 0 ? ' over' : ' short'}',
-              color: variance == null || variance == 0 ? Brand.forest : Brand.danger,
-              strong: true,
-              key: const ValueKey('variance'),
-            ),
+            if (!started)
+              Padding(
+                key: const ValueKey('count-hint'),
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: Text('Count the drawer to see the difference.', style: Theme.of(context).textTheme.bodySmall),
+              )
+            else ...[
+              _Line('Counted', cash == null ? '—' : app.money(cash), key: const ValueKey('counted-cash')),
+              _Line(
+                'Difference',
+                variance == null ? '—' : '${variance > 0 ? '+' : ''}${app.money(variance)}${variance == 0 ? '' : variance > 0 ? ' over' : ' short'}',
+                color: variance == null || variance == 0 ? Brand.forest : Brand.danger,
+                strong: true,
+                key: const ValueKey('variance'),
+              ),
+            ],
             const SizedBox(height: 10),
             TextField(controller: note, decoration: const InputDecoration(labelText: 'Note')),
             if (error != null)

@@ -8,6 +8,7 @@ import '../core/billing.dart';
 import '../main.dart';
 import '../state/app_state.dart';
 import 'barcode_scan.dart';
+import 'counter/counter_keys.dart' show showKeyHints;
 import 'login.dart';
 // WS-B: returns desk, customer 360 and collections.
 import 'orders/returns.dart';
@@ -50,7 +51,7 @@ typedef DetailOpener = Future<void>? Function(BuildContext context, String id);
 /// One sub-tab of a workspace, with its own address.
 class TabDef {
   const TabDef(this.id, this.label, this.roles, this.help, this.build,
-      {required this.path, this.feature, this.detail, this.takesArg = false});
+      {required this.path, this.feature, this.detail, this.takesArg = false, this.search = true, this.argIsRecord = true});
 
   /// Stable id used by [ShellController.open] (kept from the old navigation).
   final String id;
@@ -69,6 +70,18 @@ class TabDef {
   /// When set, `path/:id` opens that record over the list.
   final DetailOpener? detail;
   final bool takesArg;
+
+  /// UI polish: false hides the top bar's "Search this list" box on tabs whose
+  /// screen does not read it (dashboards, settings, forms with their own box).
+  final bool search;
+
+  /// UI polish: for [takesArg] tabs, whether `path/:arg` is a record page (a
+  /// customer, a job card) that gets the compact back-arrow header on phones.
+  /// False for arguments that only pick a view (for example /reports/:name).
+  final bool argIsRecord;
+
+  /// [arg] opens a record page (not a list or a view of one).
+  bool isRecordPage(String? arg) => arg != null && takesArg && argIsRecord;
 
   bool get hasArg => takesArg || detail != null;
   bool visibleTo(AppState app) => roles.contains(app.role) && (feature == null || app.feature(feature!));
@@ -136,41 +149,41 @@ final workspaces = <Workspace>[
     TabDef('sales-returns', 'Returns & exchange', _sellers,
         'Find a bill by number, receipt barcode, phone or serial; refund, exchange or give store credit.',
         (_, _) => const ReturnsPage(),
-        path: '/orders/returns'),
+        path: '/orders/returns', search: false),
     TabDef('online-orders', 'Online orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
         (_, _) => const OnlineOrdersScreen(),
         path: '/orders/online', feature: 'onlineStore', detail: _openOnlineOrder),
     // WS-C (workshop)
     TabDef('estimates', 'Estimates', _sellers, 'Quotes for parts, labour and kits; share on WhatsApp, then open a job card.',
         (_, id) => EstimatesScreen(id: id),
-        path: '/orders/estimates', takesArg: true),
+        path: '/orders/estimates', search: false, takesArg: true),
     TabDef('jobs', 'Job cards', _sellers, 'Vehicles in the workshop: check-in, work, parts, photos, then one-click GST invoice.',
         (_, id) => JobsScreen(id: id),
-        path: '/orders/jobs', takesArg: true),
+        path: '/orders/jobs', search: false, takesArg: true),
   ]),
   Workspace('/catalog', 'Catalog & stock', 'Stock', Icons.inventory_2_outlined, [
     TabDef('parts', 'Parts', _everyone, 'Parts, prices, stock and labels.', (_, _) => const PartsScreen(), path: '/catalog/parts'),
     TabDef('bins', 'Bins', _stock, 'Racks and bins where stock is kept.', (_, _) => const BinsScreen(), path: '/catalog/bins'),
     TabDef('fitment', 'Fitment', _stock, 'Which vehicles each part fits.', (_, _) => const FitmentScreen(),
-        path: '/catalog/fitment', feature: 'fitment'),
+        path: '/catalog/fitment', search: false, feature: 'fitment'),
     TabDef('transfers', 'Transfers', _stock, 'Stock sent between branches.', (_, _) => const TransfersScreen(),
-        path: '/catalog/transfers', feature: 'transfers'),
+        path: '/catalog/transfers', search: false, feature: 'transfers'),
     TabDef('warranty', 'Warranty & cores', _stock, 'Supplier warranty claims and core deposit refunds.',
         (_, _) => const WarrantyScreen(),
-        path: '/catalog/warranty', feature: 'warranty'),
+        path: '/catalog/warranty', search: false, feature: 'warranty'),
     TabDef('counts', 'Stock counts', _stock, 'Count a bin and review the difference before stock changes.',
         (_, _) => const StockCountsPage(),
-        path: '/catalog/counts'),
+        path: '/catalog/counts', search: false),
     TabDef('import', 'Import', _stock, 'Add or update many parts from a CSV file.', (_, _) => const CatalogImportPage(),
-        path: '/catalog/import'),
-    TabDef('labels', 'Labels', _everyone, 'Barcode labels for parts and bins.', (_, _) => const LabelsPage(), path: '/catalog/labels'),
+        path: '/catalog/import', search: false),
+    TabDef('labels', 'Labels', _everyone, 'Barcode labels for parts and bins.', (_, _) => const LabelsPage(), path: '/catalog/labels', search: false),
     TabDef('online', 'Online products', _managers, 'Publish parts to your Magento store and set online prices and availability.',
         (_, _) => const OnlineStoreScreen(),
         path: '/catalog/online', feature: 'onlineStore'),
     // WS-C (workshop)
     TabDef('serials', 'Serial & warranty', _everyone, 'Look up a serial or IMEI: who bought it, which vehicle, warranty until when.',
         (_, _) => const SerialLookupScreen(),
-        path: '/catalog/serials'),
+        path: '/catalog/serials', search: false),
   ]),
   Workspace('/purchasing', 'Purchasing', 'Purchasing', Icons.local_shipping_outlined, [
     TabDef('bills', 'Supplier bills', _stock,
@@ -179,14 +192,14 @@ final workspaces = <Workspace>[
         path: '/purchasing/bills', detail: _openBill),
     TabDef('orders', 'Purchase orders', _stock, 'Order from suppliers; enter the bill when the goods arrive.',
         (_, _) => const OrdersScreen(),
-        path: '/purchasing/orders'),
+        path: '/purchasing/orders', search: false),
     // WS-E: reorder alerts → draft POs; supplier cost rises found while receiving.
     TabDef('reorder', 'Reorder alerts', _stock, 'Parts at or below their reorder level. Make draft purchase orders per supplier in one click.',
         (_, _) => const ReorderScreen(),
-        path: '/purchasing/reorder'),
+        path: '/purchasing/reorder', search: false),
     TabDef('cost-changes', 'Cost changes', _stock, 'Supplier costs that rose since the last purchase, and their effect on your margin.',
         (_, _) => const CostChangesScreen(),
-        path: '/purchasing/cost-changes'),
+        path: '/purchasing/cost-changes', search: false),
     TabDef('suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
         (_, _) => const ContactsScreen(kind: 'suppliers'),
         path: '/purchasing/suppliers', detail: _openLedger('suppliers')),
@@ -203,26 +216,26 @@ final workspaces = <Workspace>[
         (_, _) => const ContactsScreen(kind: 'suppliers'),
         path: '/people/suppliers', detail: _openLedger('suppliers')),
     TabDef('staff', 'Staff', _managers /* WS-D: managers set counter PINs */, 'Staff accounts, roles, PINs and who can sign in.', (_, _) => const StaffScreen(),
-        path: '/people/staff'),
+        path: '/people/staff', search: false),
     // WS-C (workshop)
     TabDef('vehicles', 'Vehicles', _everyone, 'Customer vehicles by registration number, with their jobs and invoices.',
         (_, id) => VehiclesScreen(id: id),
-        path: '/people/vehicles', takesArg: true),
+        path: '/people/vehicles', search: false, takesArg: true),
   ]),
   Workspace('/shift', 'Shift, reports & settings', 'Shift', Icons.insights_outlined, [
-    TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', (_, _) => const ShiftsScreen(), path: '/shift'),
+    TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', (_, _) => const ShiftsScreen(), path: '/shift', search: false),
     TabDef('tender', 'Tender check', _managers, 'Compare card and UPI takings with your statement.',
         (_, _) => const TenderComparisonPage(),
-        path: '/shift/tender'),
-    TabDef('dashboard', 'Dashboard', _everyone, 'Today at a glance.', (_, _) => const DashboardScreen(), path: '/dashboard'),
+        path: '/shift/tender', search: false),
+    TabDef('dashboard', 'Dashboard', _everyone, 'Today at a glance.', (_, _) => const DashboardScreen(), path: '/dashboard', search: false),
     TabDef('reports', 'Reports', _stock, 'Sales, stock and tax reports with CSV export.',
         (context, name) => ReportsScreen(initial: name, onNameChanged: (next) => context.go('/reports/$next')),
-        path: '/reports', takesArg: true),
+        path: '/reports', argIsRecord: false, search: false, takesArg: true),
     TabDef('settings', 'Settings', _everyone, 'Business details, branches, labels and this counter.',
         (_, _) => const SettingsScreen(),
-        path: '/settings'),
+        path: '/settings', search: false),
     TabDef('sync', 'Sync & audit', _sellers, 'Sales waiting to send and the audit trail.', (_, _) => const SyncScreen(),
-        path: '/settings/sync'),
+        path: '/settings/sync', search: false),
   ]),
 ];
 
@@ -463,8 +476,11 @@ class _ShellState extends State<Shell> {
   Widget build(BuildContext context) {
     final app = context.app;
     final visible = visibleWorkspaces(app);
-    final tab = matchPath(widget.location)?.tab;
+    final match = matchPath(widget.location);
+    final tab = match?.tab;
     final active = tab == null ? null : workspaceOf(tab);
+    // UI polish: the search box only where the screen reads it, never on record pages.
+    final searchable = tab == null || (tab.search && !tab.isRecordPage(match?.arg));
     if (tab != null && controller.section.isEmpty) controller.section = tab.id;
     final layout = DeviceLayout.of(context);
     final prefs = UiPrefsScope.maybeOf(context);
@@ -477,7 +493,7 @@ class _ShellState extends State<Shell> {
           body: SafeArea(
             bottom: false,
             child: Column(children: [
-              _TopBar(controller: controller, layout: layout),
+              _TopBar(controller: controller, layout: layout, searchable: searchable),
               Expanded(child: widget.child),
             ]),
           ),
@@ -513,7 +529,7 @@ class _ShellState extends State<Shell> {
           ),
           Expanded(
             child: Column(children: [
-              _TopBar(controller: controller, layout: layout),
+              _TopBar(controller: controller, layout: layout, searchable: searchable),
               Expanded(child: content),
             ]),
           ),
@@ -736,6 +752,36 @@ class WorkspacePage extends StatefulWidget {
 class _WorkspacePageState extends State<WorkspacePage> {
   String? _opening;
 
+  /// UI polish: the sub-tab strip scrolls so the selected tab is on screen.
+  final _strip = ScrollController();
+  final _stripBox = GlobalKey();
+  final _selectedTab = GlobalKey();
+  String? _revealed;
+
+  @override
+  void dispose() {
+    _strip.dispose();
+    super.dispose();
+  }
+
+  /// Scrolls the tab strip (only it, not the page) so the selected tab shows.
+  void _revealSelectedTab() {
+    if (_revealed == widget.tab.path) return;
+    _revealed = widget.tab.path;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_strip.hasClients) return;
+      final tab = _selectedTab.currentContext?.findRenderObject() as RenderBox?;
+      final view = _stripBox.currentContext?.findRenderObject() as RenderBox?;
+      if (tab == null || view == null || !tab.attached || !view.attached) return;
+      final left = tab.localToGlobal(Offset.zero, ancestor: view).dx;
+      final right = left + tab.size.width;
+      const margin = 24.0;
+      if (left >= margin && right <= view.size.width - margin) return;
+      final target = _strip.offset + left - (view.size.width - tab.size.width) / 2;
+      _strip.jumpTo(target.clamp(0.0, _strip.position.maxScrollExtent));
+    });
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -785,6 +831,32 @@ class _WorkspacePageState extends State<WorkspacePage> {
     final layout = DeviceLayout.of(context);
     final pad = switch (layout) { DeviceLayout.phone => 16.0, DeviceLayout.tablet => 28.0, DeviceLayout.desktop => 24.0 };
     final textTheme = Theme.of(context).textTheme;
+    // UI polish: on phones a record page (a customer, a job card) gets a
+    // compact back-arrow header instead of the workspace heading and tabs.
+    if (layout == DeviceLayout.phone && tab.isRecordPage(widget.arg)) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Material(
+          key: const ValueKey('record-app-bar'),
+          color: Theme.of(context).colorScheme.surface,
+          child: SizedBox(
+            height: 48,
+            child: Row(children: [
+              IconButton(
+                tooltip: 'Back to ${tab.label.toLowerCase()}',
+                onPressed: () => context.go(tab.path),
+                icon: const Icon(Icons.arrow_back),
+              ),
+              Expanded(child: Text(tab.label, overflow: TextOverflow.ellipsis, style: textTheme.titleMedium)),
+            ]),
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 40), children: [body]),
+        ),
+      ]);
+    }
+    if (tabs.length > 1) _revealSelectedTab();
     return ListView(
       padding: EdgeInsets.fromLTRB(pad, layout == DeviceLayout.desktop ? 18 : 24, pad, 40),
       children: [
@@ -794,10 +866,18 @@ class _WorkspacePageState extends State<WorkspacePage> {
         const SizedBox(height: 14),
         if (tabs.length > 1) ...[
           SingleChildScrollView(
+            key: _stripBox,
+            controller: _strip,
             scrollDirection: Axis.horizontal,
             child: SegmentedButton<String>(
               showSelectedIcon: false,
-              segments: [for (final t in tabs) ButtonSegment(value: t.path, label: Text(t.label))],
+              segments: [
+                for (final t in tabs)
+                  ButtonSegment(
+                    value: t.path,
+                    label: t == tab ? KeyedSubtree(key: _selectedTab, child: Text(t.label)) : Text(t.label),
+                  ),
+              ],
               selected: {tab.path},
               onSelectionChanged: (value) => context.go(value.first),
             ),
@@ -811,14 +891,20 @@ class _WorkspacePageState extends State<WorkspacePage> {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.controller, required this.layout});
+  const _TopBar({required this.controller, required this.layout, this.searchable = true});
   final ShellController controller;
   final DeviceLayout layout;
+
+  /// False hides the search box (the tab's screen does not read it).
+  final bool searchable;
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final narrow = layout == DeviceLayout.phone;
+    // UI polish: below ~420 px the connection status is a dot only, so the
+    // search box keeps room for its placeholder.
+    final tiny = MediaQuery.sizeOf(context).width < 420;
     final scheme = Theme.of(context).colorScheme;
     final prefs = UiPrefsScope.maybeOf(context);
     final status = Tooltip(
@@ -827,11 +913,13 @@ class _TopBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         onTap: () => app.sync(loud: true),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: tiny ? 8 : 10, vertical: 6),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             app.syncing
                 ? const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.6))
-                : Icon(Icons.circle, size: 9, color: app.online ? Brand.forest : const Color(0xFFB46C15)),
+                : Icon(Icons.circle, size: tiny ? 11 : 9, color: app.online ? Brand.forest : const Color(0xFFB46C15),
+                    semanticLabel: app.online ? 'Online' : 'Offline'),
+            if (!tiny) ...[
             const SizedBox(width: 7),
             Text(
               narrow
@@ -839,6 +927,7 @@ class _TopBar extends StatelessWidget {
                   : '${app.online ? 'Online' : 'Offline'}${app.pending.isEmpty ? '' : ' · ${app.pending.length} waiting'}',
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
             ),
+            ],
           ]),
         ),
       ),
@@ -849,7 +938,7 @@ class _TopBar extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 24),
       decoration: BoxDecoration(color: scheme.surface, border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor))),
       child: Row(children: [
-        Expanded(
+        if (!searchable) const Spacer() else Expanded(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 460),
             child: TextField(
@@ -857,7 +946,9 @@ class _TopBar extends StatelessWidget {
               focusNode: controller.searchFocus,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: controller.section == 'billing' ? (narrow ? 'Find a part' : 'Search or scan parts  (F1)' /* WS-A: F1 on the counter */) : 'Search this list',
+                hintText: controller.section == 'billing'
+                    ? (narrow ? 'Find a part' : showKeyHints(context) ? 'Search or scan parts  (F1)' /* WS-A: F1 on the counter */ : 'Search or scan parts')
+                    : (tiny ? 'Search' : 'Search this list'),
                 prefixIcon: const Icon(Icons.search, size: 20),
                 suffixIcon: ValueListenableBuilder(
                   valueListenable: controller.search,
@@ -872,17 +963,18 @@ class _TopBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        if (searchable) SizedBox(width: tiny ? 4 : 8),
         if (scans)
           IconButton.filledTonal(
             tooltip: 'Scan barcode',
+            visualDensity: tiny ? VisualDensity.compact : null,
             onPressed: () async {
               final code = await requestBarcode(context);
               if (code != null && context.mounted) handleScan(context, controller, code);
             },
             icon: const Icon(Icons.qr_code_scanner),
           ),
-        if (!narrow) const Spacer(),
+        if (!narrow && searchable) const Spacer(),
         status,
         if (!narrow && prefs != null)
           IconButton(
@@ -893,16 +985,18 @@ class _TopBar extends StatelessWidget {
         // WS-D: switch user / lock the counter.
         IconButton(
           tooltip: 'Switch user (Ctrl+L)',
+          visualDensity: tiny ? VisualDensity.compact : null,
           onPressed: () => lockCounter(app),
           icon: const Icon(Icons.switch_account_outlined),
         ),
         if (app.canSell) ...[
-          const SizedBox(width: 6),
+          SizedBox(width: tiny ? 0 : 6),
           Badge(
             isLabelVisible: counterHolds(app).isNotEmpty, // Integration: job reservations are not counter bills
             label: Text('${counterHolds(app).length}'),
             child: IconButton(
               tooltip: 'Parked sales',
+              visualDensity: tiny ? VisualDensity.compact : null,
               onPressed: () => showParked(context, controller),
               icon: const Icon(Icons.pause_circle_outline),
             ),

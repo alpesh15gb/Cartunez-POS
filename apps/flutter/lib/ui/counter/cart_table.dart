@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../widgets.dart';
 import '../screens/people.dart';
 import 'counter_actions.dart';
+import 'counter_keys.dart' show KeyCap;
 import 'tender_sheet.dart';
 import '../orders/exchange.dart' show ExchangeReturnsPanel; // WS-B
 
@@ -162,7 +163,7 @@ class CartPanel extends StatelessWidget {
                   }
                 },
                 icon: const Icon(Icons.payments_outlined),
-                label: const Text('Checkout  (F6)'),
+                label: const Row(mainAxisSize: MainAxisSize.min, children: [Text('Checkout'), KeyCap('F6', onDark: true)]),
               ),
             ),
           ]),
