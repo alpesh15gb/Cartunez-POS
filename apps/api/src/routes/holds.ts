@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "../db.js";
 import type { Post } from "./types.js";
-import { getRecord, putRecord } from "../db.js";
-import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves } from "../domain.js";
+import { getRecord, putRecord, records } from "../db.js";
+import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves, heldUnits } from "../domain.js";
+import { isKit, reserveKitComponents } from "../hooks/kit-reserve.js";
 import { queueMagentoSync } from "../online-queue.js";
 
 /** Vehicle registration as printed on Indian plates, stored without spaces: "MH 12 AB 1234" -> "MH12AB1234". */
@@ -56,11 +57,15 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
     const expiresAt = body.expiresAt === undefined ? previous?.expiresAt || null : expiry(body.expiresAt);
     const stock = await inventory(tx, actor);
     const quantities = new Map<string, number>();
+    const kitLines: { line: any; product: any }[] = [];
     for (const line of cart.lines) {
       const quantity = integer(line.qty, "Quantity", 1, 9999);
       line.qty = quantity;
+      // Kit reservations are worked out here, never taken from the register.
+      delete line.components;
       const product = await scoped(tx, actor, "product", line.productId);
       if (product.salesStopped) fail("New sales are stopped for " + product.sku + ".", 409);
+      if (isKit(product)) kitLines.push({ line, product });
       if (product.type === "service") continue;
       const bin = await scoped(tx, actor, "location", line.binId);
       if (bin.kind !== "sellable") fail("Park stock from a sellable bin.");
@@ -84,6 +89,22 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
         quantities.get(key)!
       )
         fail("Insufficient stock to park this bill.", 409);
+    }
+    // Money and stock review: a parked kit reserves its stocked components in bins.
+    if (kitLines.length) {
+      const settingsNow = await getRecord(tx, actor.organizationId, "settings", "settings");
+      const ownLines = previous && holdReserves(previous) ? previous.cart.lines || [] : [];
+      const bins = (await records(tx, actor.organizationId, "location", actor.branchId))
+        .filter((bin) => bin.kind === "sellable")
+        .map((bin) => bin.id);
+      const free = (productId: string, binId: string) =>
+        (stock.find((item) => item.productId === productId && item.binId === binId)?.available || 0) +
+        heldUnits(ownLines, productId, binId);
+      const taken = new Map(quantities);
+      for (const { line, product } of kitLines)
+        line.components = await reserveKitComponents(tx, actor, product, line.qty, {
+          free, taken, bins, sellBeyondStock: settingsNow?.features?.negativeStock !== false,
+        });
     }
     const hold = {
       id: previous?.id || id("hold"),

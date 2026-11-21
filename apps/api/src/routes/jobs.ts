@@ -18,7 +18,8 @@ import { randomUUID } from "node:crypto";
 import type { Database, RecordData } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
-import { type Actor, allow, audit, fail, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text } from "../domain.js";
+import { type Actor, allow, audit, fail, heldUnits, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text } from "../domain.js";
+import { reserveKitComponents } from "../hooks/kit-reserve.js";
 import { nextNumber } from "../number-series.js";
 import { invoiceProfile } from "../settings.js";
 import { finalizeSale, JOB_INVOICE } from "../sales.js";
@@ -60,11 +61,10 @@ async function documentLines(
       if (hold.id !== ownHold?.id)
         for (const line of hold.cart?.lines || [])
           for (const serial of line.serials || []) reservedSerials.add(line.productId + ":" + serial);
+  // What this job's own reservation (parts and kit components) holds is free to it.
   const free = (productId: string, binId: string) =>
     (stock.find((row) => row.productId === productId && row.binId === binId)?.available || 0) +
-    (ownHold?.cart?.lines || [])
-      .filter((line: any) => line.productId === productId && line.binId === binId)
-      .reduce((sum: number, line: any) => sum + line.qty, 0);
+    heldUnits(ownHold?.cart?.lines, productId, binId);
   const lines: Line[] = [];
   const taken = new Map<string, number>();
   for (const raw of inputs as any[]) {
@@ -140,6 +140,16 @@ async function documentLines(
       fail(`${product.name} is listed twice. Change the quantity on one line instead.`);
     lines.push(line);
   }
+  // Money and stock review: a kit on a job card reserves its stocked components
+  // (after the plain parts, which take their bins first).
+  if (options.job)
+    for (const line of lines) {
+      if (line.kind !== "kit") continue;
+      const kit = await scoped(db, actor, "product", line.productId);
+      line.components = await reserveKitComponents(db, actor, kit, line.qty, {
+        free, taken, bins: sellable.map((bin) => bin.id), sellBeyondStock,
+      });
+    }
   return lines;
 }
 
@@ -207,6 +217,7 @@ async function syncJobHold(db: Database, actor: Actor, job: RecordData) {
           productId: line.productId,
           qty: line.qty,
           ...(line.binId ? { binId: line.binId, serials: line.serials || [] } : {}),
+          ...(line.components?.length ? { components: line.components } : {}),
           ...(line.staffId ? { staffId: line.staffId } : {}),
         })),
         priceLevel: "retail",
@@ -224,6 +235,32 @@ async function syncJobHold(db: Database, actor: Actor, job: RecordData) {
     job.holdId = hold.id;
   }
   if (touched.length) await queueMagentoSync(db, actor.organizationId, [...new Set(touched)], "hold", actor.branchId);
+}
+
+/**
+ * Voiding a job's invoice (routes/sales.ts) puts the job back to "ready": the
+ * invoice link is cleared, its parts are reserved again from the stock the void
+ * returned, and it can be billed again from the job card. A later partial
+ * return does not reopen the job (the work was done).
+ */
+export async function reopenVoidedJob(db: Database, actor: Actor, invoice: RecordData) {
+  const job = await getRecord(db, actor.organizationId, "job", String(invoice.jobId));
+  if (!job || job.invoiceId !== invoice.id) return;
+  job.invoiceId = null;
+  job.invoiceNumber = null;
+  job.billedTotal = null;
+  job.deliveredAt = null;
+  job.status = "ready";
+  job.history = [...(job.history || []), historyEntry(actor, "ready", `Invoice ${invoice.number} voided`)];
+  job.updatedAt = now();
+  await syncJobHold(db, actor, job);
+  await putRecord(db, actor.organizationId, "job", job, actor.branchId);
+  const estimate = job.estimateId ? await getRecord(db, actor.organizationId, "estimate", job.estimateId) : undefined;
+  if (estimate && estimate.invoiceId === invoice.id) {
+    estimate.invoiceId = null;
+    await putRecord(db, actor.organizationId, "estimate", estimate, actor.branchId);
+  }
+  await audit(db, actor, "job", job.id, `Job reopened: invoice ${invoice.number} voided`, { number: job.number });
 }
 
 function historyEntry(actor: Actor, status: string, note = "") {

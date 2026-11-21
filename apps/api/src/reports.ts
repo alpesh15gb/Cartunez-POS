@@ -1,5 +1,6 @@
 import { reorderSuggestions } from "./replenishment.js";
 import { shiftCashSummaries } from "./shift-cash.js";
+import { refundBy } from "./returns.js";
 import type { Database } from "./db.js";
 import { records, getRecord } from "./db.js";
 import { type Actor, allow, fail, inventory, now } from "./domain.js";
@@ -95,7 +96,7 @@ export async function report(
       (item) =>
         inDate(item.createdAt) &&
         (!filters.cashier || item.userId === filters.cashier) &&
-        (!filters.paymentType || item.refundType === filters.paymentType),
+        (!filters.paymentType || refundBy(item, filters.paymentType) > 0),
     )
     .map((item) => ({
       ...item,
@@ -163,7 +164,7 @@ export async function report(
       (!productFiltered || invoicesById.get(item.invoiceId)?.lines.some((line: any) =>
         line.productId === item.productId && historicalMatch(line))) &&
       (!filters.cashier || item.userId === filters.cashier) &&
-      (!filters.paymentType || item.refundType === filters.paymentType),
+      (!filters.paymentType || refundBy(item, filters.paymentType) > 0),
   );
   const coreRefundTotal = coreRefunds.reduce(
     (sum, item) => sum + item.total,
@@ -305,7 +306,8 @@ export async function report(
       .filter(entry => inDate(entry.createdAt) && (!filters.cashier || entry.userId === filters.cashier));
   } else if (name === "tenders")
     // "Credit" = sold on customers' accounts (not money collected).
-    rows = ["Cash", "Card", "UPI", "Credit"]
+    // "Online" = paid on the website (collected by the payment gateway).
+    rows = ["Cash", "Card", "UPI", "Credit", "Online"]
       .filter((type) => !filters.paymentType || filters.paymentType === type)
       .map((type) => {
         const collected = sales.reduce(
@@ -317,13 +319,10 @@ export async function report(
             (type === "Cash" ? sale.change : 0),
           0,
         );
+        // Per-tender refund breakdown (returns.ts); an exchange's applied part is not a refund.
         const refunded =
-          returns
-            .filter((item) => item.refundType === type)
-            .reduce((sum, item) => sum + (item.refundTotal ?? item.total), 0) + // WS-B: exchange part is not a refund
-          coreRefunds
-            .filter((item) => item.refundType === type)
-            .reduce((sum, item) => sum + item.total, 0);
+          returns.reduce((sum, item) => sum + refundBy(item, type), 0) +
+          coreRefunds.reduce((sum, item) => sum + refundBy(item, type), 0);
         return { type, collected, refunded, net: collected - refunded };
       });
   else if (name === "stock-movement")

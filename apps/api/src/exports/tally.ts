@@ -18,11 +18,14 @@ import { records } from "../db.js";
 import { type Actor, fail } from "../domain.js";
 import { exportPeriod, rupeeText, splitOf, taxableOf } from "./common.js";
 import { escapeXml } from "./xlsx.js";
+import { refundParts } from "../returns.js";
 
 export const LEDGERS = {
   cash: "Cash",
   card: "Card Receipts",
   upi: "UPI Receipts",
+  // Paid on the website: held by the payment gateway until it settles to the bank.
+  online: "Website Collections",
   cgstOut: "Output CGST", sgstOut: "Output SGST", igstOut: "Output IGST", taxOut: "Output Tax",
   cgstIn: "Input CGST", sgstIn: "Input SGST", igstIn: "Input IGST",
   cores: "Core Deposits",
@@ -39,6 +42,7 @@ function groupOf(name: string, parties: { customers: Set<string>; suppliers: Set
   if (parties.suppliers.has(name)) return "Sundry Creditors";
   if (name === LEDGERS.cash) return "Cash-in-Hand";
   if (name === LEDGERS.card || name === LEDGERS.upi) return "Bank Accounts";
+  if (name === LEDGERS.online) return "Current Assets";
   if (/^(Output|Input) /.test(name)) return "Duties & Taxes";
   if (name.startsWith("Sales")) return "Sales Accounts";
   if (name.startsWith("Purchase")) return "Purchase Accounts";
@@ -76,8 +80,19 @@ function taxEntries(lines: any[], sign: number, input: boolean, gst: boolean) {
   return out;
 }
 
+/**
+ * Ledger a tender (or refund method) posts to. Credit (on account), Advance
+ * (money already held for the customer, so it reduces their advance) and
+ * Exchange (credit note set against the bill) all post to the customer's own
+ * ledger; Online goes to the website collections ledger so website customers
+ * are not left owing.
+ */
 const receiptLedger = (type: string, customer: string) =>
-  type === "Cash" ? LEDGERS.cash : type === "Card" ? LEDGERS.card : type === "UPI" ? LEDGERS.upi : customer;
+  type === "Cash" ? LEDGERS.cash
+    : type === "Card" ? LEDGERS.card
+      : type === "UPI" ? LEDGERS.upi
+        : type === "Online" ? LEDGERS.online
+          : customer;
 
 export async function tallyVouchers(db: Database, actor: Actor, query: any) {
   const period = await exportPeriod(db, actor, query);
@@ -110,7 +125,15 @@ export async function tallyVouchers(db: Database, actor: Actor, query: any) {
       const customer = name ? String(name) : LEDGERS.walkIn;
       parties.customers.add(customer);
       const total = credit.lines.reduce((n: number, l: any) => n + l.total, 0);
-      const entries: Entry[] = [{ ledger: receiptLedger(credit.refundType || "Cash", customer), amount: -total }];
+      // Paid back per method (refunds breakdown); the part set against an
+      // exchange bill credits the customer, whose ledger that bill debits.
+      const parts = refundParts(credit);
+      const applied = Number(credit.exchangeApplied || 0);
+      const entries: Entry[] = parts.map((part) => ({ ledger: receiptLedger(part.type, customer), amount: -part.amount }));
+      if (applied) entries.push({ ledger: customer, amount: -applied });
+      // Older credit notes: whatever the breakdown does not cover went by refundType.
+      const rest = total - applied - parts.reduce((n, part) => n + part.amount, 0);
+      if (rest) entries.push({ ledger: receiptLedger(credit.refundType === "Exchange" ? "Credit" : credit.refundType || "Cash", customer), amount: -rest });
       for (const line of credit.lines)
         entries.push({ ledger: `Sales ${gst ? "@ " + rateLabel(line.taxRate) : ""}`.trim(), amount: taxableOf(line) });
       entries.push(...taxEntries(credit.lines, 1, false, gst));

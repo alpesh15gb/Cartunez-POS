@@ -205,6 +205,20 @@ export async function adjust(
 export function holdReserves(hold: RecordData, at = Date.now()) {
   return !hold.expiresAt || !(Date.parse(hold.expiresAt) <= at);
 }
+/**
+ * Units of a part a parked sale's lines reserve in one bin: plain lines plus
+ * the stocked components reserved for its kit lines (`line.components`, set by
+ * the hold and job routes through hooks/kits.ts reserveKitComponents).
+ */
+export function heldUnits(lines: any[] | undefined, productId: string, binId: string) {
+  let units = 0;
+  for (const line of lines || []) {
+    if (line.productId === productId && line.binId === binId) units += Number(line.qty) || 0;
+    for (const component of Array.isArray(line.components) ? line.components : [])
+      if (component.productId === productId && component.binId === binId) units += Number(component.qty) || 0;
+  }
+  return units;
+}
 /** Parked sales (of a branch) that still reserve stock. */
 export async function reservingHolds(db: Database, organizationId: string, branchId?: string) {
   return (await records(db, organizationId, "hold", branchId)).filter((hold) => holdReserves(hold));
@@ -231,6 +245,12 @@ export async function inventory(db: Database, actor: Actor) {
     for (const line of hold.cart.lines) {
       const key = line.productId + "|" + line.binId;
       parkedByBin.set(key, (parkedByBin.get(key) || 0) + line.qty);
+      // A parked kit reserves its stocked components.
+      for (const component of Array.isArray(line.components) ? line.components : []) {
+        if (!component.binId) continue;
+        const part = component.productId + "|" + component.binId;
+        parkedByBin.set(part, (parkedByBin.get(part) || 0) + (Number(component.qty) || 0));
+      }
     }
   }
   const stock = rows.map((row) => {

@@ -1,5 +1,6 @@
 import type { Database, RecordData } from "./db.js";
 import type { Actor } from "./domain.js";
+import { refundBy, refundParts } from "./returns.js";
 
 /** Read complete shifts, including activity after midnight and before the report's start date. */
 export async function shiftCashSummaries(db: Database, actor: Actor, shifts: RecordData[]) {
@@ -29,9 +30,9 @@ export async function shiftCashSummaries(db: Database, actor: Actor, shifts: Rec
     } else if (kind === "cashMovement") {
       if (data.direction === "in") cash.cashIn += data.amount;
       else cash.cashOut += data.amount;
-    } else if ((data.refundType ?? "Cash") === "Cash") {
-      // WS-B: an exchange credit note pays back only its refundTotal.
-      cash.cashRefunds += data.refundTotal ?? data.total;
+    } else {
+      // Only the cash part of a refund leaves the drawer (per-tender breakdown, returns.ts).
+      cash.cashRefunds += refundBy(data, "Cash");
     }
   }
   return shifts.map(shift => {
@@ -100,8 +101,9 @@ export async function shiftSummary(db: Database, actor: Actor, shift: RecordData
         partyPayments.push({ id: data.id, partyKind: data.partyKind, partyId: data.partyId, direction: data.direction,
           amount: data.amount, reference: data.reference || "", createdAt: data.createdAt });
     } else {
-      const type = data.refundType ?? "Cash";
-      refunds[type] = (refunds[type] || 0) + (data.total || 0);
+      // What was paid back, per method; an exchange's applied part shows as "Exchange".
+      for (const part of refundParts(data)) refunds[part.type] = (refunds[part.type] || 0) + part.amount;
+      if (data.exchangeApplied) refunds.Exchange = (refunds.Exchange || 0) + data.exchangeApplied;
       refundTotal += data.total || 0;
       refundCount++;
     }

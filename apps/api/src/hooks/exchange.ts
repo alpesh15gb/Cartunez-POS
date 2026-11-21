@@ -7,8 +7,9 @@
 // against the original invoice (stock goes back per disposition) and sets the
 // credit against the new invoice as an "Exchange" tender. The customer pays the
 // difference with ordinary tenders; when the credit is larger, the excess is
-// refunded by `exchangeRefundType` (Cash/Card/UPI through the shift, or Credit
-// to the customer's account).
+// refunded per original tender (returns.ts refundBreakdown): the Cash/Card/UPI
+// part by `exchangeRefundType` through the sale's shift, account parts to the
+// customer's account and online parts to the website.
 // Other body fields: returnApprovalId (cashiers: a manager's "return" approval
 // for this sale's transaction ID), returnReason.
 import { getRecord } from "../db.js";
@@ -51,7 +52,7 @@ registerSaleHook({
         transactionId: ctx.body.transactionId,
         approvalId: ctx.body.returnApprovalId,
         reason: ctx.body.returnReason || "Exchange",
-        // Unset: a bill sold on credit is refunded to the account, otherwise cash.
+        // Unset: Cash. Account, advance and online portions of the old bill go back the way they were paid.
         refundType: ctx.body.exchangeRefundType || undefined,
         lines: items.map((item) => ({
           lineId: item.lineId,
@@ -63,7 +64,8 @@ registerSaleHook({
         })),
       },
       false,
-      { exchangeTotal: ctx.total },
+      // The cash back goes through the sale's till, so a manager can exchange on a cashier's till.
+      { exchangeTotal: ctx.total, shift: ctx.shift },
     );
     // returnInvoice took the next credit-note number; keep the settings the sale
     // will save (next invoice number) from writing the old counter back.
