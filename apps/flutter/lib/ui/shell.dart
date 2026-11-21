@@ -23,6 +23,7 @@ import 'screens/reports.dart';
 import 'screens/sales.dart';
 import 'screens/settings.dart';
 import 'screens/tools.dart';
+import 'shift/pin_counter.dart' show isLockShortcut, lockCounter; // WS-D
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -30,7 +31,6 @@ const _sellers = ['owner', 'manager', 'cashier'];
 const _stock = ['owner', 'manager', 'inventory'];
 const _everyone = ['owner', 'manager', 'cashier', 'inventory'];
 const _managers = ['owner', 'manager'];
-const _owners = ['owner'];
 
 /// Opens the record named in a detail link (for example an invoice receipt).
 /// Returns null when the record is not on this device (yet).
@@ -164,7 +164,7 @@ final workspaces = <Workspace>[
     TabDef('people-suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
         (_, _) => const ContactsScreen(kind: 'suppliers'),
         path: '/people/suppliers', detail: _openLedger('suppliers')),
-    TabDef('staff', 'Staff', _owners, 'Staff accounts, roles and who can sign in.', (_, _) => const StaffScreen(),
+    TabDef('staff', 'Staff', _managers /* WS-D: managers set counter PINs */, 'Staff accounts, roles, PINs and who can sign in.', (_, _) => const StaffScreen(),
         path: '/people/staff'),
   ]),
   Workspace('/shift', 'Shift, reports & settings', 'Shift', Icons.insights_outlined, [
@@ -357,6 +357,12 @@ class _ShellState extends State<Shell> {
   /// wherever the cursor is, unless the user is typing into a field.
   bool _onKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
+    // WS-D: Ctrl+L / F11 locks the counter for the next person (the cart is kept).
+    if (isLockShortcut(event)) {
+      _buffer.clear();
+      unawaited(lockCounter(context.appRead));
+      return true;
+    }
     if (event.synthesized || Navigator.of(context).canPop() ||
         HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isAltPressed ||
         HardwareKeyboard.instance.isMetaPressed) {
@@ -834,6 +840,12 @@ class _TopBar extends StatelessWidget {
             onPressed: () => prefs.setAppearance(prefs.appearance.next),
             icon: Icon(prefs.appearance.icon),
           ),
+        // WS-D: switch user / lock the counter.
+        IconButton(
+          tooltip: 'Switch user (Ctrl+L)',
+          onPressed: () => lockCounter(app),
+          icon: const Icon(Icons.switch_account_outlined),
+        ),
         if (app.canSell) ...[
           const SizedBox(width: 6),
           Badge(

@@ -3,7 +3,7 @@ import type { Database } from "../db.js";
 import type { Post } from "./types.js";
 import { records, putRecord } from "../db.js";
 import { allow, scoped, integer, text, fail, id, now, audit, idempotent } from "../domain.js";
-import { shiftCashSummaries } from "../shift-cash.js";
+import { shiftCashSummaries, shiftSummary, countDenominations } from "../shift-cash.js";
 
 export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("shifts/open", async (tx, actor, body) => {
@@ -47,7 +47,12 @@ export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
     if (shift.closedAt) fail("Shift already closed.", 409);
     const [summary] = await shiftCashSummaries(tx, actor, [shift]);
     shift.expectedCash = summary.expectedCash;
-    shift.countedCash = integer(body.countedCash, "Counted cash");
+    // WS-D: optional note-by-note count; when given it must add up to the counted cash.
+    const count = countDenominations(body.denominations);
+    shift.countedCash = integer(body.countedCash ?? count?.total, "Counted cash");
+    if (count && count.total !== shift.countedCash)
+      fail("The note count does not add up to the counted cash.");
+    if (count) shift.denominations = count.counts;
     shift.variance = shift.countedCash - shift.expectedCash;
     shift.closedAt = now();
     shift.reason = text(body.reason || "Shift close", "reason");
@@ -55,6 +60,14 @@ export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
       variance: shift.variance,
     });
     return putRecord(tx, actor.organizationId, "shift", shift, actor.branchId);
+  });
+  // WS-D: shift summary (sales by tender, refunds, drawer movements, cash party payments, expected/counted).
+  app.get("/api/v1/shifts/:id/summary", async (request: any) => {
+    const actor = request.actor;
+    allow(actor, ["owner", "manager", "cashier"]);
+    const shift = await scoped(db, actor, "shift", request.params.id);
+    if (shift.userId !== actor.id) allow(actor, ["owner", "manager"]);
+    return shiftSummary(db, actor, shift);
   });
   post("approvals", async (tx, actor, body) => {
     allow(actor, ["owner", "manager"]);

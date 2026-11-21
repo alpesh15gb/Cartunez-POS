@@ -6,8 +6,11 @@ import '../../state/app_state.dart';
 import '../shell.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'billing.dart';
 import 'receipt.dart';
+
+// WS-D: the shift screens moved to lib/ui/shift/.
+export '../shift/shift_dialogs.dart' show recordDrawerMovement, showDrawerActivity, closeShift;
+export '../shift/shift_home.dart' show ShiftsScreen;
 
 class InvoicesScreen extends StatelessWidget {
   const InvoicesScreen({super.key});
@@ -146,123 +149,6 @@ Future<void> voidInvoice(BuildContext context, Json invoice) async {
     onSubmit: (v) async {
       final result = await app.mutate('/invoices/${invoice['id']}/void', v) as Map;
       app.toast('Invoice voided. Refund ${app.money(result['totalRefund'] as num? ?? 0)} by ${v['refundType']}.');
-    },
-  );
-}
-
-class ShiftsScreen extends StatelessWidget {
-  const ShiftsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final app = context.app;
-    final mine = app.openShift;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Toolbar([
-        if (mine == null)
-          FilledButton.icon(onPressed: () => openShiftDialog(context), icon: const Icon(Icons.lock_open), label: const Text('Open shift'))
-        else ...[
-          OutlinedButton.icon(onPressed: app.online ? () => recordDrawerMovement(context, mine, 'in') : null,
-            icon: const Icon(Icons.add), label: const Text('Cash in')),
-          OutlinedButton.icon(onPressed: app.online ? () => recordDrawerMovement(context, mine, 'out') : null,
-            icon: const Icon(Icons.remove), label: const Text('Cash out')),
-          FilledButton.icon(onPressed: () => closeShift(context, mine), icon: const Icon(Icons.lock_outline), label: const Text('Close my shift')),
-        ],
-      ]),
-      DataList(
-        onTap: (shift) => showDrawerActivity(context, shift),
-        rows: app.list('shifts').reversed.toList(),
-        empty: 'No shifts yet.',
-        columns: [
-          Col('Cashier', (s) => Text(app.userName('${s['userId']}'), style: const TextStyle(fontWeight: FontWeight.w700))),
-          Col('Opened', (s) => Text(formatDate(s['openedAt'])), flex: 2),
-          Col('Closed', (s) => Text(s['closedAt'] == null ? '—' : formatDate(s['closedAt'])), flex: 2),
-          Col('Expected', (s) => Text(s['closedAt'] != null ? app.money(s['expectedCash'] as num?) : app.isManager ? app.money(app.expectedCash(s)) : '—'), numeric: true),
-          Col('Counted', (s) => Text(s['closedAt'] == null ? '—' : app.money(s['countedCash'] as num?)), numeric: true),
-          Col('Variance', (s) => s['closedAt'] == null
-              ? const Text('—')
-              : Text(app.money(s['variance'] as num?), style: TextStyle(color: (s['variance'] ?? 0) == 0 ? Brand.forest : Brand.danger, fontWeight: FontWeight.w700)), numeric: true),
-          Col('Status', (s) => StatusChip(s['closedAt'] == null ? 'Open' : 'Closed')),
-        ],
-        actionWidth: 90,
-        actions: !app.isManager ? null : (s) => [
-          if (s['closedAt'] == null && s['userId'] != app.session?.userId && app.isManager)
-            OutlinedButton(onPressed: () => closeShift(context, s), child: const Text('Close')),
-        ],
-      ),
-    ]);
-  }
-}
-
-Future<void> recordDrawerMovement(BuildContext context, Json shift, String direction) async {
-  final app = context.appRead;
-  final transactionId = uuid();
-  await showFormDialog<void>(context,
-    title: direction == 'in' ? 'Cash in' : 'Cash out',
-    submit: 'Record movement',
-    fields: const [
-      FieldSpec('amount', 'Amount', kind: FieldKind.money, required: true),
-      FieldSpec('reason', 'Reason', required: true),
-    ],
-    onSubmit: (values) async {
-      final amount = parsePaymentAmount('${values['amount']}');
-      if (amount == null || amount < 1) throw FormProblem('Enter an amount above zero with up to two decimal places.');
-      await app.mutate('/shifts/${shift['id']}/cash-movements', {
-        'transactionId': transactionId, 'direction': direction, 'amount': amount, 'reason': values['reason'],
-      }, 'Drawer movement recorded.');
-    },
-  );
-}
-
-Future<void> showDrawerActivity(BuildContext context, Json shift) async {
-  final app = context.appRead;
-  final entries = app.list('cashMovements').where((m) => m['shiftId'] == shift['id']).toList().reversed;
-  final staff = app.userName(shift['userId']);
-  await showDialog<void>(context: context, builder: (dialog) => AlertDialog(
-    title: const Text('Shift cash activity'),
-    content: SizedBox(width: 520, child: SingleChildScrollView(child: Column(
-      mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('$staff · ${formatDate(shift['openedAt'])}'),
-        Text('Opening cash   ${app.money(shift['openingCash'])}'),
-        if (app.isManager || shift['closedAt'] != null)
-          Text('Expected cash   ${app.money(shift['expectedCash'] ?? app.expectedCash(shift))}'),
-        if (shift['closedAt'] != null) Text('Counted cash   ${app.money(shift['countedCash'])}'),
-        const Divider(),
-        if (entries.isEmpty) const Text('No cash-in or cash-out entries.'),
-        for (final entry in entries) ListTile(contentPadding: EdgeInsets.zero,
-          title: Text('${entry['direction'] == 'in' ? 'Cash in' : 'Cash out'} · ${app.money(entry['amount'])}'),
-          subtitle: Text('${formatDate(entry['createdAt'])} · ${app.userName(entry['userId'])}\n${entry['reason']}'),
-        ),
-      ],
-    ))),
-    actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Close'))],
-  ));
-}
-
-Future<void> closeShift(BuildContext context, Json shift) async {
-  final app = context.appRead;
-  if (app.pending.any((e) => e['transaction']['shiftId'] == shift['id'])) {
-    app.toast('Resolve waiting payments in Settings › Sync & audit before closing this shift.');
-    return;
-  }
-  await showFormDialog<void>(
-    context,
-    title: 'Close shift',
-    submit: 'Close shift',
-    fields: [
-      FieldSpec('countedCash', 'Cash counted in drawer',
-          kind: FieldKind.money,
-          required: true,
-          help: app.isManager ? 'Expected about ${app.money(app.expectedCash(shift))}.' : 'Count the drawer. Any difference is recorded.'),
-      const FieldSpec('reason', 'Note', value: 'Shift close'),
-    ],
-    onSubmit: (v) async {
-      final result = await app.mutate('/shifts/${shift['id']}/close', {
-        'countedCash': parsePaymentAmount('${v['countedCash']}'),
-        'reason': '${v['reason']}'.isEmpty ? 'Shift close' : v['reason'],
-      }) as Map;
-      final variance = (result['variance'] ?? 0) as int;
-      app.toast(variance == 0 ? 'Shift closed. The drawer balances.' : 'Shift closed with a difference of ${app.money(variance)}.');
     },
   );
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../core/billing.dart';
 import '../main.dart';
+import 'shift/pin_counter.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -20,9 +22,16 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _hide = true;
   String? _error;
 
+  /// This device's PIN counter set-up, if any; [_useEmail] shows the email form instead.
+  Json? _counter;
+  bool _useEmail = false;
+
   @override
   void initState() {
     super.initState();
+    PinCounter.load().then((value) {
+      if (mounted && value != null) setState(() => _counter = value);
+    }).catchError((_) {});
     final c = context.appRead.connection;
     _api = TextEditingController(text: '${c['api'] ?? ''}');
     _org = TextEditingController(text: '${c['organizationId'] ?? ''}');
@@ -58,12 +67,15 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width > 820;
+    final pin = _counter != null && !_useEmail;
     final card = ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 440),
       child: Card(
         child: Padding(
           padding: const EdgeInsets.all(28),
-          child: Form(
+          child: pin
+              ? PinSignIn(counter: _counter!, onUseEmail: () => setState(() => _useEmail = true))
+              : Form(
             key: _form,
             child: AutofillGroup(
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -145,6 +157,15 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Text(_error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600)),
                   ),
                 const SizedBox(height: 18),
+                if (_counter != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => setState(() => _useEmail = false),
+                      icon: const Icon(Icons.dialpad, size: 18),
+                      label: const Text('Sign in with PIN instead'),
+                    ),
+                  ),
                 FilledButton(
                   onPressed: _busy ? null : _submit,
                   child: _busy

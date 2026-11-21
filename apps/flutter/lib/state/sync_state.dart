@@ -127,6 +127,12 @@ class SyncState extends ChangeNotifier {
       'organizationId': organizationId.trim(),
       'branchId': branchId.trim(),
     }) as Map;
+    await adoptSession(address, organizationId.trim(), branchId.trim(), auth);
+  }
+
+  /// WS-D: opens the workspace for a sign-in the server granted (email or PIN):
+  /// that person's saved cart and waiting sales come back with them.
+  Future<void> adoptSession(String address, String organizationId, String branchId, Map auth) async {
     final next = Session(
       api: address,
       token: '${auth['token']}',
@@ -135,7 +141,7 @@ class SyncState extends ChangeNotifier {
       organizationId: '${auth['organizationId']}',
       expiresAt: '${auth['expiresAt']}',
     );
-    connection = {'api': address, 'organizationId': organizationId.trim(), 'branchId': branchId.trim()};
+    connection = {'api': address, 'organizationId': organizationId, 'branchId': branchId};
     await _store.write('connection', connection);
     final boot = await request(address, next.token, '/bootstrap') as Map;
     final previous = await _store.read(next.scope);

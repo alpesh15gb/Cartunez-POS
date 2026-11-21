@@ -8,6 +8,7 @@ import '../../main.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../screens/receipt.dart';
+import '../shift/shift_dialogs.dart' show showOpenShiftDialog; // WS-D
 
 // ---------------- checkout ----------------
 
@@ -36,24 +37,9 @@ Future<void> startCheckout(BuildContext context) async {
   if (invoice != null && context.mounted) await showReceipt(context, invoice);
 }
 
-Future<bool> openShiftDialog(BuildContext context, {bool forCheckout = false}) async {
-  final app = context.appRead;
-  final result = await showFormDialog<bool>(
-    context,
-    title: 'Open shift',
-    submit: 'Open shift',
-    fields: [
-      FieldSpec('openingCash', 'Cash in drawer',
-          kind: FieldKind.money, value: 0, required: true, help: forCheckout ? 'A shift is needed before taking payment.' : null),
-    ],
-    onSubmit: (values) async {
-      await app.mutate('/shifts/open', {'openingCash': parsePaymentAmount('${values['openingCash']}')},
-          'Shift opened.');
-      return true;
-    },
-  );
-  return result == true;
-}
+// WS-D: opening float with quick amounts lives in lib/ui/shift/shift_dialogs.dart.
+Future<bool> openShiftDialog(BuildContext context, {bool forCheckout = false}) =>
+    showOpenShiftDialog(context, forCheckout: forCheckout);
 
 class CheckoutDialog extends StatefulWidget {
   const CheckoutDialog({super.key, required this.total});

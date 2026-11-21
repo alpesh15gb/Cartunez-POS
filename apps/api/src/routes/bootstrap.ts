@@ -7,6 +7,7 @@ import { reorderSuggestions } from "../replenishment.js";
 import { productImages } from "../product-images.js";
 import { partyBalances } from "../purchasing.js";
 import { invoiceProfile } from "../settings.js";
+import { publicUser } from "./auth-pin.js"; // WS-D
 
 export function bootstrapRoutes(app: FastifyInstance, db: Database) {
   const readBootstrap = async (db: Database, actor: Actor) => {
@@ -27,12 +28,18 @@ export function bootstrapRoutes(app: FastifyInstance, db: Database) {
       user: actor,
     };
     const user = (await getRecord(db, actor.organizationId, "user", actor.id))!;
+    // WS-D: no password or PIN hashes; managers see this branch's staff to set counter PINs.
     data.users =
       actor.role === "owner"
-        ? (await records(db, actor.organizationId, "user")).map(
-            ({ passwordHash, ...entry }) => entry,
-          )
-        : [];
+        ? (await records(db, actor.organizationId, "user")).map(publicUser)
+        : actor.role === "manager"
+          ? (await records(db, actor.organizationId, "user"))
+              .filter((entry) => entry.branchIds.includes(actor.branchId))
+              .map((entry) => {
+                const { id, name, role, active, hasPin } = publicUser(entry);
+                return { id, name, role, active, hasPin };
+              })
+          : [];
     data.branches = (await records(db, actor.organizationId, "branch")).filter(
       (branch) => user.branchIds.includes(branch.id),
     );
