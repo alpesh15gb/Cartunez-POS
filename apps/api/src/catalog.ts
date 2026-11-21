@@ -54,6 +54,31 @@ export function buildProduct(value: RecordData, productId = id("part")) {
     icon: value.icon || "",
     fitments: value.fitments || [],
   });
+  // WS-C (workshop): kits and warranty. Both optional and additive.
+  // A kit (installation package) lists the parts and labour it is made of; it
+  // sells at its own price and its components leave stock at checkout
+  // (hooks/kits.ts). A kit holds no stock itself, so it is stored as a
+  // non-stock item (type "service") and never serial-tracked.
+  if (value.components !== undefined && value.components !== null && !Array.isArray(value.components))
+    fail("Kit components must be a list.");
+  const components: { productId: string; qty: number }[] = [];
+  for (const entry of value.components || []) {
+    const productId = text(entry?.productId, "kit component", true, 200);
+    if (productId === product.id) fail("A kit cannot contain itself.");
+    if (components.some((c) => c.productId === productId)) fail("List each kit component once and set its quantity.");
+    components.push({ productId, qty: integer(entry?.qty ?? 1, "Kit component quantity", 1, 999) });
+  }
+  if (components.length > 30) fail("A kit can have 30 components at most.");
+  product.components = components;
+  if (components.length) {
+    product.type = "service";
+    product.serialTracked = false;
+  }
+  // Months of warranty from the sale date (serial-tracked parts get a warranty-until date).
+  product.warrantyMonths = integer(
+    value.warrantyMonths === "" || value.warrantyMonths == null ? 0 : value.warrantyMonths,
+    "Warranty months", 0, 120,
+  );
   return product;
 }
 

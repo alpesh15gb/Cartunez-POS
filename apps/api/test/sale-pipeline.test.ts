@@ -36,7 +36,8 @@ test("Checkout pipeline: hooks, staff on lines, Advance tender, number series", 
     const oil = { productId: "oil", qty: 1, binId: "bin-a1" };
 
     // Built-in behaviour is registered as ordered hooks.
-    assert.deepEqual(saleHooks().map((hook) => hook.name), [
+    // WS-C: feature hooks (kits, jobs, ...) register after the built-ins.
+    assert.deepEqual(saleHooks().map((hook) => hook.name).slice(0, 8), [
       "account-tender-gate", "line-staff", "credit-tender", "tender-rules",
       "customer-check", "stock-and-serials", "release-hold", "audit",
     ]);

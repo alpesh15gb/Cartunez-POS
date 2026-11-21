@@ -53,6 +53,10 @@ export function bootstrapRoutes(app: FastifyInstance, db: Database) {
       ["conflicts", "conflict", "branch"],
       ["devices", "device", "branch"],
       ["audit", "audit", "branch"],
+      // WS-C (workshop)
+      ["customerVehicles", "customerVehicle", ""],
+      ["estimates", "estimate", "branch"],
+      ["jobs", "job", "branch"],
     ])
       data[plural] = await records(
         db,

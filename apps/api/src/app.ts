@@ -23,6 +23,11 @@ import { salesRoutes } from "./routes/sales.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
+// WS-C (workshop): vehicles, estimates & job cards, kits, serial warranty. Importing registers their checkout hooks.
+import { vehicleRoutes } from "./routes/vehicles.js";
+import { jobRoutes } from "./routes/jobs.js";
+import "./hooks/kits.js";
+import { serialWarrantyRoutes } from "./hooks/serial-warranty.js";
 
 export type { Post } from "./routes/types.js";
 
@@ -223,6 +228,10 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   transferRoutes(app, db, post);
   warrantyRoutes(app, db, post);
   reportRoutes(app, db);
+  // WS-C (workshop)
+  vehicleRoutes(app, db, post);
+  jobRoutes(app, db, post);
+  serialWarrantyRoutes(app, db);
   return app;
 }
 function withoutCost(value: any): any {
