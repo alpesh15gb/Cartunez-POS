@@ -111,6 +111,11 @@ ThemeData buildTheme([Appearance appearance = Appearance.light]) {
   );
   const radius = BorderRadius.all(Radius.circular(10));
   final side = BorderSide(color: p.line, width: p.lineWidth);
+  // High contrast: disabled buttons stay readable (dark grey text on light
+  // grey) instead of Material's 38% grey on 12% grey.
+  final hc = appearance == Appearance.highContrast;
+  const hcDisabledText = Color(0xFF3D3D3D);
+  const hcDisabledFill = Color(0xFFDADADA);
   return ThemeData(
     useMaterial3: true,
     brightness: p.brightness,
@@ -147,17 +152,22 @@ ThemeData buildTheme([Appearance appearance = Appearance.light]) {
         minimumSize: const Size(64, 46),
         shape: const RoundedRectangleBorder(borderRadius: radius),
         textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        disabledBackgroundColor: hc ? hcDisabledFill : null,
+        disabledForegroundColor: hc ? hcDisabledText : null,
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size(64, 42),
         foregroundColor: p.ink,
+        disabledForegroundColor: hc ? hcDisabledText : null,
+        disabledBackgroundColor: hc ? const Color(0xFFEDEDED) : null,
         side: side,
         shape: const RoundedRectangleBorder(borderRadius: radius),
         textStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
     ),
+    textButtonTheme: hc ? TextButtonThemeData(style: TextButton.styleFrom(disabledForegroundColor: hcDisabledText)) : null,
     dialogTheme: DialogThemeData(
       backgroundColor: p.surface,
       shape: RoundedRectangleBorder(

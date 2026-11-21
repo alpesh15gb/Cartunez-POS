@@ -16,9 +16,11 @@ class ShiftsScreen extends StatelessWidget {
     final app = context.app;
     final mine = app.openShift;
     final theme = Theme.of(context);
+    // UI polish: on phones the big buttons form a two-column grid that fills the card.
+    final phone = MediaQuery.sizeOf(context).width < 600;
     Widget big(String label, IconData icon, VoidCallback? onTap, {bool primary = false, String? hint}) => SizedBox(
-          width: 168,
-          height: 92,
+          width: phone ? double.infinity : 168,
+          height: phone ? 84 : 92,
           child: Tooltip(
             message: hint ?? '',
             child: (primary ? FilledButton.new : OutlinedButton.new)(
@@ -57,17 +59,31 @@ class ShiftsScreen extends StatelessWidget {
               _Figure('Bills', '${app.list('invoices').where((i) => i['shiftId'] == mine['id']).length}'),
             ]),
           const SizedBox(height: 16),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            if (mine == null)
-              big('Open shift', Icons.lock_open, app.canSell && app.online ? () => showOpenShiftDialog(context) : null,
-                  primary: true, hint: offline)
-            else ...[
-              big('Cash in', Icons.add_circle_outline, app.online ? () => recordDrawerMovement(context, mine, 'in') : null, hint: offline),
-              big('Cash out', Icons.remove_circle_outline, app.online ? () => recordDrawerMovement(context, mine, 'out') : null, hint: offline),
-              big('Shift summary', Icons.receipt_long_outlined, app.online ? () => showShiftSummary(context, mine) : null, hint: offline),
-              big('Close shift', Icons.lock_outline, app.online ? () => closeShift(context, mine) : null, primary: true, hint: offline),
-            ],
-          ]),
+          Builder(builder: (context) {
+            final buttons = [
+              if (mine == null)
+                big('Open shift', Icons.lock_open, app.canSell && app.online ? () => showOpenShiftDialog(context) : null,
+                    primary: true, hint: offline)
+              else ...[
+                big('Cash in', Icons.add_circle_outline, app.online ? () => recordDrawerMovement(context, mine, 'in') : null, hint: offline),
+                big('Cash out', Icons.remove_circle_outline, app.online ? () => recordDrawerMovement(context, mine, 'out') : null, hint: offline),
+                big('Shift summary', Icons.receipt_long_outlined, app.online ? () => showShiftSummary(context, mine) : null, hint: offline),
+                big('Close shift', Icons.lock_outline, app.online ? () => closeShift(context, mine) : null, primary: true, hint: offline),
+              ],
+            ];
+            if (!phone) return Wrap(spacing: 12, runSpacing: 12, children: buttons);
+            if (buttons.length == 1) return buttons.single;
+            return Column(children: [
+              for (var i = 0; i < buttons.length; i += 2) ...[
+                if (i > 0) const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(child: buttons[i]),
+                  const SizedBox(width: 10),
+                  Expanded(child: i + 1 < buttons.length ? buttons[i + 1] : const SizedBox.shrink()),
+                ]),
+              ],
+            ]);
+          }),
         ]),
       ),
     );

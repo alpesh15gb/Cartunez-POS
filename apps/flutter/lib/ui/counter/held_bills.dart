@@ -5,6 +5,7 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../shell.dart';
 import '../widgets.dart';
+import 'counter_keys.dart' show showKeyHints;
 
 // WS-A: held (parked) bills drawer. Search by customer name, vehicle reg no,
 // note or item; one click resumes the whole cart (lines, customer, vehicle,
@@ -145,7 +146,11 @@ class _HeldBillsPanelState extends State<HeldBillsPanel> {
         const SizedBox(height: 8),
         Expanded(
           child: holds.isEmpty
-              ? EmptyState(message: all.isEmpty ? 'No held bills. Press Hold (F4) to park a sale and reserve its stock.' : 'No held bill matches "${search.text}".')
+              ? EmptyState(message: all.isEmpty
+                  ? (showKeyHints(context)
+                      ? 'No held bills. Press Hold (F4) to park a sale and reserve its stock.'
+                      : 'No held bills. Tap Hold to park a sale and reserve its stock.')
+                  : 'No held bill matches "${search.text}".')
               : ListView.builder(itemCount: holds.length, itemBuilder: (context, i) => _HoldTile(hold: holds[i], onResume: () => _resume(holds[i]))),
         ),
       ]),

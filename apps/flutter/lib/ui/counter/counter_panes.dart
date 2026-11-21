@@ -68,7 +68,8 @@ class CounterLeftPane extends StatelessWidget {
                 onSelectionChanged: (v) => counter.setPane(v.first),
               ),
               const Spacer(),
-              TextButton.icon(
+              if (showKeyHints(context))
+                TextButton.icon(
                 onPressed: () => showCounterKeys(context),
                 icon: const Icon(Icons.keyboard_outlined, size: 18),
                 label: const Row(mainAxisSize: MainAxisSize.min, children: [Text('Keys'), KeyCap('?')]),
@@ -389,6 +390,13 @@ class PaymentDock extends StatelessWidget {
           final child = Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: Text(label, overflow: TextOverflow.ellipsis)), KeyCap(key, onDark: primary)]);
           const size = Size(0, 50);
           const inset = EdgeInsets.symmetric(horizontal: 10);
+          // UI polish: in the narrow tablet side pane the labels need the room more than the icons.
+          final width = MediaQuery.sizeOf(context).width;
+          if (width >= 840 && width < 1200) {
+            return primary
+                ? FilledButton(style: FilledButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, child: child)
+                : OutlinedButton(style: OutlinedButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, child: child);
+          }
           return primary
               ? FilledButton.icon(style: FilledButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, icon: Icon(icon, size: 18), label: child)
               : OutlinedButton.icon(style: OutlinedButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, icon: Icon(icon, size: 18), label: child);
@@ -509,6 +517,75 @@ class DeskCartPane extends StatelessWidget {
       ),
       const Divider(height: 1),
       const Expanded(child: CartTable()),
+      const PaymentDock(),
+    ]);
+  }
+}
+
+/// UI polish: tablet (840–1199) right pane: customer / price level, touch
+/// friendly cart lines (staff tag, +/−) and the same payment dock as desktop,
+/// so the cart stays on screen instead of in a bottom sheet.
+class TabletCartPane extends StatelessWidget {
+  const TabletCartPane({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final app = context.appRead;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 4, 4),
+        child: Row(children: [
+          const Expanded(child: Align(alignment: Alignment.centerLeft, child: CustomerVehicleChip())),
+          IconButton(
+            tooltip: 'New customer',
+            onPressed: () => editContact(context, 'customers', const {}, onSaved: (saved) => app.updateCart({'customerId': saved['id']})),
+            icon: const Icon(Icons.person_add_alt),
+          ),
+          ListenableBuilder(
+            listenable: app.cartState,
+            builder: (context, _) => (app.cart['lines'] as List).isEmpty
+                ? const SizedBox.shrink()
+                : IconButton(
+                    tooltip: 'Clear sale',
+                    onPressed: () async {
+                      if (await confirm(context, 'Clear this sale?', 'All items will be removed from the current bill.', action: 'Clear')) {
+                        app.clearCart();
+                      }
+                    },
+                    icon: const Icon(Icons.delete_sweep_outlined),
+                  ),
+          ),
+        ]),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+        child: ListenableBuilder(
+          listenable: app.cartState.terms,
+          builder: (context, _) => SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            segments: const [ButtonSegment(value: 'retail', label: Text('Retail')), ButtonSegment(value: 'wholesale', label: Text('Wholesale'))],
+            selected: {'${app.cart['priceLevel'] ?? 'retail'}'},
+            onSelectionChanged: (v) => app.updateCart({'priceLevel': v.first}),
+          ),
+        ),
+      ),
+      const Divider(height: 1),
+      Expanded(
+        child: ListenableBuilder(
+          listenable: app.cartState,
+          builder: (context, _) {
+            final lines = (app.cart['lines'] as List).cast<Map>();
+            final bill = app.bill;
+            if (lines.isEmpty) return const EmptyState(message: 'No items yet.\nScan a barcode or tap a part.', icon: Icons.qr_code_2);
+            return ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              itemCount: lines.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) => _PhoneLine(index: i, raw: Map<String, dynamic>.from(lines[i]), line: bill?.lines.elementAtOrNull(i)),
+            );
+          },
+        ),
+      ),
       const PaymentDock(),
     ]);
   }
