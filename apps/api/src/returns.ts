@@ -475,6 +475,30 @@ export function returnRoutes(app: FastifyInstance, db: Database) {
   app.get("/api/v1/returns/lookup", async (request: any) => {
     const actor: Actor = request.actor;
     allow(actor, ["owner", "manager", "cashier"]);
-    return db.readSnapshot((tx) => findInvoicesForReturn(tx, actor, String(request.query?.q ?? "")));
+    const query = String(request.query?.q ?? "");
+    const results = await db.readSnapshot((tx) => findInvoicesForReturn(tx, actor, query));
+    if (actor.role !== "cashier") return results;
+    // Security: a cashier gets exact matches only (the full invoice number, the
+    // full 10-digit phone or an exact serial), bills of the last 180 days in
+    // this branch, at most 10, and only the tender types (no references).
+    const key = normalize(query.trim());
+    const phone = phoneKey(query);
+    const exactPhone = phone.length === 10 && query.replace(/[\s+-]/g, "").replace(/^91/, "").length === 10;
+    const since = Date.now() - 180 * 86400000;
+    const customerIds = exactPhone
+      ? new Set((await records(db, actor.organizationId, "customer")).filter((c) => phoneKey(c.phone) === phone).map((c) => c.id))
+      : new Set<string>();
+    return results
+      .filter((invoice: any) => Date.parse(invoice.createdAt) >= since)
+      .filter((invoice: any) =>
+        normalize(invoice.number) === key ||
+        (exactPhone && (customerIds.has(invoice.customerId) || phoneKey(invoice.customer?.phone) === phone)) ||
+        invoice.lines.some((line: any) => (line.serials || []).some((s: string) => normalize(s) === key)))
+      .slice(0, 10)
+      .map((invoice: any) => ({
+        ...invoice,
+        customer: invoice.customer ? { id: invoice.customer.id, name: invoice.customer.name } : null,
+        tenders: (invoice.tenders || []).map((t: any) => ({ type: t.type, amount: t.amount })),
+      }));
   });
 }

@@ -261,7 +261,8 @@ Future<void> editDiscount(BuildContext context) async {
       FieldSpec('reason', 'Reason', value: app.cart['discountReason']),
       if (!app.isManager)
         FieldSpec('approvalId', 'Manager approval ID',
-            help: 'Needed above ${app.money(limit)}. Reference ${app.cart['transactionId']}'),
+            help: 'Needed above ${app.money(limit)}. Reference ${app.cart['transactionId']}. '
+                'The approval must cover at least this discount.'),
     ],
     onSubmit: (values) async {
       final amount = ((double.tryParse('${values['discount']}') ?? -1) * 100).round();
@@ -277,8 +278,15 @@ Future<void> editDiscount(BuildContext context) async {
       }
       var id = values['approvalId'];
       if (app.isManager) {
-        id = (await app.api('/approvals',
-            body: {'action': 'discount', 'transactionId': app.cart['transactionId'], 'reason': values['reason']}) as Map)['id'];
+        // Security: approvals are bound to the amount (and customer) they approve.
+        final customerId = '${app.cart['customerId'] ?? ''}';
+        id = (await app.api('/approvals', body: {
+          'action': 'discount',
+          'transactionId': app.cart['transactionId'],
+          'reason': values['reason'],
+          'amount': amount,
+          if (customerId.isNotEmpty) 'subjectId': customerId,
+        }) as Map)['id'];
       }
       app.updateCart({'discount': amount, 'discountReason': values['reason'], 'discountApprovalId': id});
     },

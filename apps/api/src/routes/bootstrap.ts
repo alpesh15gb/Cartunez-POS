@@ -173,6 +173,7 @@ export function bootstrapRoutes(app: FastifyInstance, db: Database) {
         lines: invoice.lines.map(({ cost, ...line }: any) => line),
       }));
       data.purchaseOrders = [];
+      data.suppliers = []; // Security: cashiers do not see the supplier list.
       const ownInvoices = new Set(data.invoices.map((invoice: any) => invoice.id));
       data.returns = data.returns.filter(
         (entry: any) => entry.userId === actor.id || ownInvoices.has(entry.invoiceId),

@@ -25,7 +25,17 @@ import { holdRoutes } from "./routes/holds.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
-import { pinRoutes } from "./routes/auth-pin.js"; // WS-D
+import { pinRoutes, pinSessionActive, pinSessionHours } from "./routes/auth-pin.js"; // WS-D
+import { scryptSync } from "node:crypto";
+
+// Security: the only routes reachable without a session (exact paths).
+const publicPaths = new Set([
+  "/api/v1/health",
+  "/api/v1/auth/login",
+  "/api/v1/auth/pin-staff",
+  "/api/v1/auth/pin-login",
+]);
+const dummySalt = "0".repeat(32);
 // WS-B: returns, customers and their checkout hooks (hooks register on import).
 import { returnRoutes } from "./returns.js";
 import { customerRoutes } from "./routes/customers.js";
@@ -110,12 +120,13 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       const user = (await records(db, org, "user")).find(
         (user) => user.email.toLowerCase() === email,
       );
-      if (
-        !user ||
-        !user.active ||
-        typeof body.password !== "string" ||
-        !validPassword(body.password, user.passwordHash)
-      )
+      // Security: unknown emails cost the same scrypt as a wrong password, so
+      // response time does not reveal which emails have accounts.
+      const password = typeof body.password === "string" ? body.password : "";
+      const passwordOk = user
+        ? validPassword(password, user.passwordHash)
+        : (scryptSync(password.slice(0, 256), dummySalt, 64), false);
+      if (!user || !user.active || typeof body.password !== "string" || !passwordOk)
         fail("Invalid email or password.", 401);
       const branchId = body.branchId || user.branchIds[0];
       if (!user.branchIds.includes(branchId))
@@ -145,12 +156,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     },
   );
   app.addHook("preHandler", async (request: any) => {
-    if (
-      request.url.split("?")[0].endsWith("/health") ||
-      request.url.split("?")[0].endsWith("/auth/login") ||
-      /\/auth\/pin-(staff|login)$/.test(request.url.split("?")[0]) || // WS-D: PIN counter sign-in
-      request.method === "OPTIONS"
-    )
+    // Security: exact paths only (no suffix matching) may skip sign-in.
+    if (publicPaths.has(request.url.split("?")[0]) || request.method === "OPTIONS")
       return;
     let claims: any;
     try {
@@ -176,15 +183,19 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
       "settings",
       "settings",
     );
+    // Security: PIN sessions are shorter and end when their counter stops being a PIN counter.
+    const sessionHours = claims.pin === true ? pinSessionHours(policy) : policy?.sessionHours;
     if (
       !policy ||
       typeof claims.iat !== "number" ||
-      Date.now() >= (claims.iat + policy.sessionHours * 3600) * 1000
+      Date.now() >= (claims.iat + sessionHours * 3600) * 1000
     )
       fail(
         "Sign in again. Your session has expired under the current policy.",
         401,
       );
+    if (claims.pin === true && !(await pinSessionActive(db, claims)))
+      fail("This counter's PIN sign-in was switched off. Sign in again.", 401);
     request.actor = {
       id: user.id,
       name: user.name,
@@ -256,12 +267,21 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   serialWarrantyRoutes(app, db);
   return app;
 }
-function withoutCost(value: any): any {
+// Security: anything that reveals what the shop paid (cost, landed/unit/last
+// purchase cost, cost hikes, margins, the price suggested from a cost) is never
+// sent to a cashier. Label sheet margins (marginTopMm, ...) are layout, not money.
+const layoutMargin = /^margin(Top|Left|Right|Bottom)/;
+export function isCostKey(key: string) {
+  if (key === "suggestedPrice") return true;
+  if (/cost/i.test(key)) return true;
+  return /margin/i.test(key) && !layoutMargin.test(key);
+}
+export function withoutCost(value: any): any {
   if (Array.isArray(value)) return value.map(withoutCost);
-  if (value && typeof value === "object")
+  if (value && typeof value === "object" && !(value instanceof Date) && !Buffer.isBuffer(value))
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([key]) => key !== "cost")
+        .filter(([key]) => !isCostKey(key))
         .map(([key, entry]) => [key, withoutCost(entry)]),
     );
   return value;

@@ -41,7 +41,7 @@ test("PIN sign-in works only on an enrolled PIN counter of the staff member's br
     const set = await call(`users/${cashierId}/pin`, manager, { pin: "4826" });
     assert.equal(set.json.hasPin, true);
     assert.ok(!set.body.includes("pinHash") && !set.body.includes("passwordHash"));
-    await call("users/user-manager/pin", owner, { pin: "4826" }, 409); // same PIN as the cashier
+    // Security: no uniqueness check (it revealed other people's PINs); the counter picks the person first.
 
     // The hash is never returned: bootstrap (owner and manager), password login, user edit.
     for (const token of [owner, manager, cashier]) {

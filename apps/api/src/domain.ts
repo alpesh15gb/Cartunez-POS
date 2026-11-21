@@ -324,10 +324,13 @@ export async function approved(
   action: string,
   approvalId: string | undefined,
   transactionId: string,
+  // Security: what is being done — the amount (paise, or units for a stock
+  // adjustment) and the invoice / customer / part it is done to.
+  bound: { amount?: number; subjectId?: string | null } = {},
 ) {
   if (["owner", "manager"].includes(actor.role)) return;
   if (!approvalId) fail(`Manager approval is required for ${action}.`, 403);
-  const approval = await scoped(db, actor, "approval", approvalId);
+  const approval = await scoped(db, actor, "approval", String(approvalId));
   if (
     approval.action !== action ||
     approval.transactionId !== transactionId ||
@@ -335,6 +338,13 @@ export async function approved(
     new Date(approval.expiresAt).getTime() < Date.now()
   )
     fail("Approval is invalid or expired.", 403);
+  if (typeof approval.amount === "number" && "amount" in bound) {
+    const requested = Number(bound.amount);
+    if (!Number.isFinite(requested) || requested > approval.amount)
+      fail("This approval does not cover that amount. Ask the manager for a new approval.", 403);
+  }
+  if (approval.subjectId && "subjectId" in bound && approval.subjectId !== (bound.subjectId || null))
+    fail(`This approval is for ${approval.subjectLabel || "something else"}, not this one.`, 403);
   approval.used = true;
   await putRecord(
     db,

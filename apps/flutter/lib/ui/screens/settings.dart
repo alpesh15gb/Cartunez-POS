@@ -330,9 +330,38 @@ Future<void> issueApproval(BuildContext context) async {
         ('advance-refund', 'Giving a customer advance back'),
       ]),
       FieldSpec('transactionId', 'Reference shown on the cashier\'s screen', required: true),
+      // Security: approvals are bound to what they approve.
+      FieldSpec('amount', 'Most it covers',
+          help: 'Rupees for a discount, credit or advance refund (needed for those). Units for a stock adjustment. '
+              'Leave empty for fitment.'),
+      FieldSpec('subjectId', 'For which bill / customer / part',
+          help: 'Invoice number for a return (needed). Customer phone for credit or an advance refund (needed). '
+              'Part SKU for a stock adjustment, customer phone for a discount (optional).'),
       FieldSpec('reason', 'Reason', required: true),
     ],
-    onSubmit: (v) async => '${(await app.api('/approvals', body: v) as Map)['id']}',
+    onSubmit: (v) async {
+      final action = '${v['action'] ?? ''}';
+      final amountText = '${v['amount'] ?? ''}'.trim();
+      int? amount;
+      if (amountText.isNotEmpty) {
+        if (action == 'adjustment') {
+          amount = int.tryParse(amountText);
+        } else {
+          final rupees = double.tryParse(amountText.replaceAll(',', ''));
+          amount = rupees == null ? null : (rupees * 100).round();
+        }
+        if (amount == null || amount < 0) throw FormProblem('Enter the amount as a number.');
+      }
+      final subject = '${v['subjectId'] ?? ''}'.trim();
+      final body = {
+        'action': action,
+        'transactionId': v['transactionId'],
+        'reason': v['reason'],
+        if (amount != null) 'amount': amount,
+        if (subject.isNotEmpty) 'subjectId': subject,
+      };
+      return '${(await app.api('/approvals', body: body) as Map)['id']}';
+    },
   );
   if (id == null || !context.mounted) return;
   await showDialog<void>(

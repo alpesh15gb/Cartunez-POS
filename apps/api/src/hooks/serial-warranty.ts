@@ -94,7 +94,10 @@ export async function lookupSerial(db: Database, actor: Actor, code: string) {
       invoice: invoice
         ? { id: invoice.id, number: invoice.number, createdAt: invoice.createdAt, total: ownInvoice ? invoice.total : undefined }
         : data.invoiceNumber ? { id: null, number: data.invoiceNumber } : null,
-      customer: customer ? { id: customer.id, name: customer.name, phone: customer.phone || "" } : null,
+      // Security: the stock (inventory) role does not get customer phone numbers.
+      customer: customer
+        ? { id: customer.id, name: customer.name, ...(actor.role === "inventory" ? {} : { phone: customer.phone || "" }) }
+        : null,
       vehicle: vehicle ? { id: vehicle.id, regNo: vehicle.regNo, make: vehicle.make, model: vehicle.model } : null,
       soldAt: data.soldAt || null,
       warrantyUntil: data.warrantyUntil || null,

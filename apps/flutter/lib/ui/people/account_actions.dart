@@ -69,7 +69,10 @@ Future<bool> refundAdvance(BuildContext context, Json customer, int available) a
       FieldSpec('mode', 'Given back by', kind: FieldKind.select, required: true, value: 'Cash', options: [for (final m in advanceModes) (m, m)]),
       const FieldSpec('reference', 'UPI / card reference'),
       const FieldSpec('reason', 'Reason', required: true),
-      if (!app.isManager) FieldSpec('approvalId', 'Manager approval ID', required: true, help: 'Reference $transactionId'),
+      // Security: the approval names this customer and the most that may be given back.
+      if (!app.isManager)
+        FieldSpec('approvalId', 'Manager approval ID',
+            required: true, help: 'Reference $transactionId · customer phone ${customer['phone'] ?? ''} · amount to give back'),
     ],
     onSubmit: (v) async {
       final amount = amountMinor(v['amount']);
@@ -166,7 +169,12 @@ class AccountTenderNote extends StatelessWidget {
         if (!app.isManager)
           TextFormField(
             initialValue: '${app.cart['creditApprovalId'] ?? ''}',
-            decoration: InputDecoration(labelText: 'Manager approval ID (credit limit)', helperText: 'Reference ${app.cart['transactionId']}'),
+            // Security: the approval is bound to this customer and the amount on credit.
+            decoration: InputDecoration(
+                labelText: 'Manager approval ID (credit limit)',
+                helperMaxLines: 3,
+                helperText: 'Reference ${app.cart['transactionId']} · customer phone ${customer['phone'] ?? ''} · '
+                    'up to ${app.money(amount)} on credit'),
             onChanged: (v) => app.updateCart({'creditApprovalId': v.trim()}),
           ),
       ]),

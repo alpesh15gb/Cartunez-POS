@@ -323,6 +323,7 @@ async function computeTotals(ctx: SaleContext) {
       "discount",
       body.discountApprovalId || body.approvalId,
       body.transactionId,
+      { amount: discount, subjectId: body.customerId || null }, // Security: bound approval
     );
   }
   let allocated = 0,

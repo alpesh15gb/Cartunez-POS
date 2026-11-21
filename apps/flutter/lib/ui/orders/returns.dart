@@ -338,7 +338,13 @@ class ReturnDialogState extends State<ReturnDialog> {
               items: [for (final e in dispositionLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
               onChanged: (v) => setState(() => disposition[id] = v ?? 'restock'),
             ),
-            if (disposition[id] == 'rma')
+            // Security: cashiers get no supplier list; the part's usual supplier is used.
+            if (disposition[id] == 'rma' && app.list('suppliers').isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('The claim goes to the usual supplier of this part. A manager can change it later.'),
+              )
+            else if (disposition[id] == 'rma')
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: DropdownButtonFormField<String>(
