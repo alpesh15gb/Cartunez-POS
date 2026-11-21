@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<!--
+  Cartunez product page: brand above the title, own price block (selling price,
+  MRP struck through, "You save"), trust row, tabs (accordion on phones:
+  Details, Compatibility, Installation, Delivery and returns) and
+  "You may also like". Every stock signal is removed: parts are always orderable.
+-->
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- No stock status, "Only N left" or back-in-stock alerts. -->
+        <referenceContainer name="product.info.type" remove="true"/>
+        <referenceBlock name="product.info.stockqty" remove="true"/>
+        <referenceContainer name="alert.urls" remove="true"/>
+
+        <!-- Brand above the title. -->
+        <referenceContainer name="product.info.main">
+            <block class="Cartunez\Storefront\Block\ProductPage" name="cz.product.brand" template="Cartunez_Storefront::product/brand.phtml" before="-"/>
+            <block class="Cartunez\Storefront\Block\ProductPage" name="cz.product.trust" template="Cartunez_Storefront::product/trust.phtml" after="product.info"/>
+        </referenceContainer>
+        <move element="cz.product.brand" destination="product.info.main" before="page.main.title"/>
+
+        <!-- Our price block instead of Magento's (no "Regular Price" wording). -->
+        <referenceBlock name="product.price.final" remove="true"/>
+        <referenceContainer name="product.info.price">
+            <block class="Cartunez\Storefront\Block\ProductPage" name="cz.product.price" template="Cartunez_Storefront::product/price.phtml" before="-"/>
+        </referenceContainer>
+
+        <!-- Tabs: Details (description), Compatibility, Installation, Delivery and returns, Reviews. -->
+        <referenceBlock name="product.attributes" remove="true"/>
+        <referenceBlock name="product.info.description">
+            <arguments>
+                <argument name="title" translate="true" xsi:type="string">Details</argument>
+                <argument name="sort_order" xsi:type="string">10</argument>
+            </arguments>
+        </referenceBlock>
+        <referenceBlock name="product.info.details">
+            <block class="Cartunez\Storefront\Block\ProductPage" name="cz.product.compatibility" as="cz_compatibility" template="Cartunez_Storefront::product/compatibility.phtml" group="detailed_info">
+                <arguments>
+                    <argument name="title" translate="true" xsi:type="string">Compatibility</argument>
+                    <argument name="sort_order" xsi:type="string">20</argument>
+                </arguments>
+            </block>
+            <block class="Cartunez\Storefront\Block\ProductPage" name="cz.product.installation" as="cz_installation" template="Cartunez_Storefront::product/installation.phtml" group="detailed_info">
+                <arguments>
+                    <argument name="title" translate="true" xsi:type="string">Installation</argument>
+                    <argument name="sort_order" xsi:type="string">30</argument>
+                </arguments>
+            </block>
+            <block class="Cartunez\Storefront\Block\ProductPage" name="cz.product.delivery" as="cz_delivery" template="Cartunez_Storefront::product/delivery.phtml" group="detailed_info">
+                <arguments>
+                    <argument name="title" translate="true" xsi:type="string">Delivery &amp; returns</argument>
+                    <argument name="sort_order" xsi:type="string">40</argument>
+                </arguments>
+            </block>
+        </referenceBlock>
+        <referenceBlock name="reviews.tab">
+            <arguments>
+                <argument name="sort_order" xsi:type="string">50</argument>
+            </arguments>
+        </referenceBlock>
+
+        <!-- "You may also like" replaces Magento's related and up-sell blocks. -->
+        <referenceBlock name="catalog.product.related" remove="true"/>
+        <referenceBlock name="product.info.upsell" remove="true"/>
+        <referenceContainer name="content">
+            <block class="Cartunez\Storefront\Block\AlsoLike" name="cz.product.also" template="Cartunez_Storefront::product/also-like.phtml" after="-"/>
+        </referenceContainer>
+    </body>
+</page>

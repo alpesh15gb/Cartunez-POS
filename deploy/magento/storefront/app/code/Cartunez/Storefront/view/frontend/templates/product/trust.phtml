@@ -1,0 +1,15 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductPage $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$points = [
+    __('Genuine parts'),
+    __('Fitting at our S.P. Road studio'),
+    __('Pickup or delivery across India'),
+    __('Invoice with every order'),
+];
+?>
+<ul class="cz-pdp-trust">
+    <?php foreach ($points as $point): ?>
+        <li><?= $escaper->escapeHtml($point) ?></li>
+    <?php endforeach; ?>
+</ul>

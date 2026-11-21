@@ -125,11 +125,17 @@ const token = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a
  * Vehicle fitment for the shop's Make/Model/Year finder (Magento attribute
  * cz_fitment, added by the Cartunez_Storefront module). One line per rule,
  * "V:Make|Model|from|to", plus one search word per year ("marutisuzukiswift2020")
- * so a finder search matches exactly. Universal parts say "universal".
+ * so a finder search matches exactly.
+ *
+ * Universal marker: a part marked universal, or one with no usable vehicle
+ * rule, starts with exactly these two lines so the finder always includes it:
+ *   universal
+ *   U:All vehicles
+ * (search word "universal"; the product page shows a "U:" line as a universal fit).
  */
+export const UNIVERSAL_FITMENT = "universal\nU:All vehicles";
 export function fitmentText(product: any, now = new Date()) {
   const lines: string[] = [];
-  if (product.universal) lines.push("universal");
   const words = new Set<string>();
   for (const rule of product.fitments || []) {
     if (!rule?.make || !rule?.model) continue;
@@ -141,6 +147,7 @@ export function fitmentText(product: any, now = new Date()) {
     for (let year = from; year <= to; year++) words.add(`${token(rule.make)}${token(rule.model)}${year}`);
   }
   if (words.size) lines.push([...words].join(" "));
+  if (product.universal || !lines.length) lines.unshift(UNIVERSAL_FITMENT);
   return lines.join("\n");
 }
 
@@ -155,9 +162,10 @@ export function magentoProduct(
 ) {
   const links = (Array.isArray(categoryIds) ? categoryIds : [categoryIds]).filter((c): c is number => !!c);
   const published = !!listing.published && !product.salesStopped && !product.serialTracked && product.type !== "service";
-  const onOrder = listing.availability === "order";
-  const inStock = qty > 0 || onOrder;
-  const hide = listing.availability === "hidden" && qty <= 0;
+  // Every published part is always orderable on the website and the customer is
+  // never told about stock: in stock, backorders allowed WITHOUT notifying the
+  // customer (1); qty still tracks. The POS availability ("stock"/"order"/"hidden")
+  // is kept for internal use only: nothing is hidden at 0 stock any more.
   const custom: { attribute_code: string; value: string }[] = [
     // Special price equal to the price shows a single price (no strike-through).
     { attribute_code: "special_price", value: (prices.selling / 100).toFixed(2) },
@@ -165,11 +173,8 @@ export function magentoProduct(
     { attribute_code: "cz_fitment", value: fitmentText(product) },
   ];
   if (listing.description) custom.push({ attribute_code: "description", value: listing.description });
-  if (onOrder)
-    custom.push({
-      attribute_code: "short_description",
-      value: `Available on order. Ships in ${listing.leadDays || 7} days.`,
-    });
+  // Clear the old "Available on order. Ships in N days." notice.
+  if (listing.availability === "order") custom.push({ attribute_code: "short_description", value: "" });
   return {
     product: {
       sku: product.sku,
@@ -178,7 +183,7 @@ export function magentoProduct(
       type_id: "simple",
       price: Number((prices.mrp / 100).toFixed(2)),
       status: published ? 1 : 2,
-      visibility: hide ? 1 : 4,
+      visibility: 4,
       weight: 1,
       extension_attributes: {
         website_ids: [Number(config.websiteId || 1)],
@@ -187,11 +192,11 @@ export function magentoProduct(
         category_links: links.map((c) => ({ position: 0, category_id: String(c) })),
         stock_item: {
           qty,
-          is_in_stock: inStock,
+          is_in_stock: true,
           manage_stock: true,
           use_config_backorders: false,
-          // 2 = allow backorders and notify the customer.
-          backorders: onOrder ? 2 : 0,
+          // 1 = allow backorders without notifying the customer.
+          backorders: 1,
         },
       },
       custom_attributes: custom,

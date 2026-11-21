@@ -271,7 +271,6 @@ a:hover, .alink:hover { color: @cz-blue; }
     .old-price:before { content: 'MRP '; color: @cz-muted; font-size: 0.85em; }
 }
 .product-info-main .price-box .price-wrapper .price { font-size: 32px; letter-spacing: -0.01em; }
-.product-info-main .price-box:after { content: 'Inclusive of all taxes'; display: block; color: @cz-muted; font-size: 12px; margin-top: 2px; }
 
 // ---------- Product cards ----------
 .products-grid .product-item {
@@ -318,16 +317,10 @@ a:hover, .alink:hover { color: @cz-blue; }
 }
 .product.media { position: relative; }
 .product.media .cz-badge { top: 14px; left: 14px; }
-.stock.available span { color: #15803D; font-weight: 700; }
-.stock.unavailable span { color: @cz-red; font-weight: 700; }
-.product.attribute.overview {
-    background: #FEF2F2;
-    border-left: 4px solid @cz-red;
-    border-radius: @cz-radius-s;
-    padding: 12px 16px;
-    color: @cz-ink;
-    font-weight: 600;
-}
+// Parts are always orderable: no stock signal anywhere on the shop.
+.stock.available, .stock.unavailable, .product-info-stock-sku .stock,
+.availability.only, .product-info-main .availability, .product-alert-stock { display: none !important; }
+.product.attribute.overview { color: @cz-text; }
 .product-info-main .page-title-wrapper .page-title { font-size: 32px; }
 
 // ---------- Home page ----------
@@ -755,6 +748,154 @@ a:hover, .alink:hover { color: @cz-blue; }
 }
 .message.success, .message.error, .message.info, .message.warning { border-radius: @cz-radius-s; }
 
+// ---------- Product page ----------
+.cz-pdp-brand {
+    display: inline-block;
+    margin: 0 0 6px;
+    color: @cz-red;
+    font-family: @cz-display;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    text-decoration: none;
+    &:hover, &:visited { color: @cz-red-dark; text-decoration: none; }
+}
+.product-info-main .product-info-price { display: block; border-bottom: 1px solid @cz-line; padding-bottom: 14px; margin-bottom: 18px; }
+.product-info-main .product-info-price .product-info-stock-sku { display: block; padding: 6px 0 0; text-align: left; color: @cz-muted; font-size: 12px; }
+.cz-pdp-price {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0;
+    .special-price .price, .cz-pdp-now .price { color: @cz-ink; font-size: 34px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+    .special-price .price { color: @cz-red; }
+    .cz-pdp-mrp { color: @cz-muted; font-size: 15px; }
+    .old-price { display: inline; }
+    .old-price:before { content: none; }
+    .old-price .price { font-size: 15px; font-weight: 500; color: @cz-muted; text-decoration: line-through; }
+    .cz-pdp-save {
+        align-self: flex-start;
+        background: #ECFDF3;
+        color: #15803D;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 999px;
+    }
+}
+.cz-buybox {
+    .fieldset { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+    .field.qty { margin: 0; padding: 0; }
+    .field.qty .label { display: block; font-size: 12px; color: @cz-muted; margin: 0 0 6px; }
+    .actions { display: flex; flex: 1 1 320px; gap: 10px; padding: 0; }
+    .actions .action.tocart, .actions .cz-buynow { flex: 1 1 0; width: auto; min-height: 52px; margin: 0; font-size: 15px; }
+    .cz-buynow {
+        background: @cz-dark;
+        border: 1px solid @cz-dark;
+        border-radius: @cz-radius-s;
+        color: #fff;
+        font-family: @cz-display;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.15s @cz-ease;
+        &:hover, &:focus { background: @cz-black; border-color: @cz-black; color: #fff; transform: translateY(-1px); }
+    }
+}
+.cz-qty {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid #D5D9E0;
+    border-radius: @cz-radius-s;
+    overflow: hidden;
+    background: #fff;
+    height: 52px;
+    .cz-qty-btn {
+        width: 44px;
+        border: 0;
+        border-radius: 0;
+        background: @cz-canvas;
+        color: @cz-ink;
+        font-size: 20px;
+        font-weight: 600;
+        line-height: 1;
+        padding: 0;
+        cursor: pointer;
+        box-shadow: none;
+        &:hover { background: @cz-line; }
+    }
+    input.input-text.qty {
+        width: 52px;
+        height: 100%;
+        border: 0;
+        border-radius: 0;
+        text-align: center;
+        font-weight: 700;
+        -moz-appearance: textfield;
+        &::-webkit-outer-spin-button, &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    }
+    div.mage-error { position: absolute; }
+}
+.cz-pdp-trust {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 16px;
+    list-style: none;
+    margin: 18px 0 8px;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid @cz-line;
+    border-radius: @cz-radius-s;
+    li { position: relative; margin: 0; padding-left: 20px; color: @cz-text; font-size: 13px; font-weight: 600; }
+    li:before { content: '\2713'; position: absolute; left: 0; top: 0; color: @cz-red; font-weight: 800; }
+}
+.product.info.detailed {
+    .product.data.items > .item.title > .switch {
+        font-family: @cz-display;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: @cz-ink;
+    }
+    .product.data.items > .item.title.active > .switch { color: @cz-ink; box-shadow: inset 0 -3px 0 @cz-red; }
+    .product.data.items > .item.content { background: #fff; }
+}
+.cz-pdp-tab {
+    color: @cz-text;
+    ul { margin: 0 0 14px; padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    .cz-pdp-lead, .cz-pdp-universal { font-weight: 700; color: @cz-ink; font-size: 16px; }
+    .cz-pdp-universal:before { content: '\2713\00a0'; color: #15803D; }
+    .cz-pdp-note { color: @cz-muted; font-size: 13px; margin: 0; }
+    .cz-pdp-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
+    .cz-pdp-link {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid @cz-ink;
+        color: @cz-ink;
+        font-weight: 700;
+        text-decoration: none;
+        &:hover { background: @cz-ink; color: #fff; text-decoration: none; }
+    }
+    .cz-pdp-link--wa { background: #25D366; border-color: #25D366; color: #08311A; &:hover { background: #1EBE5A; border-color: #1EBE5A; color: #08311A; } }
+}
+.cz-pdp-vehicles {
+    columns: 2;
+    column-gap: 24px;
+    li { break-inside: avoid; }
+}
+.cz-also {
+    clear: both;
+    margin: 48px 0 24px;
+    .cz-section-head { align-items: flex-start; text-align: left; margin-bottom: 18px; h2 { font-size: 28px; } }
+    .products-grid { margin: 0; }
+    .products-grid .product-items { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 0; }
+    .products-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
+}
+
 // Respect "reduce motion": no zooms, lifts or cross-fades.
 @media (prefers-reduced-motion: reduce) {
     *, *:before, *:after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
@@ -808,6 +949,22 @@ a:hover, .alink:hover { color: @cz-blue; }
     .nav-sections, .nav-sections-item-content, .navigation { background: @cz-dark; }
     .logo img { width: 70px; height: 60px; }
     .page-title-wrapper .page-title { font-size: 28px; }
+    // Product page: full-width buttons, one-column vehicles, swipeable "You may also like".
+    .product-info-main .page-title-wrapper .page-title { font-size: 24px; }
+    .cz-pdp-price .special-price .price, .cz-pdp-price .cz-pdp-now .price { font-size: 30px; }
+    .cz-buybox .actions { flex-basis: 100%; }
+    .cz-pdp-vehicles { columns: 1; }
+    .cz-also .products-grid .product-items {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        margin-right: -15px;
+        padding-right: 15px;
+        scrollbar-width: none;
+        &::-webkit-scrollbar { display: none; }
+        > .product-item { flex: 0 0 44%; scroll-snap-align: start; }
+    }
 }
 
 // ---------- Desktop (Luma sets these again in its desktop styles) ----------

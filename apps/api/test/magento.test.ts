@@ -113,6 +113,10 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     assert.equal(product.status, 1);
     assert.equal(product.extension_attributes.stock_item.qty, 23); // 24 in Pune - 1 buffer
     assert.equal(product.extension_attributes.stock_item.is_in_stock, true);
+    // Always orderable, the customer is never told: backorders without notice.
+    assert.equal(product.extension_attributes.stock_item.backorders, 1);
+    assert.equal(product.extension_attributes.stock_item.use_config_backorders, false);
+    assert.equal(product.extension_attributes.stock_item.manage_stock, true);
     // Vehicle fitment for the shop's finder: one line per rule and a search word per year.
     const fit = product.custom_attributes.find((a: any) => a.attribute_code === "cz_fitment").value;
     assert.match(fit, /^V:Maruti Suzuki\|Swift\|2018\|2025$/m);
@@ -179,8 +183,21 @@ test("Magento: publish, price, stock follows POS sales, retries and permissions"
     await call("integrations/magento/retry", {}, manager);
     assert.deepEqual(await runMagentoSync(db, { fetch: magento.fetch }), { sent: 1, failed: 0 });
     product = lastPut("ML-FILTER-01");
-    assert.equal(product.extension_attributes.stock_item.backorders, 2);
-    assert.match(product.custom_attributes.find((a: any) => a.attribute_code === "short_description").value, /10 days/);
+    // "On order" is internal only: same silent backorders, the old notice is cleared.
+    assert.equal(product.extension_attributes.stock_item.backorders, 1);
+    assert.equal(product.extension_attributes.stock_item.is_in_stock, true);
+    assert.equal(product.custom_attributes.find((a: any) => a.attribute_code === "short_description").value, "");
+
+    // "Hidden when out of stock" no longer hides: at 0 stock the part stays visible and orderable.
+    await call("online-listings", { productIds: ["filter"], changes: { availability: "hidden", buffer: 1000 } }, owner);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    product = lastPut("ML-FILTER-01");
+    assert.equal(product.visibility, 4);
+    assert.ok(product.extension_attributes.stock_item.qty <= 0);
+    assert.equal(product.extension_attributes.stock_item.is_in_stock, true);
+    assert.equal(product.extension_attributes.stock_item.backorders, 1);
+    assert.equal(product.custom_attributes.find((a: any) => a.attribute_code === "short_description"), undefined);
+    await call("online-listings", { productIds: ["filter"], changes: { availability: "stock", buffer: 1 } }, owner);
 
     // Unpublish disables the product in Magento instead of deleting it.
     await call("online-listings", { productIds: ["filter"], changes: { published: false } }, owner);
@@ -284,8 +301,13 @@ test("Magento: requests go over real HTTP with the token, and errors read clearl
 
 test("Magento: fitment text for the vehicle finder", () => {
   const now = new Date("2026-06-01");
-  assert.equal(fitmentText({ universal: true }, now), "universal");
-  assert.equal(fitmentText({ fitments: [] }, now), "");
+  // Universal parts, and parts with no vehicle rule, carry the universal marker.
+  assert.equal(fitmentText({ universal: true }, now), "universal\nU:All vehicles");
+  assert.equal(fitmentText({ fitments: [] }, now), "universal\nU:All vehicles");
+  assert.equal(
+    fitmentText({ universal: true, fitments: [{ make: "Tata", model: "Nexon", yearFrom: 2026 }] }, now),
+    "universal\nU:All vehicles\nV:Tata|Nexon|2026|2026\ntatanexon2026",
+  );
   const text = fitmentText(
     { fitments: [{ make: "Land Rover", model: "Range-Rover Evoque", yearFrom: 2024 }, { make: "Tata", model: "Nexon EV", yearFrom: 2023, yearTo: 2024 }] },
     now,
@@ -296,7 +318,7 @@ test("Magento: fitment text for the vehicle finder", () => {
     "landroverrangeroverevoque2024 landroverrangeroverevoque2025 landroverrangeroverevoque2026 tatanexonev2023 tatanexonev2024",
   ]);
   // Bad or reversed years are skipped rather than exploding into thousands of words.
-  assert.equal(fitmentText({ fitments: [{ make: "A", model: "B", yearFrom: 2030, yearTo: 2020 }] }, now), "");
+  assert.equal(fitmentText({ fitments: [{ make: "A", model: "B", yearFrom: 2030, yearTo: 2020 }] }, now), "universal\nU:All vehicles");
 });
 
 test("Magento: parts on sale join the Sale category until the sale is removed or ends", async () => {

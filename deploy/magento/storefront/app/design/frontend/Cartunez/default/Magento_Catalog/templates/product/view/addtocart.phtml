@@ -1,0 +1,83 @@
+<?php
+/**
+ * Cartunez: Magento's add-to-cart box with a - / + quantity stepper and a
+ * "Buy now" button. Buy now submits the same form with return_url set to the
+ * checkout, so Magento adds the part and goes straight to checkout (the
+ * standard Checkout cart/add controller honours an internal return_url).
+ */
+
+/** @var $block \Magento\Catalog\Block\Product\View */
+/** @var \Magento\Framework\Escaper $escaper */
+?>
+<?php $_product = $block->getProduct(); ?>
+<?php $buttonTitle = __('Add to Cart'); ?>
+<?php if ($_product->isSaleable()): ?>
+<div class="box-tocart cz-buybox">
+    <div class="fieldset">
+        <?php if ($block->shouldRenderQuantity()): ?>
+        <div class="field qty">
+            <label class="label" for="qty"><span><?= $escaper->escapeHtml(__('Qty')) ?></span></label>
+            <div class="control cz-qty">
+                <button type="button" class="cz-qty-btn" data-cz-step="-1" aria-label="<?= $escaper->escapeHtmlAttr(__('Decrease quantity')) ?>">&minus;</button>
+                <input type="number"
+                       name="qty"
+                       id="qty"
+                       min="0"
+                       inputmode="numeric"
+                       value="<?= $block->getProductDefaultQty() * 1 ?>"
+                       title="<?= $escaper->escapeHtmlAttr(__('Qty')) ?>"
+                       class="input-text qty"
+                       data-validate="<?= $escaper->escapeHtmlAttr(json_encode($block->getQuantityValidators())) ?>"
+                       />
+                <button type="button" class="cz-qty-btn" data-cz-step="1" aria-label="<?= $escaper->escapeHtmlAttr(__('Increase quantity')) ?>">+</button>
+            </div>
+        </div>
+        <?php endif; ?>
+        <div class="actions">
+            <button type="submit"
+                    title="<?= $escaper->escapeHtmlAttr($buttonTitle) ?>"
+                    class="action primary tocart"
+                    id="product-addtocart-button" disabled>
+                <span><?= $escaper->escapeHtml($buttonTitle) ?></span>
+            </button>
+            <button type="submit"
+                    title="<?= $escaper->escapeHtmlAttr(__('Buy now')) ?>"
+                    class="action cz-buynow"
+                    id="cz-buynow-button">
+                <span><?= $escaper->escapeHtml(__('Buy now')) ?></span>
+            </button>
+            <input type="hidden" name="return_url" id="cz-buynow-return" disabled
+                   value="<?= $escaper->escapeHtmlAttr($block->getUrl('checkout', ['_secure' => true])) ?>"/>
+            <?= $block->getChildHtml('', true) ?>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    var box = document.currentScript && document.currentScript.previousElementSibling;
+    if (!box) return;
+    var qty = box.querySelector('#qty');
+    var back = box.querySelector('#cz-buynow-return');
+    box.querySelectorAll('[data-cz-step]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (!qty) return;
+            var next = (parseInt(qty.value, 10) || 0) + parseInt(button.getAttribute('data-cz-step'), 10);
+            qty.value = String(Math.max(1, next));
+            qty.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    });
+    // Only "Buy now" sends return_url; "Add to Cart" stays on the page as usual.
+    var buy = box.querySelector('#cz-buynow-button');
+    var add = box.querySelector('#product-addtocart-button');
+    if (buy && back) buy.addEventListener('click', function () { back.disabled = false; });
+    if (add && back) add.addEventListener('click', function () { back.disabled = true; });
+})();
+</script>
+<?php endif; ?>
+<script type="text/x-magento-init">
+    {
+        "#product_addtocart_form": {
+            "Magento_Catalog/js/validate-product": {}
+        }
+    }
+</script>

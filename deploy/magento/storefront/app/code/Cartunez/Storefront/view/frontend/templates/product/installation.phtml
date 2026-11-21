@@ -1,0 +1,22 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductPage $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$product = $block->getProduct();
+if ($product === null) {
+    return;
+}
+$message = (string)__('I would like to book fitting for %1', (string)$product->getName());
+?>
+<div class="cz-pdp-tab">
+    <p class="cz-pdp-lead"><?= $escaper->escapeHtml(__("Fitting available at our studio \u{2014} call or WhatsApp to book.")) ?></p>
+    <p class="cz-pdp-actions">
+        <a class="cz-pdp-link" href="<?= $escaper->escapeUrl($block->getPhoneUrl()) ?>"><?= $escaper->escapeHtml(__('Call %1', $block->getPhoneText())) ?></a>
+        <a class="cz-pdp-link cz-pdp-link--wa" href="<?= $escaper->escapeUrl($block->getWhatsappUrl($message)) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('WhatsApp us')) ?></a>
+    </p>
+    <ul>
+        <li><?= $escaper->escapeHtml(__('Our technicians fit the part at the S.P. Road studio, Secunderabad; most fittings are done while you wait.')) ?></li>
+        <li><?= $escaper->escapeHtml(__('Electrical, audio and lighting parts are best fitted by a professional to protect your car\'s wiring and warranty.')) ?></li>
+        <li><?= $escaper->escapeHtml(__('Fitting yourself? Check the part against your vehicle before you start and keep the packing until it works.')) ?></li>
+        <li><?= $escaper->escapeHtml(__('Keep your invoice: it is needed for any warranty claim.')) ?></li>
+    </ul>
+</div>

@@ -1,0 +1,30 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductPage $block */
+/** @var \Magento\Framework\Escaper $escaper */
+if ($block->getProduct() === null) {
+    return;
+}
+$vehicles = $block->getVehicles();
+?>
+<div class="cz-pdp-tab cz-pdp-fit">
+    <?php if ($block->isUniversal()): ?>
+        <p class="cz-pdp-universal"><?= $escaper->escapeHtml(__("Universal fit \u{2014} suits all vehicles")) ?></p>
+    <?php endif; ?>
+    <?php if ($vehicles): ?>
+        <?php if ($block->isUniversal()): ?>
+            <p><?= $escaper->escapeHtml(__('Also listed for:')) ?></p>
+        <?php else: ?>
+            <p><?= $escaper->escapeHtml(__('Fits these vehicles:')) ?></p>
+        <?php endif; ?>
+        <ul class="cz-pdp-vehicles">
+            <?php foreach ($vehicles as $vehicle): ?>
+                <li><?= $escaper->escapeHtml($vehicle) ?></li>
+            <?php endforeach; ?>
+        </ul>
+    <?php endif; ?>
+    <p class="cz-pdp-note">
+        <?= $escaper->escapeHtml(__('Not sure it fits your car? Send us your vehicle model on')) ?>
+        <a href="<?= $escaper->escapeUrl($block->getWhatsappUrl((string)__('Does this part fit my car? %1', (string)$block->getProduct()->getName()))) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('WhatsApp')) ?></a>
+        <?= $escaper->escapeHtml(__('and we will check.')) ?>
+    </p>
+</div>
