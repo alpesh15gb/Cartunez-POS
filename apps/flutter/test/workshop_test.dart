@@ -106,11 +106,16 @@ void main() {
     expect(find.text('MH 12 AB 1234 · JOB-MAIN-1'), findsOneWidget);
     expect(find.text('KA 05 MN 7788 · JOB-MAIN-2'), findsOneWidget);
 
+    // Status chips sit in one sideways-scrolling row on phones.
+    await tester.ensureVisible(find.text('Ready (1)'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Ready (1)'));
     await tester.pumpAndSettle();
     expect(find.text('MH 12 AB 1234 · JOB-MAIN-1'), findsNothing);
     expect(find.text('KA 05 MN 7788 · JOB-MAIN-2'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Open (2)'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Open (2)'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('MH 12 AB 1234 · JOB-MAIN-1'));
@@ -129,6 +134,43 @@ void main() {
     await tester.tap(find.text('Job board'));
     await tester.pumpAndSettle();
     expect(find.byType(JobBoard), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('job card: advance on the job, bill offers the held advance, disabled bill says why', (tester) async {
+    final app = _workshop();
+    app.snapshot = {
+      ...app.snapshot,
+      'partyBalances': {'customers': {'c1': -20000}},
+      'partyPayments': [
+        {'id': 'p1', 'partyKind': 'customer', 'partyId': 'c1', 'jobId': 'j1', 'amount': 20000, 'mode': 'UPI', 'advance': true,
+          'createdAt': '2026-11-21T10:00:00Z'},
+      ],
+      'shifts': [
+        {'id': 's1', 'userId': 'u1', 'openedAt': '2026-11-21T08:00:00Z', 'closedAt': null, 'openingCash': 0},
+      ],
+    };
+    await _open(tester, app, '/orders/jobs/j1');
+    expect(find.textContaining('Advance ₹200.00 by UPI'), findsOneWidget);
+    expect(find.textContaining('billing offers it first'), findsOneWidget);
+    expect(find.text('Take advance'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Bill job (GST invoice)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bill job (GST invoice)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Use from advance'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '200.00'), findsOneWidget, reason: 'pre-filled up to the balance due');
+    expect(find.text('Rest paid by'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('job card with nothing on it: the bill button is off and says why', (tester) async {
+    await _open(tester, _workshop(), '/orders/jobs/j2');
+    expect(find.byKey(const ValueKey('bill-blocked')), findsOneWidget);
+    expect(find.text('Add parts or labour before billing.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

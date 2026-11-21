@@ -10,6 +10,20 @@ import '../../main.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
+/// "2026-11-21" (or a timestamp) as the app's dd/mm/yyyy.
+String formatIsoDay(Object? value) {
+  final text = '${value ?? ''}';
+  final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(text);
+  if (m == null) return text.isEmpty ? '—' : text;
+  return '${m[3]}/${m[2]}/${m[1]}';
+}
+
+/// "1 bill", "3 bills".
+String plural(Object? count, String one, [String? many]) {
+  final n = count is num ? count : num.tryParse('${count ?? 0}') ?? 0;
+  return '$n ${n == 1 ? one : many ?? '${one}s'}';
+}
+
 /// Live overview for the owner: tills, today's sales and margin by hour, stock
 /// alerts, online orders, customer dues, shift variances and top items. Polls
 /// the server every [refreshEvery] while the screen is visible and the app is
@@ -93,7 +107,7 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       Expanded(child: Text(
         d == null
             ? (problem == null ? 'Loading today…' : 'Could not load the dashboard.')
-            : 'Today ${d['day']} · updated ${loadedAt == null ? '' : TimeOfDay.fromDateTime(loadedAt!).format(context)} · '
+            : 'Today ${formatIsoDay(d['day'])} · updated ${loadedAt == null ? '' : TimeOfDay.fromDateTime(loadedAt!).format(context)} · '
                 'refreshes every ${widget.refreshEvery.inSeconds} s',
         style: text.bodySmall)),
       if (loading) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -138,14 +152,14 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
         children: [
           for (final t in tills)
             _Line('${t['counter']}${t['counter'] == t['userName'] ? '' : ' · ${t['userName']}'}', app.money(n(t['cashOnHand'])),
-                sub: 'Open since ${time(t['openedAt'])} · ${t['sales']} sales · last ${time(t['lastSaleAt'])}'),
+                sub: 'Open since ${time(t['openedAt'])} · ${plural(t['sales'], 'sale')} · last ${time(t['lastSaleAt'])}'),
           if (tills.isEmpty) const _Line('Open a shift on the counter to start selling.', ''),
         ],
       ),
       _Tile(
         key: const ValueKey('tile-sales'),
         title: 'Sales and margin today',
-        value: '${app.money(n(today['net']))} · ${today['sales']} bills',
+        value: '${app.money(n(today['net']))} · ${plural(today['sales'], 'bill')}',
         icon: Icons.show_chart,
         wide: true,
         onTap: () => open('/reports/daily-sales'),
@@ -159,7 +173,7 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       _Tile(
         key: const ValueKey('tile-low'),
         title: 'Running low',
-        value: '${low['count'] ?? 0} parts',
+        value: plural(low['count'] ?? 0, 'part'),
         icon: Icons.trending_down,
         tone: n(low['count']) > 0 ? _Tone.warn : _Tone.ok,
         onTap: () => open('/reports/low-stock'),
@@ -171,7 +185,7 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       _Tile(
         key: const ValueKey('tile-dead'),
         title: 'Dead stock',
-        value: '${dead['count'] ?? 0} parts · ${app.money(n(dead['value']))}',
+        value: '${plural(dead['count'] ?? 0, 'part')} · ${app.money(n(dead['value']))}',
         icon: Icons.inventory_outlined,
         tone: n(dead['count']) > 0 ? _Tone.warn : _Tone.ok,
         onTap: () => open('/reports/slow-moving'),
@@ -207,7 +221,7 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       _Tile(
         key: const ValueKey('tile-dues'),
         title: 'Customer dues',
-        value: '${app.money(n(dues['total']))} · ${dues['customers'] ?? 0} customers',
+        value: '${app.money(n(dues['total']))} · ${plural(dues['customers'] ?? 0, 'customer')}',
         icon: Icons.account_balance_wallet_outlined,
         onTap: () => open('/people/customers'),
         children: [for (final r in rows(dues['rows'])) _Line('${r['name']}', app.money(n(r['balance'])))],
@@ -215,7 +229,7 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       _Tile(
         key: const ValueKey('tile-variance'),
         title: 'Shift cash differences (7 days)',
-        value: variances.isEmpty ? 'All balanced' : '${variances.length} shifts',
+        value: variances.isEmpty ? 'All balanced' : plural(variances.length, 'shift'),
         icon: Icons.rule,
         tone: variances.isEmpty ? _Tone.ok : _Tone.alert,
         onTap: () => open('/reports/shifts'),
@@ -245,9 +259,28 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       LayoutBuilder(builder: (context, c) {
         final columns = c.maxWidth >= 1100 ? 3 : c.maxWidth >= 640 ? 2 : 1;
         const gap = 12.0;
-        final width = (c.maxWidth - gap * (columns - 1)) / columns;
-        return Wrap(spacing: gap, runSpacing: gap, children: [
-          for (final t in tiles) SizedBox(width: t.wide && columns > 1 ? width * 2 + gap : width, child: t),
+        if (columns == 1) {
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (final (i, t) in tiles.indexed) Padding(padding: EdgeInsets.only(top: i == 0 ? 0 : gap), child: t),
+          ]);
+        }
+        // Masonry: each tile goes under the shortest column so far (heights
+        // estimated from content), which leaves no holes between tiles.
+        final stacks = [for (var i = 0; i < columns; i++) <Widget>[]];
+        final heights = List<double>.filled(columns, 0);
+        for (final t in tiles) {
+          var at = 0;
+          for (var i = 1; i < columns; i++) {
+            if (heights[i] < heights[at] - 1) at = i;
+          }
+          stacks[at].add(Padding(padding: EdgeInsets.only(bottom: gap), child: t));
+          heights[at] += t.estimatedHeight + gap;
+        }
+        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (var i = 0; i < columns; i++) ...[
+            if (i > 0) const SizedBox(width: gap),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: stacks[i])),
+          ],
         ]);
       }),
     ]);
@@ -266,6 +299,10 @@ class _Tile extends StatelessWidget {
   final _Tone tone;
   final bool wide;
   final Widget? trailing;
+
+  /// Rough height for the masonry layout: header and value, plus each line.
+  double get estimatedHeight =>
+      90 + children.fold<double>(0, (h, c) => h + (c is SizedBox ? (c.height ?? 0) : c is _Line ? (c.sub == null ? 24 : 40) : 22));
 
   @override
   Widget build(BuildContext context) {
@@ -338,18 +375,20 @@ class HourlyChart extends StatelessWidget {
     final shown = [for (final h in hours) if (v(h, 'hour') >= first && v(h, 'hour') <= last) h];
     final best = hours.fold<num>(0, (m, h) => math.max(m, v(h, 'net')));
     final label = Theme.of(context).textTheme.labelSmall;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final marginColor = dark ? const Color(0xFFFFC266) : Brand.warning;
     return Semantics(
       label: 'Sales by hour. Best hour ${money(best)}.',
       child: Column(children: [
         Expanded(child: CustomPaint(size: Size.infinite,
-            painter: _HourlyPainter(shown, bar: scheme.primary, line: Brand.warning, grid: scheme.outlineVariant))),
+            painter: _HourlyPainter(shown, bar: scheme.primary, line: marginColor, grid: scheme.outlineVariant))),
         const SizedBox(height: 4),
         Row(children: [
           Text('${first.toString().padLeft(2, '0')}:00', style: label),
           Expanded(child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: Row(mainAxisSize: MainAxisSize.min, children: [
             Container(width: 10, height: 10, color: scheme.primary),
             Text(' Sales  ', style: label),
-            Container(width: 10, height: 2, color: Brand.warning),
+            Container(width: 10, height: 2, color: marginColor),
             Text(' Margin', style: label),
           ])))),
           Text('${last.toString().padLeft(2, '0')}:00', style: label),
@@ -389,5 +428,5 @@ class _HourlyPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_HourlyPainter old) => old.hours != hours;
+  bool shouldRepaint(_HourlyPainter old) => old.hours != hours || old.line != line || old.bar != bar || old.grid != grid;
 }

@@ -52,51 +52,152 @@ class PartsScreen extends StatelessWidget {
             ]),
           if (app.canStock && app.bins.isEmpty && app.products.isNotEmpty)
             Align(alignment: Alignment.centerLeft, child: TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a bin to receive or adjust stock'))),
-          DataList(
-            rows: rows,
-            empty: q.isEmpty ? 'No parts yet. Add your first part.' : 'No part matches.',
-            onTap: app.canStock ? (p) => editProduct(context, p) : null,
-            columns: [
-              Col('Part', (p) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    if (p['salesStopped'] == true) const StatusChip('Sales stopped'),
-                    Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    Text('${p['sku']}${'${p['partNumber'] ?? ''}'.isNotEmpty ? ' · ${p['partNumber']}' : ''}',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ]), flex: 3),
-              Col('Barcode', (p) => Text('${(p['barcodes'] as List? ?? []).firstOrNull ?? '—'}'), flex: 2),
-              Col('Stock', (p) {
-                if (p['type'] == 'service') return const Text('Service');
-                final n = app.available('${p['id']}');
-                return Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                  Text('$n', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  if (n <= (p['reorderLevel'] ?? 0)) StatusChip(n <= 0 ? 'Out of stock' : 'Low'),
-                ]);
-              }),
-              Col('Retail', (p) => Text(app.money(p['retailPrice'] as num?)), numeric: true),
-              if (app.canStock) Col('Cost', (p) => Text(app.money(p['cost'] as num?)), numeric: true),
-            ],
-            actionWidth: app.isManager ? 144 : 100,
-            actions: app.canStock
-                ? (p) => [
-                      if (app.isManager)
-                        IconButton(tooltip: 'Remove part', icon: const Icon(Icons.delete_outline), onPressed: () async {
-                          if (!await confirm(context, 'Remove ${p['sku']}?', 'This removes an unused part from Billing and Inventory. You can restore it from Inventory.', action: 'Remove')) return;
-                          try {
-                            await app.mutate('/products/${p['id']}/remove', {}, 'Part removed.');
-                          } catch (error) {
-                            app.toast(errorText(error));
-                          }
-                        }),
-                      IconButton(tooltip: 'Photos', onPressed: () => editPhotos(context, p), icon: const Icon(Icons.photo_library_outlined)),
-                      IconButton(tooltip: 'Print label', onPressed: () => printLabels(context, [productLabel(context.appRead, p)]), icon: const Icon(Icons.qr_code_2)),
-                    ]
-                : null,
-          ),
+          LayoutBuilder(builder: (context, c) {
+            final empty = q.isEmpty ? 'No parts yet. Add your first part.' : 'No part matches.';
+            final emptyAction = q.isEmpty && app.canStock
+                ? FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part'))
+                : null;
+            // Phones: a compact two-line tile per part, the less common actions in a menu.
+            if (c.maxWidth < 700) {
+              if (rows.isEmpty) return EmptyState(message: empty, action: emptyAction);
+              return Card(
+                clipBehavior: Clip.antiAlias,
+                child: Column(children: [
+                  for (final (i, p) in rows.indexed) ...[
+                    if (i > 0) const Divider(height: 1),
+                    _PartTile(part: p),
+                  ],
+                ]),
+              );
+            }
+            return DataList(
+              rows: rows,
+              dense: true,
+              empty: empty,
+              emptyAction: emptyAction,
+              onTap: app.canStock ? (p) => editProduct(context, p) : null,
+              columns: [
+                Col('Part', (p) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      if (p['salesStopped'] == true) const StatusChip('Sales stopped'),
+                      Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text('${p['sku']}${'${p['partNumber'] ?? ''}'.isNotEmpty ? ' · ${p['partNumber']}' : ''}',
+                          style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ]), flex: 3),
+                Col('Barcode', (p) => Text('${(p['barcodes'] as List? ?? []).firstOrNull ?? '—'}'), flex: 2),
+                Col('Stock', (p) => _StockText(part: p)),
+                Col('Retail', (p) => Text(app.money(p['retailPrice'] as num?)), numeric: true),
+                if (app.canStock) Col('Cost', (p) => Text(app.money(p['cost'] as num?)), numeric: true),
+              ],
+              actionWidth: 100,
+              actions: app.canStock
+                  ? (p) => [
+                        // 36px buttons keep the row near 50px high.
+                        SizedBox(height: 36, width: 40, child: IconButton(tooltip: 'Print label', padding: EdgeInsets.zero,
+                            onPressed: () => printLabels(context, [productLabel(context.appRead, p)]), icon: const Icon(Icons.qr_code_2))),
+                        SizedBox(height: 36, width: 40, child: _PartMenu(part: p)),
+                      ]
+                  : null,
+            );
+          }),
         ]);
       },
     );
   }
 
+}
+
+/// Stock figure with a Low / Out of stock chip (services show "Service").
+class _StockText extends StatelessWidget {
+  const _StockText({required this.part});
+  final Json part;
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    if (part['type'] == 'service') return const Text('Service');
+    final n = app.available('${part['id']}');
+    return Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      Text('$n', style: const TextStyle(fontWeight: FontWeight.w700)),
+      if (n <= (part['reorderLevel'] ?? 0)) StatusChip(n <= 0 ? 'Out of stock' : 'Low'),
+    ]);
+  }
+}
+
+/// Edit, photos, label and (managers) remove, behind one ⋮ button.
+class _PartMenu extends StatelessWidget {
+  const _PartMenu({required this.part});
+  final Json part;
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    return PopupMenuButton<String>(
+      tooltip: 'More for ${part['name']}',
+      padding: EdgeInsets.zero,
+      icon: const Icon(Icons.more_vert),
+      onSelected: (choice) async {
+        switch (choice) {
+          case 'edit':
+            await editProduct(context, part);
+          case 'photos':
+            await editPhotos(context, part);
+          case 'label':
+            await printLabels(context, [productLabel(context.appRead, part)]);
+          case 'remove':
+            if (!await confirm(context, 'Remove ${part['sku']}?',
+                'This removes an unused part from Billing and Inventory. You can restore it from Inventory.', action: 'Remove')) {
+              return;
+            }
+            try {
+              await app.mutate('/products/${part['id']}/remove', {}, 'Part removed.');
+            } catch (error) {
+              app.toast(errorText(error));
+            }
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit part'), contentPadding: EdgeInsets.zero)),
+        const PopupMenuItem(value: 'photos', child: ListTile(leading: Icon(Icons.photo_library_outlined), title: Text('Photos'), contentPadding: EdgeInsets.zero)),
+        const PopupMenuItem(value: 'label', child: ListTile(leading: Icon(Icons.qr_code_2), title: Text('Print label'), contentPadding: EdgeInsets.zero)),
+        if (app.isManager) ...[
+          const PopupMenuDivider(),
+          const PopupMenuItem(value: 'remove', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Remove part'), contentPadding: EdgeInsets.zero)),
+        ],
+      ],
+    );
+  }
+}
+
+/// Phone row: name, then SKU and stock; price on the right, menu last.
+class _PartTile extends StatelessWidget {
+  const _PartTile({required this.part});
+  final Json part;
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    final small = Theme.of(context).textTheme.bodySmall;
+    return InkWell(
+      onTap: app.canStock ? () => editProduct(context, part) : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 4, 8),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Flexible(child: Text('${part['name']}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+              if (part['salesStopped'] == true) ...[const SizedBox(width: 6), const StatusChip('Sales stopped')],
+            ]),
+            const SizedBox(height: 2),
+            Row(children: [
+              Flexible(child: Text('${part['sku']} · Stock ', maxLines: 1, overflow: TextOverflow.ellipsis, style: small)),
+              _StockText(part: part),
+            ]),
+          ])),
+          const SizedBox(width: 8),
+          Text(app.money(part['retailPrice'] as num?), style: const TextStyle(fontWeight: FontWeight.w700)),
+          if (app.canStock) _PartMenu(part: part) else const SizedBox(width: 12),
+        ]),
+      ),
+    );
+  }
 }
 
 Future<void> restorePart(BuildContext context) async {

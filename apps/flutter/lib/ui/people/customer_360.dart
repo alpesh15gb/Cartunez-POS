@@ -91,9 +91,9 @@ class Customer360View extends StatelessWidget {
       if ('${customer['email'] ?? ''}'.isNotEmpty) '${customer['email']}',
       if ('${customer['taxRegistrationId'] ?? ''}'.isNotEmpty) 'GSTIN ${customer['taxRegistrationId']}',
     ].join(' · ');
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    final head = <Widget>[
       const _Back(),
-      Text('${customer['name']}', style: Theme.of(context).textTheme.headlineSmall),
+      Text('${customer['name']}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
       if (details.isNotEmpty) Text(details),
       if ('${customer['address'] ?? ''}'.isNotEmpty) Text('${customer['address']}', style: Theme.of(context).textTheme.bodySmall),
       const SizedBox(height: 12),
@@ -122,14 +122,23 @@ class Customer360View extends StatelessWidget {
         if (app.isManager)
           OutlinedButton.icon(onPressed: () => then(editCreditLimit(context, customer)), icon: const Icon(Icons.speed_outlined), label: const Text('Set credit limit')),
       ]),
-      Wrap(spacing: 12, runSpacing: 12, children: [
-        _Figure('Balance', balanceText(app, 'customers', balance), color: balanceColor(balance)),
-        if (advance > 0) _Figure('Advance held', app.money(advance), color: Brand.forest),
-        _Figure('Credit limit', limit == null ? 'No limit' : app.money(limit),
-            sub: limit == null ? null : '${app.money(summary['creditAvailable'] as int? ?? 0)} left'),
-        _Figure('Bills', '${stats['bills'] ?? 0}', sub: 'Spent ${app.money(stats['spent'] as num? ?? 0)}'),
-        _Figure('Last visit', stats['lastVisit'] == null ? '—' : formatDate(stats['lastVisit'])),
-      ]),
+    ];
+    // Profile, figures, vehicles and dues on one side; history and the ledger on the other.
+    final profile = <Widget>[
+      LayoutBuilder(builder: (context, c) {
+        final figures = [
+          _Figure('Balance', balanceText(app, 'customers', balance), color: balanceColor(balance)),
+          if (advance > 0) _Figure('Advance held', app.money(advance), color: Brand.forest),
+          _Figure('Credit limit', limit == null ? 'No limit' : app.money(limit),
+              sub: limit == null ? null : '${app.money(summary['creditAvailable'] as int? ?? 0)} left'),
+          _Figure('Bills', '${stats['bills'] ?? 0}', sub: 'Spent ${app.money(stats['spent'] as num? ?? 0)}'),
+          _Figure('Last visit', stats['lastVisit'] == null ? '—' : formatDate(stats['lastVisit'])),
+        ];
+        // An even grid: two across in a narrow pane, otherwise up to five.
+        final across = c.maxWidth < 640 ? 2 : figures.length;
+        final width = (c.maxWidth - 12 * (across - 1)) / across;
+        return Wrap(spacing: 12, runSpacing: 12, children: [for (final f in figures) SizedBox(width: width, child: f)]);
+      }),
       SectionTitle('Vehicles'),
       // Integration: the customer's vehicles from the vehicle registry (WS-C), each
       // opening its page; the legacy saved vehicle shows only when none is registered.
@@ -155,6 +164,8 @@ class Customer360View extends StatelessWidget {
                   .where((e) => e != null && '$e'.isNotEmpty).join(' ')),
             ),
         ]),
+    ];
+    final dues = <Widget>[
       SectionTitle('Bills still due'),
       DataList(
         rows: rows('dueBills'),
@@ -167,6 +178,8 @@ class Customer360View extends StatelessWidget {
           Col('Due', (r) => Text(app.money(r['due'] as num), style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w700)), numeric: true),
         ],
       ),
+    ];
+    final history = <Widget>[
       SectionTitle('Purchases'),
       DataList(
         rows: rows('invoices'),
@@ -193,6 +206,8 @@ class Customer360View extends StatelessWidget {
           Col('Credit', (r) => Text(app.money(r['total'] as num)), numeric: true),
         ],
       ),
+    ];
+    final account = <Widget>[
       SectionTitle('Account'),
       DataList(
         rows: rows('entries').reversed.toList(),
@@ -206,8 +221,36 @@ class Customer360View extends StatelessWidget {
               style: TextStyle(color: balanceColor((r['balance'] ?? 0) as int))), numeric: true),
         ],
       ),
-    ]);
+    ];
+    return LayoutBuilder(builder: (context, c) {
+      if (c.maxWidth < 1100) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [...head, ...profile, ...dues, ...history, ...account]);
+      }
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        ...head,
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(flex: 5, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [...profile, ...dues])),
+          const SizedBox(width: 24),
+          // The right pane starts level with the figures.
+          Expanded(flex: 6, child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            ...account.map((w) => w is SectionTitle && identical(w, account.first) ? _TopTitle(w) : w),
+            ...history,
+          ])),
+        ]),
+      ]);
+    });
   }
+}
+
+/// A section title without the top gap, for the first item of a pane.
+class _TopTitle extends StatelessWidget {
+  const _TopTitle(this.title);
+  final SectionTitle title;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(title.text, style: Theme.of(context).textTheme.titleMedium),
+      );
 }
 
 class _Figure extends StatelessWidget {

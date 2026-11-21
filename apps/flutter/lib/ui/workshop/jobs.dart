@@ -10,6 +10,7 @@ import '../barcode_scan.dart';
 import '../photos.dart';
 import '../purchasing/file_thumbs.dart';
 import '../screens/receipt.dart';
+import '../people/account_actions.dart' show availableAdvance, advanceModes;
 import '../widgets.dart';
 import 'common.dart';
 import 'estimates.dart';
@@ -116,61 +117,123 @@ class _JobBoardState extends State<JobBoard> {
     ]);
     return LayoutBuilder(builder: (context, c) {
       if (c.maxWidth >= 900) {
+        // Lanes stay at least [minLane] wide; narrower windows scroll sideways.
+        const minLane = 220.0, gap = 10.0;
+        final lane = ((c.maxWidth - gap * (jobStatuses.length - 1)) / jobStatuses.length).clamp(minLane, double.infinity);
+        final scheme = Theme.of(context).colorScheme;
+        final lanes = Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (final (i, status) in jobStatuses.indexed) ...[
+            if (i > 0) const SizedBox(width: gap),
+            Container(
+              width: lane,
+              constraints: const BoxConstraints(minHeight: 220),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+                  child: Text('${jobStatusLabel(status)} (${visible.where((j) => j['status'] == status).length})',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                ),
+                for (final job in visible.where((j) => j['status'] == status))
+                  Padding(padding: const EdgeInsets.only(bottom: 8), child: JobTile(job: job, compact: true)),
+                if (!visible.any((j) => j['status'] == status))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Text('No jobs', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+                  ),
+              ]),
+            ),
+          ],
+        ]);
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           toolbar,
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            for (final status in jobStatuses)
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Text('${jobStatusLabel(status)} (${visible.where((j) => j['status'] == status).length})',
-                        style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: 6),
-                    for (final job in visible.where((j) => j['status'] == status)) JobTile(job: job),
-                  ]),
-                ),
-              ),
-          ]),
+          SingleChildScrollView(scrollDirection: Axis.horizontal, child: lanes),
         ]);
       }
       final shown = visible.where((j) => filter == 'open' ? j['status'] != 'delivered' : j['status'] == filter).toList();
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         toolbar,
-        Wrap(spacing: 6, runSpacing: 6, children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
             for (final s in ['open', ...jobStatuses])
-              ChoiceChip(
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
                   label: Text('${s == 'open' ? 'Open' : jobStatusLabel(s)} '
                       '(${visible.where((j) => s == 'open' ? j['status'] != 'delivered' : j['status'] == s).length})'),
                   selected: filter == s,
                   onSelected: (_) => setState(() => filter = s),
                 ),
-        ]),
+              ),
+          ]),
+        ),
         const SizedBox(height: 8),
-        if (shown.isEmpty) const EmptyState(message: 'No job cards here. Check in a vehicle to start one.'),
+        if (shown.isEmpty)
+          EmptyState(
+            message: 'No job cards here. Check in a vehicle to start one.',
+            action: FilledButton.icon(onPressed: () => newJob(context), icon: const Icon(Icons.add), label: const Text('New job card')),
+          ),
         for (final job in shown) JobTile(job: job, showStatus: true),
       ]);
     });
   }
 }
 
+/// "Bay 2" whether the bay was typed as "2" or "Bay 2".
+String bayLabel(Object? bay) {
+  final text = '${bay ?? ''}'.trim();
+  if (text.isEmpty) return '';
+  return text.toLowerCase().startsWith('bay') ? text : 'Bay $text';
+}
+
 class JobTile extends StatelessWidget {
-  const JobTile({super.key, required this.job, this.showStatus = false});
+  const JobTile({super.key, required this.job, this.showStatus = false, this.compact = false});
   final Json job;
   final bool showStatus;
+
+  /// Board lanes: registration and number on separate lines, total underneath.
+  final bool compact;
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final vehicle = vehicleById(app, job['vehicleId']);
+    final details = [
+      if (vehicle != null) '${vehicle['make'] ?? ''} ${vehicle['model'] ?? ''}'.trim(),
+      customerLabel(app, job['customerId']),
+      bayLabel(job['bay']),
+      if (job['technicianId'] != null) app.userName('${job['technicianId']}'),
+    ].where((e) => e.isNotEmpty).join(' · ');
+    if (compact) {
+      final small = Theme.of(context).textTheme.bodySmall;
+      return Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => context.go('/orders/jobs/${job['id']}'),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${vehicle?['regNo'] ?? 'No vehicle'}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text('${job['number']}', style: small),
+              const SizedBox(height: 4),
+              Text(details, maxLines: 2, overflow: TextOverflow.ellipsis, style: small),
+              const SizedBox(height: 4),
+              Text(app.money(job['total'] as num?), style: const TextStyle(fontWeight: FontWeight.w700)),
+            ]),
+          ),
+        ),
+      );
+    }
     return Card(
       child: ListTile(
         title: Text('${vehicle?['regNo'] ?? 'No vehicle'} · ${job['number']}'),
-        subtitle: Text([
-          if (vehicle != null) '${vehicle['make'] ?? ''} ${vehicle['model'] ?? ''}'.trim(),
-          customerLabel(app, job['customerId']),
-          if ('${job['bay'] ?? ''}'.isNotEmpty) 'Bay ${job['bay']}',
-          if (job['technicianId'] != null) app.userName('${job['technicianId']}'),
-        ].where((e) => e.isNotEmpty).join(' · ')),
+        subtitle: Text(details),
         trailing: showStatus ? StatusChip(jobStatusLabel(job['status'])) : Text(app.money(job['total'] as num?)),
         onTap: () => context.go('/orders/jobs/${job['id']}'),
       ),
@@ -288,37 +351,87 @@ class _JobCardState extends State<JobCard> {
       return;
     }
     final tenders = [...app.tenderTypes, if (job['customerId'] != null) 'Credit'];
+    final total = ((job['total'] ?? 0) as num).toInt();
+    // Money held for the customer (advances, store credit) is offered first, up to the bill.
+    final held = job['customerId'] == null ? 0 : availableAdvance(app, '${job['customerId']}');
+    final offer = held < total ? held : total;
     final invoice = await showFormDialog<Json>(
       context,
-      title: 'Bill ${job['number']} · ${app.money(job['total'] as num?)}',
+      title: 'Bill ${job['number']} · ${app.money(total)}',
       submit: 'Make GST invoice',
       fields: [
-        FieldSpec('type', 'Paid by', kind: FieldKind.select, value: 'Cash', required: true,
+        if (held > 0)
+          FieldSpec('advance', 'Use from advance', kind: FieldKind.money, value: (offer / 100).toStringAsFixed(2),
+              help: '${app.money(held)} held for ${customerLabel(app, job['customerId'])}. Up to ${app.money(offer)} can be used.'),
+        FieldSpec('type', held > 0 ? 'Rest paid by' : 'Paid by', kind: FieldKind.select, value: 'Cash', required: true,
             options: [for (final t in tenders) (t, t == 'Credit' ? 'On account (udhaar)' : t)]),
         const FieldSpec('reference', 'Card / UPI reference', help: 'Needed for card and UPI after you confirm the money arrived.'),
       ],
       onSubmit: (v) async {
         final type = '${v['type']}';
-        if (type != 'Cash' && type != 'Credit' && '${v['reference']}'.trim().isEmpty) {
+        final advance = held > 0 ? (parsePaymentAmount('${v['advance'] ?? ''}'.trim().isEmpty ? '0' : '${v['advance']}') ?? -1) : 0;
+        if (advance < 0 || advance > offer) throw FormProblem('Use between ₹0 and ${app.money(offer)} from the advance.');
+        final rest = total - advance;
+        if (rest > 0 && type != 'Cash' && type != 'Credit' && '${v['reference']}'.trim().isEmpty) {
           throw FormProblem('Enter the $type reference once the payment is confirmed.');
         }
         final result = await app.mutate('/jobs/${job['id']}/invoice', {
           'shiftId': shift['id'],
-          'expectedTotal': job['total'],
+          'expectedTotal': total,
           'tenders': [
-            {'type': type, 'amount': job['total'], 'confirmed': true, 'reference': '${v['reference'] ?? ''}'.trim()},
+            if (advance > 0) {'type': 'Advance', 'amount': advance},
+            if (rest > 0) {'type': type, 'amount': rest, 'confirmed': true, 'reference': '${v['reference'] ?? ''}'.trim()},
           ],
-        }, 'Invoice made. Job delivered.');
+        }, advance > 0 ? 'Invoice made with ${app.money(advance)} from the advance. Job delivered.' : 'Invoice made. Job delivered.');
         return Map<String, dynamic>.from(result as Map);
       },
     );
     if (invoice != null && mounted) await showReceipt(context, invoice);
   }
 
+  Future<void> _takeAdvance() async {
+    final app = context.appRead;
+    final transactionId = uuid();
+    await showFormDialog<void>(
+      context,
+      title: 'Advance for ${job['number']}',
+      submit: 'Record advance',
+      fields: [
+        const FieldSpec('amount', 'Amount', kind: FieldKind.money, required: true),
+        FieldSpec('mode', 'Paid by', kind: FieldKind.select, required: true, value: 'Cash', options: [for (final m in advanceModes) (m, m)]),
+        const FieldSpec('reference', 'UPI / card reference'),
+        const FieldSpec('notes', 'For', help: 'For example: parts on order for this job.'),
+      ],
+      onSubmit: (v) async {
+        final amount = parsePaymentAmount('${v['amount']}') ?? 0;
+        if (amount <= 0) throw FormProblem('Enter the amount received.');
+        if (v['mode'] != 'Cash' && '${v['reference'] ?? ''}'.trim().isEmpty) throw FormProblem('Enter the ${v['mode']} reference.');
+        await app.mutate('/jobs/${job['id']}/advances', {
+          'transactionId': transactionId,
+          'amount': amount,
+          'mode': v['mode'],
+          'reference': v['reference'] ?? '',
+          'notes': v['notes'] ?? '',
+        }, 'Advance of ${app.money(amount)} recorded on ${job['number']}.');
+      },
+    );
+  }
+
+  /// Why "Bill job" is switched off, in plain words (null when it is on).
+  String? _billBlocked(bool canSell) {
+    if (!canSell) return 'Only cashiers, managers and owners can bill.';
+    if (lines.isEmpty) return 'Add parts or labour before billing.';
+    if (busy) return 'Saving…';
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final vehicle = vehicleById(app, job['vehicleId']);
+    final jobAdvances = app.list('partyPayments').where((p) => p['jobId'] == job['id'] && p['voided'] != true && p['refund'] != true).toList();
+    final held = job['customerId'] == null ? 0 : availableAdvance(app, '${job['customerId']}');
+    final blocked = _billBlocked(app.canSell);
     final photos = [for (final p in job['photos'] as List? ?? const []) Map<String, dynamic>.from(p as Map)];
     final status = '${job['status']}';
     final next = switch (status) {
@@ -330,7 +443,7 @@ class _JobCardState extends State<JobCard> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         TextButton.icon(onPressed: () => context.go('/orders/jobs'), icon: const Icon(Icons.arrow_back), label: const Text('Job board')),
-        Text('Job ${job['number']}', style: Theme.of(context).textTheme.headlineSmall),
+        Text('Job ${job['number']}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
         StatusChip(jobStatusLabel(status)),
       ]),
       const SizedBox(height: 6),
@@ -340,7 +453,7 @@ class _JobCardState extends State<JobCard> {
       ),
       Text([
         customerLabel(app, job['customerId']),
-        if ('${job['bay'] ?? ''}'.isNotEmpty) 'Bay ${job['bay']}',
+        if (bayLabel(job['bay']).isNotEmpty) bayLabel(job['bay']),
         'Technician: ${job['technicianId'] == null ? 'not set' : app.userName('${job['technicianId']}')}',
         if (job['odoIn'] != null) 'ODO in ${job['odoIn']} km',
       ].join(' · ')),
@@ -380,12 +493,35 @@ class _JobCardState extends State<JobCard> {
       const SizedBox(height: 10),
       DocumentTotals(job),
       const SizedBox(height: 10),
-      Wrap(spacing: 8, runSpacing: 8, children: [
+      if (jobAdvances.isNotEmpty || (open && held > 0))
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final a in jobAdvances)
+              Text('Advance ${app.money(a['amount'] as num?)} by ${a['mode']} on ${formatDate(a['createdAt'])}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (open && held > 0)
+              Text('${app.money(held)} is held for ${customerLabel(app, job['customerId'])}; billing offers it first.',
+                  style: Theme.of(context).textTheme.bodySmall),
+          ]),
+        ),
+      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (open && app.canSell)
-          FilledButton.icon(onPressed: busy || lines.isEmpty ? null : _bill, icon: const Icon(Icons.receipt_long_outlined), label: const Text('Bill job (GST invoice)')),
+          FilledButton.icon(onPressed: blocked != null ? null : _bill, icon: const Icon(Icons.receipt_long_outlined), label: const Text('Bill job (GST invoice)')),
+        if (open && app.canSell && job['customerId'] != null)
+          OutlinedButton.icon(onPressed: busy ? null : _takeAdvance, icon: const Icon(Icons.savings_outlined), label: const Text('Take advance')),
         OutlinedButton.icon(onPressed: () => shareOnWhatsApp(context, job, title: 'Job card'), icon: const Icon(Icons.chat_outlined), label: const Text('WhatsApp')),
         OutlinedButton.icon(onPressed: () => shareDocumentPdf(context, job, title: 'Job card'), icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Share PDF')),
       ]),
+      if (open && blocked != null && app.canSell)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(children: [
+            Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Expanded(child: Text(blocked, key: const ValueKey('bill-blocked'), style: Theme.of(context).textTheme.bodySmall)),
+          ]),
+        ),
       for (final tag in ['walkaround', 'defect']) ...[
         SectionTitle(tag == 'walkaround' ? 'Walk-around photos' : 'Defect photos',
             trailing: Wrap(spacing: 6, children: [

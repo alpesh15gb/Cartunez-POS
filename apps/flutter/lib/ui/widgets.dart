@@ -378,6 +378,8 @@ class DataList extends StatelessWidget {
     this.empty = 'Nothing here yet.',
     this.onTap,
     this.actionWidth = 220,
+    this.emptyAction, // UI polish: a way forward from an empty list
+    this.dense = false, // UI polish: tighter table rows (wide layout)
   });
   final List<Json> rows;
   final List<Col> columns;
@@ -385,10 +387,12 @@ class DataList extends StatelessWidget {
   final String empty;
   final void Function(Json row)? onTap;
   final double actionWidth;
+  final Widget? emptyAction;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
-    if (rows.isEmpty) return EmptyState(message: empty);
+    if (rows.isEmpty) return EmptyState(message: empty, action: emptyAction);
     return LayoutBuilder(builder: (context, c) {
       final narrow = c.maxWidth < 700;
       if (narrow) {
@@ -451,7 +455,7 @@ class DataList extends StatelessWidget {
             InkWell(
               onTap: onTap == null ? null : () => onTap!(row),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: dense ? 6 : 12),
                 child: Row(children: [
                   for (final col in columns)
                     Expanded(
@@ -477,9 +481,12 @@ class DataList extends StatelessWidget {
 }
 
 class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.message, this.icon = Icons.inbox_outlined});
+  const EmptyState({super.key, required this.message, this.icon = Icons.inbox_outlined, this.action});
   final String message;
   final IconData icon;
+
+  /// UI polish: an optional button under the message (the next step).
+  final Widget? action;
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 36),
@@ -488,6 +495,7 @@ class EmptyState extends StatelessWidget {
             Icon(icon, size: 40, color: const Color(0xFF9CB1A5)),
             const SizedBox(height: 10),
             Text(message, style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
+            if (action != null) ...[const SizedBox(height: 12), action!],
           ]),
         ),
       );

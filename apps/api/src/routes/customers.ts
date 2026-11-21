@@ -23,7 +23,7 @@ async function openShift(db: Database, actor: Actor) {
   return (await records(db, actor.organizationId, "shift", actor.branchId)).find((s) => s.userId === actor.id && !s.closedAt) || null;
 }
 
-async function advanceMovement(db: Database, actor: Actor, body: any, customerId: string, refund: boolean) {
+export async function advanceMovement(db: Database, actor: Actor, body: any, customerId: string, refund: boolean) {
   const amount = integer(body.amount, "Amount", 1);
   const mode = String(body.mode || "Cash");
   if (!ADVANCE_MODES.includes(mode)) fail("Choose Cash, UPI or Card.");

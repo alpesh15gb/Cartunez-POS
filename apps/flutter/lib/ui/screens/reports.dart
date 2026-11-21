@@ -11,6 +11,7 @@ import '../../main.dart';
 import '../widgets.dart';
 import '../widgets/data_grid.dart';
 import 'accounting_exports.dart';
+import 'command_center.dart' show formatIsoDay;
 import 'receipt.dart';
 import 'tender_comparison.dart';
 
@@ -199,8 +200,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final timestamp = DateTime.tryParse('$value');
     if ('$value'.contains('T') && timestamp != null) {
       final time = timestamp.toUtc().add(report?['timeZone'] == 'Asia/Kolkata' ? const Duration(hours: 5, minutes: 30) : Duration.zero);
-      return DateFormat('dd MMM yyyy, HH:mm').format(time);
+      return DateFormat('dd/MM/yyyy, h:mm a').format(time).replaceAll('AM', 'am').replaceAll('PM', 'pm');
     }
+    // Plain days ("2026-11-21") in the app's dd/mm/yyyy.
+    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch('$value')) return formatIsoDay(value);
     return '$value';
   }
 
@@ -239,8 +242,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
+  /// Filter width: fixed on wide screens, the full row on phones.
+  double fieldWidth(double fixed) => MediaQuery.sizeOf(context).width < 600 ? double.infinity : fixed;
+
   Widget filter(String title, String value, List<(String, String)> choices, ValueChanged<String> setValue) => SizedBox(
-    width: 200,
+    width: fieldWidth(200),
     child: DropdownButtonFormField<String>(
       key: ValueKey((title, value)),
       initialValue: choices.any((choice) => choice.$1 == value) ? value : '',
@@ -281,7 +287,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
         SizedBox(
-          width: 240,
+          width: fieldWidth(240),
           child: DropdownButtonFormField<String>(
             key: ValueKey(name),
             isExpanded: true,
@@ -296,7 +302,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ),
         if (!_snapshotReports.contains(name)) OutlinedButton.icon(
           icon: const Icon(Icons.date_range),
-          label: Text(range == null ? 'All dates' : '${range!.start.day}/${range!.start.month} – ${range!.end.day}/${range!.end.month}/${range!.end.year}'),
+          label: Text(range == null ? 'All dates' : '${formatDay(range!.start)} – ${formatDay(range!.end)}'),
           onPressed: busy ? null : () async {
             final now = app.businessTime(DateTime.now());
             final picked = await showDateRangePicker(context: context, firstDate: DateTime(now.year - 5), lastDate: now, initialDateRange: range);
@@ -314,6 +320,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
           label: const Text('Run report'),
         ),
         if (rows.isNotEmpty) MenuAnchor(
+          alignmentOffset: const Offset(0, 4),
+          style: MenuStyle(
+            elevation: const WidgetStatePropertyAll(0),
+            backgroundColor: WidgetStatePropertyAll(Theme.of(context).colorScheme.surface),
+            surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+            shape: WidgetStatePropertyAll(RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: Theme.of(context).dividerTheme.thickness ?? 1),
+            )),
+          ),
           builder: (context, controller, _) => OutlinedButton.icon(
             onPressed: busy ? null : () => controller.isOpen ? controller.close() : controller.open(),
             icon: const Icon(Icons.download), label: const Text('Export')),
@@ -336,9 +352,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
         SectionTitle('${humanize('${report!['name']}')} report'),
         Text('${app.branchName('${report!['branchId'] ?? app.session?.branchId}')} · ${report!['timeZone'] == 'Asia/Kolkata' ? 'IST' : 'UTC'} · Confirmed transactions'),
         if (name == 'tenders') const Text('Recorded payments less cash change and refunds. Card and UPI payouts are reconciled with your provider separately.'),
-        Wrap(spacing: 12, runSpacing: 12, children: [
-          for (final e in (report!['totals'] as Map? ?? {}).entries) Metric(columnLabel('${e.key}'), cell('${e.key}', e.value)),
-        ]),
+        const SizedBox(height: 10),
+        LayoutBuilder(builder: (context, c) {
+          final phone = c.maxWidth < 600;
+          final width = phone ? (c.maxWidth - 12) / 2 : 200.0;
+          return Wrap(spacing: 12, runSpacing: 12, children: [
+            for (final e in (report!['totals'] as Map? ?? {}).entries)
+              SizedBox(width: width, child: Metric(columnLabel('${e.key}'), cell('${e.key}', e.value))),
+          ]);
+        }),
         if ((report!['pendingConflicts'] ?? 0) > 0)
           Padding(
             padding: const EdgeInsets.only(top: 10),

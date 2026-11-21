@@ -49,6 +49,9 @@ class _CollectionsPageState extends State<CollectionsPage> {
           DataList(
             rows: shown,
             empty: 'Nobody owes you. Credit (udhaar) sales appear here until paid.',
+            emptyAction: q.isEmpty
+                ? OutlinedButton.icon(onPressed: () => ShellScope.of(context).open('/people/customers'), icon: const Icon(Icons.people_outline), label: const Text('See all customers'))
+                : null,
             onTap: (r) => ShellScope.of(context).open('/people/customers/${r['customerId']}'),
             columns: [
               Col('Customer', (r) => Text('${r['name']}', style: const TextStyle(fontWeight: FontWeight.w700)), flex: 2),
