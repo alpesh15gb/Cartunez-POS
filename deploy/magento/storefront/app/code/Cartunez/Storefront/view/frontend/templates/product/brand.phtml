@@ -1,0 +1,9 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductPage $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$brand = $block->getBrand();
+if ($brand === null) {
+    return;
+}
+?>
+<a class="cz-pdp-brand" href="<?= $escaper->escapeUrl((string)$brand->getUrl()) ?>"><?= $escaper->escapeHtml((string)$brand->getName()) ?></a>

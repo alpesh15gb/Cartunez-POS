@@ -1,0 +1,25 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductPage $block */
+/** @var \Magento\Framework\Escaper $escaper */
+// Keep in line with the shipping-policy and returns-and-refunds pages (PolicyPages patch).
+if ($block->getProduct() === null) {
+    return;
+}
+?>
+<div class="cz-pdp-tab">
+    <ul>
+        <li><strong><?= $escaper->escapeHtml(__('Pickup (free):')) ?></strong>
+            <?= $escaper->escapeHtml(__('collect from our S.P. Road studio, Secunderabad. We call or message you when your order is ready.')) ?></li>
+        <li><strong><?= $escaper->escapeHtml(__('Delivery across India:')) ?></strong>
+            <?= $escaper->escapeHtml(__("\u{20B9}99 per order, free on orders of \u{20B9}1,999 or more.")) ?></li>
+        <li><strong><?= $escaper->escapeHtml(__('Returns:')) ?></strong>
+            <?= $escaper->escapeHtml(__('return unused, uninstalled parts in their original packing within 7 days of delivery or pickup, with the invoice.')) ?></li>
+        <li><strong><?= $escaper->escapeHtml(__('Wrong or damaged part:')) ?></strong>
+            <?= $escaper->escapeHtml(__('if it is our mistake, or it arrives damaged or faulty, we replace or refund it in full.')) ?></li>
+    </ul>
+    <p class="cz-pdp-note">
+        <a href="<?= $escaper->escapeUrl($block->getUrl('', ['_direct' => 'shipping-policy'])) ?>"><?= $escaper->escapeHtml(__('Shipping and delivery')) ?></a>
+        &middot;
+        <a href="<?= $escaper->escapeUrl($block->getUrl('', ['_direct' => 'returns-and-refunds'])) ?>"><?= $escaper->escapeHtml(__('Returns and refunds')) ?></a>
+    </p>
+</div>

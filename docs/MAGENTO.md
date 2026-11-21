@@ -12,8 +12,12 @@ prices and stock; Magento follows it.
 - **Prices:** MRP is the POS retail price including tax. The selling price is MRP, a % off MRP, or a
   fixed price (never above MRP). MRP is sent as Magento's *price* and the selling price as its
   *special price*, so the storefront shows MRP struck through next to the discounted price.
-- **Availability:** *In stock* (out of stock at 0), *On order* (backorders allowed, "Ships in N days"
-  in the short description) or *Hidden when out of stock*.
+- **Always orderable:** every published part is sent in stock with backorders allowed and no
+  customer notice, so the website never shows "out of stock", stock counts or "only N left" (the
+  shop fulfils every order). The POS *availability* (In stock / On order / Hidden when out of stock)
+  is kept for internal use only; it no longer changes the website and nothing is hidden at 0 stock.
+- **Vehicle fitment** (`cz_fitment`): `V:Make|Model|from|to` lines plus year search words. Universal
+  parts, and parts with no vehicle rule, start with the lines `universal` and `U:All vehicles`.
 - **Stock:** the website quantity is the online branch's stock, minus parked sales and the safety
   buffer. Every sale, return, receipt, adjustment, count, move and parked sale in that branch queues
   an update; editing a part updates its name and price.

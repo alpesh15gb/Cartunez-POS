@@ -1,0 +1,40 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductPage $block */
+/** @var \Magento\Framework\Escaper $escaper */
+// Replaces Magento's product page price box: selling price, then MRP struck
+// through, then the saving. Keeps the price-box / special-price / old-price
+// classes so the "-X%" photo badge (scripts.phtml) still finds the prices.
+$product = $block->getProduct();
+if ($product === null) {
+    return;
+}
+$prices = $block->getPrices();
+?>
+<div class="cz-pdp-price price-box" data-product-id="<?= (int)$product->getId() ?>">
+    <?php if ($prices['discounted']): ?>
+        <span class="special-price"><span class="price"><?= $escaper->escapeHtml($prices['selling']) ?></span></span>
+        <span class="cz-pdp-mrp">
+            <?= $escaper->escapeHtml(__('MRP')) ?>
+            <span class="old-price"><span class="price"><?= $escaper->escapeHtml($prices['mrp']) ?></span></span>
+        </span>
+        <span class="cz-pdp-save">
+            <?= $escaper->escapeHtml(__('You save %1 (%2%)', $prices['save'], $prices['percent'])) ?>
+        </span>
+    <?php else: ?>
+        <span class="cz-pdp-now"><span class="price"><?= $escaper->escapeHtml($prices['selling']) ?></span></span>
+    <?php endif; ?>
+</div>
+<script type="application/ld+json"><?= /* @noEscape */ json_encode([
+    '@context' => 'https://schema.org',
+    '@type' => 'Product',
+    'name' => (string)$product->getName(),
+    'sku' => (string)$product->getSku(),
+    'url' => (string)$product->getProductUrl(),
+    'offers' => [
+        '@type' => 'Offer',
+        'price' => number_format($prices['value'], 2, '.', ''),
+        'priceCurrency' => $block->getCurrencyCode(),
+        'availability' => 'https://schema.org/InStock',
+        'url' => (string)$product->getProductUrl(),
+    ],
+], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>

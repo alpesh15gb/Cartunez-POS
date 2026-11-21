@@ -1,0 +1,33 @@
+<?php
+/** @var \Cartunez\Storefront\Block\AlsoLike $block */
+/** @var \Magento\Framework\Escaper $escaper */
+$items = $block->getItems();
+if (!$items) {
+    return;
+}
+?>
+<section class="cz-also block" aria-labelledby="cz-also-title">
+    <div class="cz-section-head">
+        <h2 id="cz-also-title"><?= $escaper->escapeHtml(__('You may also like')) ?></h2>
+    </div>
+    <div class="products wrapper grid products-grid cz-also-list">
+        <ol class="products list items product-items">
+            <?php foreach ($items as $item): ?>
+                <?php $url = $block->getProductUrl($item); ?>
+                <li class="item product product-item">
+                    <div class="product-item-info">
+                        <a href="<?= $escaper->escapeUrl($url) ?>" class="product photo product-item-photo" tabindex="-1">
+                            <?= /* @noEscape */ $block->getImage($item, 'related_products_list')->toHtml() ?>
+                        </a>
+                        <div class="product details product-item-details">
+                            <strong class="product name product-item-name">
+                                <a class="product-item-link" href="<?= $escaper->escapeUrl($url) ?>"><?= $escaper->escapeHtml((string)$item->getName()) ?></a>
+                            </strong>
+                            <?= /* @noEscape */ $block->getProductPrice($item) ?>
+                        </div>
+                    </div>
+                </li>
+            <?php endforeach; ?>
+        </ol>
+    </div>
+</section>
