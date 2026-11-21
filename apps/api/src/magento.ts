@@ -61,7 +61,34 @@ export async function onlineQuantity(
         .reduce((s: number, line: any) => s + Number(line.qty || 0), 0),
     0,
   );
-  return Math.max(0, onHand - parked - buffer);
+  return Math.max(0, onHand + (await msiStillReserved(db, organizationId, branchId, productId)) - parked - buffer);
+}
+
+/**
+ * WS-E: units Magento's MSI still reserves although the POS stock has already let
+ * them go. The POS pushes the source quantity; Magento shows
+ * salable = source − its reservations, and keeps a reservation for every ordered
+ * unit until it is shipped (or cancelled / refunded) on Magento.
+ * A "pos" order is invoiced in the POS before Magento ships it, so in between the
+ * units are out of POS stock AND still reserved by MSI: counted twice. Adding them
+ * back keeps the website right. Example: 24 on the shelf, an order for 3:
+ *   ordered, not invoiced  POS 24 → push 24; MSI 24 − 3 = 21 salable
+ *   POS invoiced           POS 21 → push 21 + 3 = 24; MSI 24 − 3 = 21 salable
+ *   shipped on Magento     MSI takes 3 off the source and drops the reservation;
+ *                          POS 21 → push 21 (re-queued on shipment); 21 salable
+ * Older "magento" orders and orders whose shipment reached Magento add nothing.
+ */
+export async function msiStillReserved(db: Database, organizationId: string, branchId: string, productId: string) {
+  let units = 0;
+  for (const order of await records(db, organizationId, "onlineOrder", branchId)) {
+    if (order.mode !== "pos" || order.fulfilment?.shipment?.state === "sent") continue;
+    for (const line of order.lines || []) {
+      if (line.productId !== productId) continue;
+      const open = Math.max(0, Number(line.ordered || 0) - Number(line.canceled || 0) - Number(line.refunded || 0));
+      units += Math.max(0, Math.min(Number(line.posInvoiced || 0), open) - Number(line.shipped || 0));
+    }
+  }
+  return units;
 }
 
 const slug = (value: string) =>
@@ -533,6 +560,23 @@ export function magentoRoutes(app: FastifyInstance, db: Database, post: Post, fe
     if (body.attributeSetId !== undefined) next.attributeSetId = integer(body.attributeSetId, "Attribute set", 1, 1000000);
     if (body.websiteId !== undefined) next.websiteId = integer(body.websiteId, "Website", 1, 1000000);
     if (body.rootCategoryId !== undefined) next.rootCategoryId = integer(body.rootCategoryId, "Root category", 1, 1000000);
+    // WS-E: MSI source to ship from (empty: Magento's default source).
+    if (body.sourceCode !== undefined) {
+      const code = text(body.sourceCode ?? "", "MSI source code", false, 64);
+      if (code && !/^[A-Za-z0-9_-]+$/.test(code)) fail("The MSI source code has only letters, digits, - and _.");
+      next.sourceCode = code;
+    }
+    // WS-E: Magento payment codes a gateway has already collected (invoiced as paid online).
+    if (body.prepaidMethods !== undefined) {
+      const list = Array.isArray(body.prepaidMethods)
+        ? body.prepaidMethods
+        : String(body.prepaidMethods ?? "").split(",");
+      next.prepaidMethods = [...new Set(list.map((m: unknown) => String(m).trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      if (next.prepaidMethods.some((m: string) => !/^[a-z0-9_]+$/.test(m)))
+        fail("Enter Magento payment method codes such as razorpay, separated by commas.");
+      if (next.prepaidMethods.some((m: string) => ["cashondelivery", "banktransfer", "checkmo"].includes(m)))
+        fail("Cash on delivery, bank transfer and cheque are paid later, not by a gateway.");
+    }
     if (body.token !== undefined && String(body.token).trim()) {
       await putRecord(tx, actor.organizationId, "integrationSecret", {
         id: "magento",

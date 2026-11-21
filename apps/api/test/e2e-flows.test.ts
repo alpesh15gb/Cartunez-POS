@@ -14,6 +14,7 @@ import { runMagentoShipments } from "../src/fulfilment.js";
 function fakeMagento() {
   const orders: any[] = [];
   const shipments: any[] = [];
+  const invoices: any[] = [];
   const requests: { method: string; path: string; body: any }[] = [];
   const fetch = (async (url: string | URL, init: any = {}) => {
     const u = new URL(String(url));
@@ -33,6 +34,26 @@ function fakeMagento() {
       shipments.push({ orderId: Number(ship[1]), body });
       return reply(200, 900 + shipments.length);
     }
+    // The fulfilment worker reads the order back (shipped / invoiced quantities) before acting.
+    const one = u.pathname.match(/^\/rest\/V1\/orders\/(\d+)$/);
+    if (one && (init.method || "GET") === "GET") {
+      const o = orders.find((x) => x.entity_id === Number(one[1]));
+      if (!o) return reply(404, { message: "Not found" });
+      const shippedQty = (itemId: number) => shipments.filter((sh) => sh.orderId === o.entity_id)
+        .flatMap((sh) => sh.body?.items || []).filter((i: any) => i.order_item_id === itemId)
+        .reduce((n: number, i: any) => n + Number(i.qty || 0), 0);
+      return reply(200, {
+        ...o,
+        items: o.items.map((i: any) => ({ ...i, qty_shipped: (i.qty_shipped || 0) + shippedQty(i.item_id) })),
+      });
+    }
+    const inv = u.pathname.match(/^\/rest\/V1\/order\/(\d+)\/invoice$/);
+    if (inv && init.method === "POST") {
+      invoices.push({ orderId: Number(inv[1]), body });
+      return reply(200, 700 + invoices.length);
+    }
+    if (u.pathname === "/rest/V1/shipments") return reply(200, { items: [], total_count: 0 });
+    if (u.pathname === "/rest/V1/shipment/track" && init.method === "POST") return reply(200, 1);
     if (u.pathname.startsWith("/rest/all/V1/products/")) return reply(200, { id: 1, sku: "x" });
     return reply(404, { message: "Not found" });
   }) as typeof globalThis.fetch;
@@ -562,7 +583,8 @@ test("Loop 6 – online fulfilment: import, pick, invoice without a shift, ship,
   try {
     const owner = await login("owner");
     const cashier = await login("cashier");
-    await call("integrations/magento", { baseUrl: "http://magento.test", token: "test-token", branchId: "pune", enabled: true }, owner);
+    // Razorpay is a prepaid gateway; COD and bank transfer stay owed until collected.
+    await call("integrations/magento", { baseUrl: "http://magento.test", token: "test-token", branchId: "pune", enabled: true, prepaidMethods: ["razorpay"] }, owner);
     const onHand = async (productId: string) =>
       Number((await db.query("SELECT COALESCE(SUM(quantity),0) q FROM stock WHERE organization_id='demo' AND branch_id='pune' AND product_id=$1", [productId])).rows[0].q);
     const poll = () => pollMagentoOrders(db, { fetch: magento.fetch, organizationId: "demo" });

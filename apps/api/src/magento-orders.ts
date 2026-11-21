@@ -214,7 +214,7 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
         method: String(mg.payment?.method || ""),
         title: String(mg.payment?.additional_information?.[0] || mg.payment?.method || ""),
       },
-      shippingCharge: paise(mg.shipping_incl_tax ?? mg.shipping_amount),
+      shippingCharge: Math.max(0, paise(mg.shipping_incl_tax ?? mg.shipping_amount) - paise(mg.shipping_discount_amount)),
       total: paise(mg.grand_total),
       currency: mg.order_currency_code || mg.base_currency_code || "INR",
       createdAt: isoDate(mg.created_at),
@@ -237,6 +237,13 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
             item.row_total_incl_tax != null && Number(item.qty_ordered) > 0
               ? Math.round(paise(Number(item.row_total_incl_tax) - Number(item.discount_amount || 0)) / Number(item.qty_ordered))
               : paise(item.price_incl_tax ?? item.price),
+          // WS-E: the whole row as paid (GST included, after discount), for exact invoice totals.
+          rowPaid:
+            item.row_total_incl_tax != null
+              ? paise(Number(item.row_total_incl_tax) - Number(item.discount_amount || 0))
+              : paise(item.price_incl_tax ?? item.price) * Number(item.qty_ordered || 0),
+          // WS-E: units Magento has shipped (MSI drops its reservation for them).
+          shipped: Number(item.qty_shipped || 0),
           ordered: t.ordered,
           invoiced: t.invoiced,
           canceled: t.canceled,
@@ -247,9 +254,50 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
         };
       }),
     };
+    await flagCreditNote(tx, organizationId, order);
     await applyOnlineOrder(tx, order, branchId);
     return putRecord(tx, organizationId, "onlineOrder", order, branchId);
   });
+}
+
+/**
+ * WS-E: units cancelled or refunded on Magento after the POS invoiced them need a
+ * POS credit note. The order is flagged "credit note needed" and a shipment that
+ * has not reached Magento yet is held (its job dropped) until staff deal with it.
+ * line.creditNoteQty remembers what was flagged, so reading the order again does
+ * not flag it twice.
+ */
+async function flagCreditNote(db: Database, organizationId: string, order: any) {
+  const f = order.fulfilment;
+  if (order.mode !== "pos" || !f?.invoiceId) return;
+  let grew = false;
+  for (const line of order.lines) {
+    const invoiced = Number(line.posInvoiced || 0);
+    if (!invoiced) continue;
+    const excess = Math.max(0, invoiced - Math.max(0, Number(line.ordered || 0) - Number(line.canceled || 0) - Number(line.refunded || 0)));
+    if (excess > Number(line.creditNoteQty || 0)) {
+      line.creditNoteQty = excess;
+      grew = true;
+    }
+  }
+  if (!grew) return;
+  f.creditNoteNeeded = {
+    at: new Date().toISOString(),
+    invoiceId: f.invoiceId,
+    invoiceNumber: f.invoiceNumber,
+    lines: order.lines
+      .filter((l: any) => Number(l.creditNoteQty || 0) > 0)
+      .map((l: any) => ({ itemId: l.itemId, sku: l.sku, name: l.name, qty: Number(l.creditNoteQty) })),
+    resolvedAt: null,
+  };
+  if (f.shipment && f.shipment.state !== "sent" && f.shipment.state !== "cancelled") {
+    await db.query("DELETE FROM records WHERE organization_id=$1 AND kind='magentoShipment' AND id=$2", [organizationId, order.id]);
+    f.shipment = {
+      ...f.shipment,
+      state: "held",
+      error: "Part of this order was cancelled or refunded on the website after it was invoiced. Make the credit note, then send the shipment again.",
+    };
+  }
 }
 
 /** Re-applies orders still waiting for stock (after goods arrive). */

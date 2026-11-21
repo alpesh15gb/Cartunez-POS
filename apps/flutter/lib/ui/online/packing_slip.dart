@@ -75,7 +75,12 @@ Future<Uint8List> packingSlipPdf(AppState app, Json order) async {
         ],
       ),
       pw.SizedBox(height: 14),
-      pw.Text(f['cod'] == true ? 'Cash on delivery: collect ${app.money(f['invoiceTotal'] as num?)}' : 'Paid online. Nothing to collect.',
+      pw.Text(
+          f['cod'] == true
+              ? 'Cash on delivery: collect ${app.money(f['invoiceTotal'] as num?)}'
+              : f['paymentKind'] == 'bank'
+                  ? 'Paid by bank transfer / UPI. Nothing to collect.'
+                  : 'Paid online. Nothing to collect.',
           style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
       if ((f['shipment'] as Map?)?['tracking'] != null)
         pw.Text('Courier ${(f['shipment'] as Map)['courier']} · Tracking ${(f['shipment'] as Map)['tracking']}', style: const pw.TextStyle(fontSize: 10)),

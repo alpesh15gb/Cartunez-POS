@@ -5,6 +5,7 @@ import { records, putRecord } from "../db.js";
 import { allow, scoped, fail, id, now, audit, idempotent } from "../domain.js";
 import { finalizeSale, returnInvoice } from "../sales.js";
 import { refundBreakdown, refundTypeOf } from "../returns.js";
+import { onlineInvoiceVoided } from "../fulfilment.js"; // WS-E
 
 export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("invoices", async (tx, actor, body) =>
@@ -55,6 +56,7 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
       },
       true,
     );
+    await onlineInvoiceVoided(tx, actor, invoice); // WS-E: an online order goes back to "To pick" (fulfilment.ts)
     let coreRefundTotal = 0;
     let credited = credit.total;
     for (const line of invoice.lines.filter(

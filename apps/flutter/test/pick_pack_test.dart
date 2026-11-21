@@ -122,6 +122,68 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  test('payment kinds, credit note flag and held shipments', () {
+    final o = {
+      ..._order(),
+      'fulfilment': {'invoiceId': 'inv-1', 'paymentKind': 'bank', 'paymentDue': 20000, 'shipment': {'state': 'held'}},
+    };
+    expect(paymentLabel(fulfilmentOf(o)), 'bank transfer / UPI');
+    expect(paymentDue(fulfilmentOf(o)), 20000);
+    expect(fulfilmentStage(o), 'Shipment not sent');
+    expect(canShip(o), isTrue);
+    final flagged = {...o, 'fulfilment': {...fulfilmentOf(o), 'creditNoteNeeded': {'invoiceId': 'inv-1', 'invoiceNumber': 'ML-1', 'lines': []}}};
+    expect(fulfilmentStage(flagged), 'Credit note needed');
+    expect(canShip(flagged), isFalse);
+    final cancelled = {...o, 'fulfilment': {...fulfilmentOf(o), 'shipment': {'state': 'cancelled'}}};
+    expect(fulfilmentStage(cancelled), 'Nothing to ship');
+    expect(canShip(cancelled), isFalse);
+  });
+
+  testWidgets('bank transfer payment received and the credit note banner at phone width', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final order = {
+      ..._order(),
+      'posState': 'sold',
+      'payment': {'title': 'Bank Transfer (UPI)'},
+      'fulfilment': {
+        'status': 'packed', 'invoiceId': 'inv-1', 'invoiceNumber': 'ML-PUNE-1000', 'invoiceTotal': 30000,
+        'paymentKind': 'bank', 'paymentDue': 30000, 'cod': false,
+        'creditNoteNeeded': {'invoiceId': 'inv-1', 'invoiceNumber': 'ML-PUNE-1000', 'lines': [{'itemId': 10, 'name': 'Spin-On Oil Filter', 'qty': 1}]},
+      },
+    };
+    final app = _Shop()
+      ..snapshot = {
+        'onlineOrders': [order],
+        'products': [{'id': 'filter', 'name': 'Spin-On Oil Filter', 'sku': 'ML-FILTER-01'}],
+        'settings': {},
+      };
+    await tester.pumpWidget(AppScope(state: app, child: const MaterialApp(home: PickPackPage(orderId: 'mg-1'))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('credit-note-needed')), findsOneWidget);
+    expect(find.textContaining('1 × Spin-On Oil Filter'), findsOneWidget);
+    expect(find.text('Make credit note'), findsOneWidget);
+    // No shipping while the credit note is outstanding.
+    expect(find.text('Ship & send tracking to Magento'), findsNothing);
+    await tester.tap(find.text('Credit note made'));
+    await tester.pumpAndSettle();
+    expect(app.calls.any((c) => c.$1 == '/online-orders/mg-1/credit-note/resolve'), isTrue);
+
+    await tester.scrollUntilVisible(find.text('Payment received'), 200, scrollable: find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first);
+    expect(find.textContaining('bank transfer / UPI'), findsWidgets);
+    await tester.tap(find.text('Payment received'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'UPI / bank reference (UTR)'), 'UTR 4242');
+    await tester.tap(find.text('Record payment'));
+    await tester.pumpAndSettle();
+    final paid = app.calls.firstWhere((c) => c.$1 == '/online-orders/mg-1/payment-received');
+    expect(paid.$2['reference'], 'UTR 4242');
+    expect(paid.$2['amount'], 30000);
+    expect(paid.$2['mode'], 'UPI');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('reorder alerts make draft purchase orders at phone width', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
