@@ -196,14 +196,16 @@ test("Workshop: vehicle registry, estimate -> job card -> invoice, kits, serial 
     assert.equal(warrantyUntil("2026-11-20T20:00:00.000Z", 12), "2027-11-21", "the sale's India business day");
     assert.equal(warrantyUntil("2026-11-20T10:00:00.000Z", 0), null);
     const battery = await call("products", {
-      name: "Amaron 45Ah", sku: "AMR-45", hsnSac: "8507", retailPrice: 600000, serialTracked: true, warrantyMonths: 36,
+      name: "Amaron 45Ah", sku: "AMR-45", hsnSac: "8507", retailPrice: 600000, serialTracked: true, warrantyMonths: 36, universal: true,
     }, manager);
     await db.query("INSERT INTO stock(organization_id,branch_id,product_id,bin_id,quantity) VALUES('demo','pune',$1,'bin-a1',1)", [battery.id]);
     await putRecord(db, "demo", "serial", {
       id: battery.id + ":AMR123", branchId: "pune", productId: battery.id, serial: "AMR123", binId: "bin-a1", status: "available",
     }, "pune");
     const batterySale = await call("invoices", {
-      transactionId: randomUUID(), shiftId: shift.id, customerId: "customer-1", vehicleId: swift.id,
+      transactionId: randomUUID(), shiftId: shift.id, customerId: "customer-1",
+      // The counter's vehicle chip puts the registry id on the fitment vehicle.
+      vehicle: { make: "Maruti Suzuki", model: "Swift", year: 2022, customerVehicleId: swift.id },
       lines: [{ productId: battery.id, qty: 1, binId: "bin-a1", serials: ["AMR123"] }],
       tenders: [{ type: "Cash", amount: 708000, confirmed: true }],
     }, cashier);

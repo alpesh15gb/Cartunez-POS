@@ -25,6 +25,11 @@ import 'screens/settings.dart';
 import 'screens/tools.dart';
 import 'theme.dart';
 import 'widgets.dart';
+// WS-C (workshop)
+import 'workshop/estimates.dart';
+import 'workshop/jobs.dart';
+import 'workshop/serials.dart';
+import 'workshop/vehicles.dart';
 
 const _sellers = ['owner', 'manager', 'cashier'];
 const _stock = ['owner', 'manager', 'inventory'];
@@ -124,6 +129,13 @@ final workspaces = <Workspace>[
     TabDef('online-orders', 'Online orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
         (_, _) => const OnlineOrdersScreen(),
         path: '/orders/online', feature: 'onlineStore', detail: _openOnlineOrder),
+    // WS-C (workshop)
+    TabDef('estimates', 'Estimates', _sellers, 'Quotes for parts, labour and kits; share on WhatsApp, then open a job card.',
+        (_, id) => EstimatesScreen(id: id),
+        path: '/orders/estimates', takesArg: true),
+    TabDef('jobs', 'Job cards', _sellers, 'Vehicles in the workshop: check-in, work, parts, photos, then one-click GST invoice.',
+        (_, id) => JobsScreen(id: id),
+        path: '/orders/jobs', takesArg: true),
   ]),
   Workspace('/catalog', 'Catalog & stock', 'Stock', Icons.inventory_2_outlined, [
     TabDef('parts', 'Parts', _everyone, 'Parts, prices, stock and labels.', (_, _) => const PartsScreen(), path: '/catalog/parts'),
@@ -144,6 +156,10 @@ final workspaces = <Workspace>[
     TabDef('online', 'Online products', _managers, 'Publish parts to your Magento store and set online prices and availability.',
         (_, _) => const OnlineStoreScreen(),
         path: '/catalog/online', feature: 'onlineStore'),
+    // WS-C (workshop)
+    TabDef('serials', 'Serial & warranty', _everyone, 'Look up a serial or IMEI: who bought it, which vehicle, warranty until when.',
+        (_, _) => const SerialLookupScreen(),
+        path: '/catalog/serials'),
   ]),
   Workspace('/purchasing', 'Purchasing', 'Purchasing', Icons.local_shipping_outlined, [
     TabDef('bills', 'Supplier bills', _stock,
@@ -166,6 +182,10 @@ final workspaces = <Workspace>[
         path: '/people/suppliers', detail: _openLedger('suppliers')),
     TabDef('staff', 'Staff', _owners, 'Staff accounts, roles and who can sign in.', (_, _) => const StaffScreen(),
         path: '/people/staff'),
+    // WS-C (workshop)
+    TabDef('vehicles', 'Vehicles', _everyone, 'Customer vehicles by registration number, with their jobs and invoices.',
+        (_, id) => VehiclesScreen(id: id),
+        path: '/people/vehicles', takesArg: true),
   ]),
   Workspace('/shift', 'Shift, reports & settings', 'Shift', Icons.insights_outlined, [
     TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', (_, _) => const ShiftsScreen(), path: '/shift'),

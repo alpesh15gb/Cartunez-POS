@@ -133,7 +133,8 @@ export async function searchVehicles(db: Database, actor: Actor, query: string, 
 const vehicleOnInvoice: SaleHook = {
   name: "ws-c-vehicle-on-invoice",
   async beforePersist(ctx) {
-    const vehicleId = ctx.body.vehicleId;
+    // The counter puts the registry id on its fitment vehicle; the job card sends vehicleId.
+    const vehicleId = ctx.body.vehicleId || ctx.body.vehicle?.customerVehicleId;
     if (!vehicleId) return;
     const vehicle = await scoped(ctx.db, ctx.actor, "customerVehicle", text(vehicleId, "vehicle", true, 200));
     ctx.invoice!.vehicleId = vehicle.id;

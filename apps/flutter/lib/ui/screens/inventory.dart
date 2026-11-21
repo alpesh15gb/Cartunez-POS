@@ -7,6 +7,7 @@ import '../../main.dart';
 import '../shell.dart';
 import '../photos.dart';
 import '../widgets.dart';
+import '../workshop/kits.dart'; // WS-C
 import 'receipt.dart';
 import 'catalog_import.dart';
 import 'physical_count.dart';
@@ -174,6 +175,12 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
           value: '${product['serialTracked'] ?? false}',
           options: const [('false', 'Not tracked'), ('true', 'Record a serial for every unit')],
           advanced: true),
+      // WS-C (workshop): warranty months and kit components.
+      FieldSpec('warrantyMonths', 'Warranty (months)', kind: FieldKind.number, value: product['warrantyMonths'] ?? 0, advanced: true,
+          help: 'Serial-tracked parts show warranty until the sale date plus this many months.'),
+      FieldSpec('kitComponents', 'Kit components', value: kitComponentsText(app, product), advanced: true,
+          help: 'Makes this a kit / installation package: SKU x quantity, separated by commas, '
+              'for example ML-BRAKE-01 x1, ML-SERVICE-01 x1. Components leave stock when the kit is sold.'),
     ],
     onSubmit: (v) async {
       final barcodes = {...splitList(v['barcodes'])}.toList();
@@ -211,7 +218,10 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
         'serialTracked': v['serialTracked'] == 'true',
         'unit': '${v['unit']}'.isEmpty ? 'Each' : v['unit'],
         for (final k in ['oemReferences', 'supplierReferences', 'supersedes', 'interchanges']) k: splitList(v[k]),
-      }..remove('generateBarcode');
+        // WS-C (workshop)
+        'warrantyMonths': int.tryParse('${v['warrantyMonths']}') ?? 0,
+        'components': parseKitComponents(app, '${v['kitComponents'] ?? ''}', product['id'] as String?),
+      }..remove('generateBarcode')..remove('kitComponents');
       if (body['salesAction'] == 'keep') body.remove('salesAction');
       final saved = await app.mutate('/products', body, created == null ? 'Part saved.' : 'Part saved with barcode $created.');
       if (saved is Map) {
