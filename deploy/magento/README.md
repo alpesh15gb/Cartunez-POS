@@ -91,6 +91,15 @@ search engines allowed; a nightly backup (`/usr/local/sbin/cartunez-shop-backup`
 returns, terms, privacy) come from Stage 4. Later: Razorpay, and admin two-factor sign-in
 (`bin/magento module:enable Magento_TwoFactorAuth Magento_AdminAdobeImsTwoFactorAuth`).
 
+## Fresh launch: `7-reset-shop.sh`
+
+`bash 7-reset-shop.sh` (as root) clears the test data before opening: all products and their photos,
+orders, invoices, shipments, credit memos, carts, customers, and every category except the two roots
+(1 and 2). It keeps CMS pages and blocks, the theme, configuration, admin users and the POS token.
+It takes a full backup first and asks you to type `CLEAR SHOP`. Run it **after** the POS reset
+(`/opt/cartunez-pos/current/bin/reset-data.sh`). The order of commands and how to restore are in
+`docs/CARTUNEZ-DEPLOYMENT.md`, section "Fresh launch: clear test data".
+
 ## Remove everything (if ever needed)
 
 ```bash

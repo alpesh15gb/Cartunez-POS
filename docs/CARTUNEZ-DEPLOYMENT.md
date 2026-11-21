@@ -162,6 +162,60 @@ Rollback verifies the backup checksum/release match, stops the API, preserves th
 
 Keep at least the previous release and its Docker images. Do not use `docker compose down --volumes` on `cartunezpos`. The only automated volume deletion in these scripts is for a newly created, explicitly named disposable restore-drill project.
 
+## Fresh launch: clear test data
+
+Use this once, before opening for real, to remove everything entered while testing. Run both resets, **POS first, then the shop**, from an interactive root terminal on the VPS. Pause every counter first (close the app on each till; finish or send any offline sales). The POS reset needs a release that includes `apps/api/dist/reset-cli.js`; activate the latest release first if it stops with a message about that.
+
+```bash
+# 1. POS. Takes a backup, shows the counts, asks for CLEAR POS.
+bash /opt/cartunez-pos/current/bin/reset-data.sh
+# 2. Website. Takes a backup, shows the counts, asks for CLEAR SHOP.
+bash /opt/cartunez-shop-source/deploy/magento/7-reset-shop.sh
+```
+
+**POS (`reset-data.sh`).** It checks the API and database are healthy, then takes a full `pg_dump` with `bin/backup.sh`. If the backup fails, it stops. The backup is copied to `/var/lib/cartunez-pos/backups/before-reset-cartunezpos-<time>.dump`, with `.sha256` and `.meta` files, under a name the nightly clean-up never removes. It prints what will be deleted and what will be kept, then asks whether to keep the business details (default yes), then asks you to type `CLEAR POS`. It stops the API and runs the reset in one database transaction (`apps/api/src/reset.ts`, in a one-off container from the same image). Then it starts the API again and waits for health. If the reset fails, the transaction rolls back, nothing is deleted, and the API is started again.
+
+- Kept: the organization and branch records, the owner account(s) (all other staff accounts are removed; add them again in Settings), bins/locations, customers and suppliers, and the Magento connection (store address, token, online branch). Customers and suppliers keep their details, but their opening balances go to 0 and their vehicle links are cleared.
+- Settings go back to a new shop's defaults. The invoice, credit note, estimate and job numbers restart at 1. The tax setting becomes **Not GST registered**. Module switches are kept. If you keep the business details (the default), the shop name, legal name, address, phone, email, state, UPI ID, receipt footer, label design and number prefixes stay. The GSTIN is cleared. If you choose not to keep them, those go back to blank defaults.
+- Deleted: parts, stock and the stock ledger, serials, invoices, returns and credit notes, holds, shifts, cash movements, approvals, purchase orders, receipts, bills and returns, party payments, attachments and product images, job cards, estimates, customer vehicles, the vehicle list, online listings, orders, jobs, queues and cursors, the Magento category cache, devices and PIN keys, idempotency records, and the audit trail. One new audit entry records the reset.
+- Afterwards: sign in again on every counter and enroll devices again. Because the online listings and category cache are gone, the next publish creates new products and categories on the website. That is why the shop reset comes next.
+
+**Shop (`7-reset-shop.sh`).** It checks that the containers are running and that every store uses root category 2. Then it runs `deploy/magento/backup.sh` (database, `pub/media`, `app/etc`) and keeps copies named `/var/backups/cartunez-shop/before-reset-db-<time>.sql.gz.keep` and `before-reset-files-<time>.tar.gz.keep`, which the 14-day clean-up skips. It prints the counts and asks you to type `CLEAR SHOP`. It then turns maintenance on, pauses cron and deletes everything in one database transaction, respecting foreign keys:
+
+- All products, with their URL rewrites, MSI source items and reservations, stock rows and media gallery.
+- All orders, invoices, shipments, credit memos and carts, with their grids and report tables.
+- All customers and their addresses, wishlists and newsletter subscriptions.
+- Every category except the catalog root (1) and the store root (2). This removes Brands, Sale and the POS-made categories.
+
+After the transaction, it resets the order, invoice, shipment and credit memo number sequences. It deletes the product photo files except the placeholder, reindexes everything, flushes the cache, starts cron and turns maintenance off. CMS pages and blocks, the theme, configuration, admin users, the POS integration token, and the tax, payment and shipping settings are kept. If any step fails, the shop stays in maintenance and the script prints how to reopen it. A failure in the database step deletes nothing.
+
+Then publish the parts again from the POS (Online store).
+
+**Restore the POS** from its backup (this stops the API, saves the current database as an emergency dump and restores the old one in one transaction):
+
+```bash
+bash /opt/cartunez-pos/current/bin/rollback.sh "$(basename "$(readlink -f /opt/cartunez-pos/current)")" \
+  /var/lib/cartunez-pos/backups/before-reset-cartunezpos-TIME.dump --restore-database
+```
+
+**Restore the shop** from its backup:
+
+```bash
+cd /opt/cartunez-shop
+docker compose -p cartunezshop exec -T php php bin/magento maintenance:enable
+docker compose -p cartunezshop stop cron
+gunzip -c /var/backups/cartunez-shop/before-reset-db-TIME.sql.gz.keep | \
+  docker compose -p cartunezshop exec -T db sh -c 'mariadb -umagento -p"$(cat /run/secrets/db_password)" magento'
+docker compose -p cartunezshop exec -T php sh -c 'rm -rf pub/media/catalog/product/*'
+docker compose -p cartunezshop exec -T php tar -C /var/www/magento -xzf - pub/media < /var/backups/cartunez-shop/before-reset-files-TIME.tar.gz.keep
+docker compose -p cartunezshop exec -T php php -d memory_limit=4G bin/magento indexer:reindex
+docker compose -p cartunezshop exec -T php php bin/magento cache:flush
+docker compose -p cartunezshop start cron
+docker compose -p cartunezshop exec -T php php bin/magento maintenance:disable
+```
+
+Restore both or neither. A restored shop with a reset POS (or the reverse) leaves the POS's remembered Magento ids out of step with the shop.
+
 ## Web bundle from CI
 
 The VPS has no Flutter SDK. The web app it serves comes from one of two places, chosen by the optional `WEB_BUNDLE` key in `/etc/cartunez-pos/config.json`:
