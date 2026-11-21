@@ -2,42 +2,67 @@
 /** @var \Cartunez\Storefront\Block\VehicleFinder $block */
 /** @var \Magento\Framework\Escaper $escaper */
 $vehicles = $block->getVehicles();
-if (!$vehicles) {
-    return; // No fitment published yet: no finder.
-}
+$mode = $block->getMode();
+$whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need parts for my car: '));
 ?>
-<div class="cz-finder">
+<section class="cz-finder cz-finder--<?= $escaper->escapeHtmlAttr($mode) ?>" id="cz-finder" aria-labelledby="cz-finder-title" data-cz-finder>
     <div class="cz-finder-inner">
         <div class="cz-finder-title">
             <span class="cz-finder-kicker"><?= $escaper->escapeHtml(__('Find parts that fit')) ?></span>
-            <strong><?= $escaper->escapeHtml(__('Search by make, model, year')) ?></strong>
+            <strong id="cz-finder-title"><?= $escaper->escapeHtml(__('Select your vehicle')) ?></strong>
         </div>
-        <form class="cz-finder-form" action="<?= $escaper->escapeUrl($block->getUrl('catalogsearch/result')) ?>" method="get">
-            <label class="cz-visually-hidden" for="cz-make"><?= $escaper->escapeHtml(__('Make')) ?></label>
-            <select id="cz-make" required>
-                <option value=""><?= $escaper->escapeHtml(__('Select make')) ?></option>
-            </select>
-            <label class="cz-visually-hidden" for="cz-model"><?= $escaper->escapeHtml(__('Model')) ?></label>
-            <select id="cz-model" required disabled>
-                <option value=""><?= $escaper->escapeHtml(__('Select model')) ?></option>
-            </select>
-            <label class="cz-visually-hidden" for="cz-year"><?= $escaper->escapeHtml(__('Year')) ?></label>
-            <select id="cz-year" required disabled>
-                <option value=""><?= $escaper->escapeHtml(__('Select year')) ?></option>
-            </select>
-            <input type="hidden" name="q" value="">
-            <button type="submit" class="action primary cz-finder-go"><?= $escaper->escapeHtml(__('Find parts')) ?></button>
-        </form>
+        <?php if ($vehicles): ?>
+            <p class="cz-finder-saved" hidden>
+                <span class="cz-finder-saved-text"></span>
+                <a class="cz-finder-shop" href="#" hidden><?= $escaper->escapeHtml(__('Shop parts')) ?></a>
+                <span aria-hidden="true">&middot;</span>
+                <button type="button" class="cz-finder-change"><?= $escaper->escapeHtml(__('Change')) ?></button>
+            </p>
+            <form class="cz-finder-form" action="<?= $escaper->escapeUrl($block->getUrl('catalogsearch/result')) ?>" method="get">
+                <label class="cz-visually-hidden" for="cz-make"><?= $escaper->escapeHtml(__('Make')) ?></label>
+                <select id="cz-make" required>
+                    <option value=""><?= $escaper->escapeHtml(__('Make')) ?></option>
+                </select>
+                <label class="cz-visually-hidden" for="cz-model"><?= $escaper->escapeHtml(__('Model')) ?></label>
+                <select id="cz-model" required disabled>
+                    <option value=""><?= $escaper->escapeHtml(__('Model')) ?></option>
+                </select>
+                <label class="cz-visually-hidden" for="cz-year"><?= $escaper->escapeHtml(__('Year')) ?></label>
+                <select id="cz-year" required disabled>
+                    <option value=""><?= $escaper->escapeHtml(__('Year')) ?></option>
+                </select>
+                <input type="hidden" name="q" value="">
+                <button type="submit" class="action primary cz-finder-go"><?= $escaper->escapeHtml(__('Find parts')) ?></button>
+            </form>
+            <p class="cz-finder-help">
+                <?= $escaper->escapeHtml(__('Car not listed?')) ?>
+                <a href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('Tell us your car on WhatsApp')) ?></a>
+            </p>
+        <?php else: ?>
+            <div class="cz-finder-empty">
+                <p><?= $escaper->escapeHtml(__('Tell us your car (make, model and year) and we will find the parts that fit.')) ?></p>
+                <div class="cz-finder-empty-actions">
+                    <a class="cz-button cz-button--wa" href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('Tell us your car')) ?></a>
+                    <a class="cz-finder-contact" href="<?= $escaper->escapeUrl($block->getUrl('contact')) ?>"><?= $escaper->escapeHtml(__('or send a message')) ?></a>
+                </div>
+            </div>
+        <?php endif; ?>
     </div>
+    <?php if ($vehicles): ?>
     <script type="application/json" id="cz-vehicles"><?= /* @noEscape */ $block->getVehiclesJson() ?></script>
     <script>
     (function () {
+        var root = document.getElementById('cz-finder');
         var data = JSON.parse(document.getElementById('cz-vehicles').textContent || '{}');
         var make = document.getElementById('cz-make');
         var model = document.getElementById('cz-model');
         var year = document.getElementById('cz-year');
         var form = make.form;
-        function fill(select, values, placeholder) {
+        var saved = root.querySelector('.cz-finder-saved');
+        var savedText = saved.querySelector('.cz-finder-saved-text');
+        var shop = saved.querySelector('.cz-finder-shop');
+        var labels = { make: make.options[0].textContent, model: model.options[0].textContent, year: year.options[0].textContent };
+        function fill(select, values, placeholder, value) {
             select.innerHTML = '';
             var first = document.createElement('option');
             first.value = '';
@@ -49,22 +74,59 @@ if (!$vehicles) {
                 select.appendChild(o);
             });
             select.disabled = values.length === 0;
+            if (value && values.indexOf(value) >= 0) select.value = value;
         }
         // Same search word the POS writes: lowercase letters and digits only.
         function word(v) { return String(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
-        fill(make, Object.keys(data), make.options[0].textContent);
+        function models(m) { return m && data[m] ? Object.keys(data[m]) : []; }
+        function years(m, n) { return m && n && data[m] && data[m][n] ? data[m][n].map(String) : []; }
+        function load() {
+            try {
+                var v = JSON.parse(localStorage.getItem('cz-vehicle') || 'null');
+                if (v && years(v.make, v.model).indexOf(String(v.year)) >= 0) return v;
+            } catch (x) {}
+            return null;
+        }
+        function searchUrl(v) {
+            return form.action + (form.action.indexOf('?') < 0 ? '?' : '&') + 'q=' + encodeURIComponent(word(v.make) + word(v.model) + v.year);
+        }
+        function show(v) {
+            var q = new URLSearchParams(location.search).get('q') || '';
+            var here = v && q === word(v.make) + word(v.model) + v.year;
+            if (!v) { saved.hidden = true; form.hidden = false; return; }
+            var name = v.make + ' ' + v.model + ' ' + v.year;
+            savedText.textContent = (here ? 'Showing parts for ' : 'Your car: ') + name;
+            shop.hidden = !!here;
+            shop.href = searchUrl(v);
+            saved.hidden = false;
+            form.hidden = true;
+        }
+        var vehicle = load();
+        fill(make, Object.keys(data), labels.make, vehicle && vehicle.make);
+        fill(model, models(make.value), labels.model, vehicle && vehicle.model);
+        fill(year, years(make.value, model.value), labels.year, vehicle && String(vehicle.year));
+        show(vehicle);
         make.addEventListener('change', function () {
-            fill(model, make.value ? Object.keys(data[make.value]) : [], model.options[0].textContent);
-            fill(year, [], year.options[0].textContent);
+            fill(model, models(make.value), labels.model);
+            fill(year, [], labels.year);
         });
         model.addEventListener('change', function () {
-            fill(year, model.value ? data[make.value][model.value].map(String) : [], year.options[0].textContent);
+            fill(year, years(make.value, model.value), labels.year);
         });
+        function open() {
+            form.hidden = false;
+            saved.hidden = true;
+            make.focus();
+        }
+        saved.querySelector('.cz-finder-change').addEventListener('click', open);
+        // "Shop by car" in the menu opens the finder (scripts.phtml).
+        root.addEventListener('cz-finder-open', function () { if (!load()) make.focus(); });
         form.addEventListener('submit', function (e) {
             if (!make.value || !model.value || !year.value) { e.preventDefault(); return; }
             form.q.value = word(make.value) + word(model.value) + year.value;
-            try { sessionStorage.setItem('cz-vehicle', make.value + ' ' + model.value + ' ' + year.value); } catch (x) {}
+            try { localStorage.setItem('cz-vehicle', JSON.stringify({ make: make.value, model: model.value, year: year.value })); } catch (x) {}
         });
     })();
     </script>
-</div>
+    <?php endif; ?>
+</section>

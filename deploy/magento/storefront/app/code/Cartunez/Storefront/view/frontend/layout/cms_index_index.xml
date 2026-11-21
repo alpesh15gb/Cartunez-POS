@@ -1,9 +1,8 @@
 <?xml version="1.0"?>
 <page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
     <body>
-        <!-- Make / Model / Year finder under the menu on the home page. -->
-        <referenceContainer name="page.top">
-            <block class="Cartunez\Storefront\Block\VehicleFinder" name="cartunez.finder" template="Cartunez_Storefront::finder.phtml" after="navigation.sections"/>
-        </referenceContainer>
+        <!-- The home page finder is now in the page content, right under the hero
+             (Content > Pages > Home Page, added by the HomeFinderAndRows patch).
+             This file stays so an older copy that put it above the hero is replaced. -->
     </body>
 </page>

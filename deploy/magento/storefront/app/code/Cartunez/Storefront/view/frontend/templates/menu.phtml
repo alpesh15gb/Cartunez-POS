@@ -1,0 +1,31 @@
+<?php
+/** @var \Cartunez\Storefront\Block\Menu $block */
+/** @var \Magento\Framework\Escaper $escaper */
+// Luma's menu markup and widget, so the desktop dropdown and the phone drawer
+// (hamburger, tap to open "Brands") keep working with the curated items.
+$items = $block->getItems();
+if (!$items) {
+    return;
+}
+?>
+<nav class="navigation cz-nav" data-action="navigation" aria-label="<?= $escaper->escapeHtmlAttr(__('Main menu')) ?>">
+    <ul data-mage-init='{"menu":{"responsive":true, "expanded":true, "position":{"my":"left top","at":"left bottom"}}}'>
+        <?php foreach ($items as $n => $item): ?>
+            <?php $children = $item['children']; ?>
+            <li class="level0 nav-<?= (int)$n + 1 ?> level-top cz-nav-<?= $escaper->escapeHtmlAttr($item['kind']) ?><?= $children ? ' parent' : '' ?>">
+                <a href="<?= $escaper->escapeUrl($item['url']) ?>" class="level-top"<?= $item['kind'] === 'finder' ? ' data-cz-shop-by-car' : '' ?>>
+                    <span><?= $escaper->escapeHtml($item['label']) ?></span>
+                </a>
+                <?php if ($children): ?>
+                    <ul class="level0 submenu cz-nav-brands">
+                        <?php foreach ($children as $child): ?>
+                            <li class="level1">
+                                <a href="<?= $escaper->escapeUrl($child['url']) ?>"><span><?= $escaper->escapeHtml($child['label']) ?></span></a>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+            </li>
+        <?php endforeach; ?>
+    </ul>
+</nav>

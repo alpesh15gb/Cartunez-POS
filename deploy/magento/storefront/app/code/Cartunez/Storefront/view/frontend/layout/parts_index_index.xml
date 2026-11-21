@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" layout="1column" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- /parts/index/index/list/{best|new|universal}: "View all" for the home rows. -->
+        <referenceContainer name="content">
+            <block class="Cartunez\Storefront\Block\ProductRow" name="cartunez.parts" template="Cartunez_Storefront::row.phtml">
+                <arguments>
+                    <argument name="list" xsi:type="string">request</argument>
+                    <argument name="mode" xsi:type="string">page</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>

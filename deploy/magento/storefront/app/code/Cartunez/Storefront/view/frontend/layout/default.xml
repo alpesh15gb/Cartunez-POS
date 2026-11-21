@@ -9,7 +9,30 @@
                 </arguments>
             </block>
         </referenceContainer>
+
+        <!-- Curated menu instead of Luma's category menu, on desktop and in the phone drawer.
+             Edit in Content > Blocks > cartunez-menu. -->
+        <referenceBlock name="catalog.topnav" remove="true"/>
+        <referenceContainer name="store.menu">
+            <block class="Cartunez\Storefront\Block\Menu" name="cartunez.menu" template="Cartunez_Storefront::menu.phtml"/>
+        </referenceContainer>
+
+        <!-- No wish list or compare anywhere (cards, sidebar, header, product page). -->
+        <referenceBlock name="catalog.compare.link" remove="true"/>
+        <referenceBlock name="catalog.compare.sidebar" remove="true"/>
+        <referenceBlock name="wishlist_sidebar" remove="true"/>
+        <referenceBlock name="wish-list-link" remove="true"/>
+        <referenceBlock name="category.product.addto.compare" remove="true"/>
+        <referenceBlock name="category.product.addto.wishlist" remove="true"/>
+        <referenceBlock name="view.addto.compare" remove="true"/>
+        <referenceBlock name="view.addto.wishlist" remove="true"/>
+        <referenceBlock name="related.product.addto.compare" remove="true"/>
+        <referenceBlock name="related.product.addto.wishlist" remove="true"/>
+        <referenceBlock name="upsell.product.addto.compare" remove="true"/>
+        <referenceBlock name="upsell.product.addto.wishlist" remove="true"/>
+
         <referenceContainer name="before.body.end">
+            <block class="Magento\Framework\View\Element\Template" name="cartunez.whatsapp" template="Cartunez_Storefront::whatsapp.phtml"/>
             <block class="Magento\Framework\View\Element\Template" name="cartunez.scripts" template="Cartunez_Storefront::scripts.phtml"/>
         </referenceContainer>
     </body>

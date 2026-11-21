@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- Compact vehicle finder at the top of every category page. -->
+        <referenceContainer name="page.top">
+            <block class="Cartunez\Storefront\Block\VehicleFinder" name="cartunez.finder" template="Cartunez_Storefront::finder.phtml" after="navigation.sections">
+                <arguments>
+                    <argument name="mode" xsi:type="string">compact</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>

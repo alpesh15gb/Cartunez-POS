@@ -8,11 +8,43 @@ use Magento\Framework\View\Element\Template;
 use Magento\Framework\View\Element\Template\Context;
 
 /**
- * "Search by Make, Model, Year": the vehicles come from the cz_fitment values
- * the POS sends with each published part ("V:Make|Model|from|to" lines).
+ * "Select your vehicle" Make > Model > Year: the vehicles come from the cz_fitment
+ * values the POS sends with each published part ("V:Make|Model|from|to" lines).
+ * mode "hero" (home page, under the hero slider) or "compact" (top of category
+ * and search pages). With no fitment published yet it asks the customer to tell
+ * us their car on WhatsApp instead. Cached for an hour (fitment changes are
+ * picked up within that time); the chosen vehicle lives in the browser only.
  */
 class VehicleFinder extends Template
 {
+    public const WHATSAPP = '919949695030';
+
+    protected function _construct()
+    {
+        parent::_construct();
+        $this->addData(['cache_lifetime' => 3600]);
+    }
+
+    public function getCacheKeyInfo()
+    {
+        return array_merge(parent::getCacheKeyInfo(), ['cz_finder', $this->getMode()]);
+    }
+
+    public function getCacheTags()
+    {
+        return array_merge(parent::getCacheTags(), [\Magento\Catalog\Model\Product::CACHE_TAG]);
+    }
+
+    public function getMode(): string
+    {
+        return $this->getData('mode') === 'hero' ? 'hero' : 'compact';
+    }
+
+    public function getWhatsAppUrl(string $text): string
+    {
+        return 'https://wa.me/' . self::WHATSAPP . '?text=' . rawurlencode($text);
+    }
+
     public function __construct(
         Context $context,
         private readonly ResourceConnection $resource,
