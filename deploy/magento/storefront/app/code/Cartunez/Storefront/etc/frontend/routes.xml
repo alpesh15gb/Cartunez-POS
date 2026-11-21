@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:App/etc/routes.xsd">
+    <!-- /parts/index/index/list/{new|best|universal}: "View all" for the home rows and universal parts. -->
+    <router id="standard">
+        <route id="parts" frontName="parts">
+            <module name="Cartunez_Storefront"/>
+        </route>
+    </router>
+</config>

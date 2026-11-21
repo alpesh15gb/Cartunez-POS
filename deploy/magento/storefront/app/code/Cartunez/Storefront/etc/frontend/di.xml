@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!-- Brand (or "Universal" / vehicle make) above the name on every product card. -->
+    <type name="Magento\Catalog\Block\Product\AbstractProduct">
+        <plugin name="cartunez_card_label" type="Cartunez\Storefront\Plugin\CardLabel"/>
+    </type>
+</config>

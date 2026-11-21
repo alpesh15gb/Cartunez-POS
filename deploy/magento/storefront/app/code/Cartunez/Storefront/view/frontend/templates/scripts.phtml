@@ -1,7 +1,8 @@
 <?php
 /** @var \Magento\Framework\View\Element\Template $block */
-// Small storefront behaviours, no libraries: hero slider, "-X%" badges on
-// discounted parts, and a readable heading for vehicle-finder results.
+// Small storefront behaviours, no libraries: hero slider, "Save N%" badges on
+// discounted parts, a readable heading for vehicle-finder results, "Shop by car"
+// in the menu, and the WhatsApp message on product pages.
 ?>
 <script>
 (function () {
@@ -63,32 +64,74 @@
             var was = amount(box.querySelector('.old-price .price'));
             if (!(now > 0 && was > now)) return;
             box.dataset.czBadge = '1';
-            var off = Math.round((was - now) * 100 / was);
+            var off = Math.floor((was - now) * 100 / was);
             if (off < 1) return;
-            var holder = box.closest('.product-item-info') || document.querySelector('.product.media');
+            // On the card photo; on a product page, on the gallery.
+            var card = box.closest('.product-item-info');
+            var holder = card ? (card.querySelector('.product-item-photo') || card) : document.querySelector('.product.media');
             if (!holder || holder.querySelector('.cz-badge')) return;
             var badge = document.createElement('span');
             badge.className = 'cz-badge';
-            badge.textContent = '-' + off + '%';
+            badge.textContent = 'Save ' + off + '%';
             holder.appendChild(badge);
         });
     }
 
-    // ---------- Vehicle finder results: a readable heading ----------
+    // ---------- The chosen vehicle (vehicle finder, kept in this browser) ----------
+    function savedVehicle() {
+        try {
+            var v = JSON.parse(localStorage.getItem('cz-vehicle') || 'null');
+            return v && v.make && v.model && v.year ? v : null;
+        } catch (x) { return null; }
+    }
+    function word(v) { return String(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+
+    // Vehicle finder results: "Parts for Maruti Suzuki Swift 2020".
     function vehicleHeading() {
         if (!document.body.classList.contains('catalogsearch-result-index')) return;
-        var vehicle = null;
-        try { vehicle = sessionStorage.getItem('cz-vehicle'); } catch (x) {}
+        var v = savedVehicle();
         var q = new URLSearchParams(location.search).get('q') || '';
-        if (!vehicle || !/^[a-z0-9]+\d{4}$/.test(q)) return;
+        if (!v || q !== word(v.make) + word(v.model) + v.year) return;
         var title = document.querySelector('.page-title .base');
-        if (title) title.textContent = 'Parts for ' + vehicle;
+        if (title) title.textContent = 'Parts for ' + v.make + ' ' + v.model + ' ' + v.year;
+    }
+
+    // "Shop by car" in the menu: opens the finder on this page, else on the home page.
+    function openFinder(finder) {
+        document.documentElement.classList.remove('nav-open', 'nav-before-open');
+        finder.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        finder.dispatchEvent(new CustomEvent('cz-finder-open'));
+    }
+    function shopByCar() {
+        document.addEventListener('click', function (e) {
+            var link = e.target.closest && e.target.closest('[data-cz-shop-by-car]');
+            var finder = document.getElementById('cz-finder');
+            if (!link || !finder) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openFinder(finder);
+        }, true);
+        var finder = document.getElementById('cz-finder');
+        if (finder && location.hash === '#cz-finder') setTimeout(function () { openFinder(finder); }, 200);
+    }
+
+    // ---------- WhatsApp button: on a product page, about that product ----------
+    function whatsApp() {
+        var link = document.querySelector('[data-cz-wa]');
+        var title = document.querySelector('.page-title .base');
+        if (!link || !title || !document.body.classList.contains('catalog-product-view')) return;
+        var canonical = document.querySelector('link[rel="canonical"]');
+        var url = canonical && canonical.href ? canonical.href : location.href.split('#')[0].split('?')[0];
+        var text = 'Hi, I\'m interested in ' + title.textContent.trim() + ' (' + url + ')';
+        link.href = 'https://wa.me/919949695030?text=' + encodeURIComponent(text);
     }
 
     function ready() {
         document.querySelectorAll('.cz-slider').forEach(slider);
         badges();
         vehicleHeading();
+        shopByCar();
+        whatsApp();
         // Product lists that load later (widgets, ajax) get badges too.
         new MutationObserver(function () { badges(); }).observe(document.body, { childList: true, subtree: true });
     }

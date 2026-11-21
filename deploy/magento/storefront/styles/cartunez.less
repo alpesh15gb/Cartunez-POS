@@ -300,10 +300,11 @@ a:hover, .alink:hover { color: @cz-blue; }
     .product-item-actions .action.tocart { width: 100%; }
     .product-item-inner { margin: 0; padding: 0; border: 0; box-shadow: none; }
 }
+// "Save N%" on the card photo (and the product gallery) when the price is below the MRP.
 .cz-badge {
     position: absolute;
-    top: 20px;
-    left: 20px;
+    top: 10px;
+    left: 10px;
     z-index: 2;
     background: @cz-red;
     color: #fff;
@@ -548,23 +549,7 @@ a:hover, .alink:hover { color: @cz-blue; }
     margin: 0 0 64px;
     .block.widget.block-products-list { margin-bottom: 0; }
     .product-item-info { position: relative; }
-    // Sale badge on each card (every product here is on sale).
-    .product-item-photo:before {
-        content: 'Sale';
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        z-index: 2;
-        padding: 3px 9px;
-        border-radius: 99px;
-        background: @cz-red;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-    }
-    .product-item-photo { position: relative; display: block; }
+    // Each card shows its "Save N%" badge (scripts.phtml).
 }
 .cz-section-head--sale { position: relative; }
 .cz-kicker--sale {
@@ -980,4 +965,267 @@ a:hover, .alink:hover { color: @cz-blue; }
         .links a, .links strong { color: #fff; }
         .links a:hover { color: @cz-red; }
     }
+}
+
+// =====================================================================
+// Shop round: vehicle finder, curated menu, product cards, product rows,
+// WhatsApp button. Phone and desktop rules are at the end of this part.
+// =====================================================================
+
+// ---------- Vehicle finder (hero bar on the home page, compact elsewhere) ----------
+.cz-finder {
+    [hidden] { display: none !important; }
+    .cz-finder-saved {
+        flex: 1 1 420px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 12px;
+        margin: 0;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        > span[aria-hidden] { color: @cz-soft; }
+    }
+    .cz-finder-shop {
+        color: #fff;
+        font-weight: 700;
+        text-decoration: none;
+        border-bottom: 2px solid @cz-red;
+        &:hover, &:visited { color: #fff; }
+    }
+    .cz-finder-change {
+        background: none;
+        border: 0;
+        box-shadow: none;
+        padding: 0;
+        min-height: 0;
+        color: @cz-blue;
+        font-weight: 600;
+        font-size: 15px;
+        cursor: pointer;
+        text-decoration: underline;
+        &:hover, &:focus { background: none; border: 0; color: #fff; }
+    }
+    .cz-finder-help {
+        flex: 1 1 100%;
+        margin: -4px 0 0;
+        color: @cz-soft;
+        font-size: 13px;
+        a { color: #fff; font-weight: 600; text-decoration: none; border-bottom: 1px solid rgba(255, 255, 255, 0.35); }
+        a:hover { border-color: #25D366; }
+    }
+    .cz-finder-empty {
+        flex: 1 1 420px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 22px;
+        p { color: #CDD2DA; margin: 0; flex: 1 1 260px; }
+    }
+    .cz-finder-empty-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+    .cz-finder-contact { color: #fff; font-size: 14px; text-decoration: underline; &:visited, &:hover { color: #fff; } }
+}
+.cz-button--wa {
+    background: #1FA855;
+    border-color: #1FA855;
+    box-shadow: 0 12px 28px -12px rgba(31, 168, 85, 0.8);
+    &:hover, &:visited:hover { background: #178A45; border-color: #178A45; }
+}
+.cz-finder--hero {
+    position: relative;
+    z-index: 4;
+    margin: -84px 32px 40px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    background: rgba(17, 19, 24, 0.94);
+    box-shadow: @cz-shadow-dark;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    scroll-margin-top: 90px;
+    .cz-finder-inner { padding: 20px 24px; }
+}
+// The finder covers the bottom of the hero: the dots move up.
+.cms-index-index .cz-slider { margin-bottom: 0; }
+.cms-index-index .cz-slider .cz-dots { bottom: 104px; }
+.cz-finder--compact {
+    scroll-margin-top: 20px;
+    .cz-finder-inner { padding: 12px 20px; gap: 10px 22px; }
+    .cz-finder-title strong { font-size: 17px; }
+    .cz-finder-form select, .cz-finder-form .cz-finder-go { height: 42px; }
+    .cz-finder-help { display: none; }
+}
+
+// ---------- Curated menu ----------
+.cz-nav.navigation {
+    .cz-nav-finder > .level-top span:before {
+        content: '';
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 8px;
+        border-radius: 50%;
+        background: @cz-blue;
+        vertical-align: middle;
+        box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.2);
+    }
+    .cz-nav-sale > .level-top, .cz-nav-sale > .level-top:visited { color: #FF5A5F; }
+    .cz-nav-brands { min-width: 220px; max-height: 70vh; overflow-y: auto; }
+}
+
+// ---------- Product cards ----------
+// Brand (or Universal / vehicle make) above the name; no stock, compare or wish list.
+.product-items .product-item-details { display: flex; flex-direction: column; }
+.product-items .product-item-details > .product-item-inner { margin-top: auto; }
+.cz-card-brand {
+    order: -1;
+    display: block;
+    margin: 12px 0 -6px;
+    color: @cz-muted;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.product-items .product-item-photo { position: relative; display: block; }
+.product-items .product-item .stock { display: none !important; }
+.action.tocompare, .action.towishlist, .block-compare, .block-wishlist, .link.wishlist, .link.compare,
+.product-addto-links, .product-item-actions .actions-secondary { display: none !important; }
+.products-grid .product-item {
+    .product-item-info { display: flex; flex-direction: column; }
+    .product-item-details { flex: 1 1 auto; }
+    // Add to cart always on the card (Luma shows it only on hover on desktop).
+    .product-item-inner {
+        display: block !important;
+        position: static !important;
+        margin: 10px 0 0 !important;
+        padding: 0 !important;
+        background: none !important;
+    }
+    .product-item-actions { display: block; margin: 0; }
+    .product-item-actions .actions-primary { display: block; width: 100%; }
+    .product-item-actions .action.tocart {
+        width: 100%;
+        min-height: 42px;
+        padding: 10px 12px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+    .price-box { margin: 6px 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+}
+
+// ---------- Product rows (Best sellers, New arrivals, Universal parts) ----------
+.cz-row { margin: 0 0 64px; }
+.cz-row-all {
+    margin-top: 10px;
+    color: @cz-blue-dark;
+    font-weight: 600;
+    font-size: 14px;
+    text-decoration: none;
+    &:after { content: ' \2192'; }
+    &:hover, &:focus { text-decoration: underline; }
+}
+.cz-row .cz-row-grid { margin: 0; }
+.cz-row .cz-row-grid .product-items {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+}
+.cz-row .cz-row-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
+.catalogsearch-result-index .cz-row { margin-top: 48px; }
+.cz-row--page { margin-top: 8px; }
+
+// ---------- WhatsApp button ----------
+.cz-wa {
+    position: fixed;
+    right: 16px;
+    bottom: calc(var(--cz-wa-offset, 20px) + env(safe-area-inset-bottom, 0px));
+    z-index: 900;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 52px;
+    padding: 0 18px 0 14px;
+    border-radius: 999px;
+    background: #1FA855;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    text-decoration: none;
+    box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.45);
+    transition: transform 0.15s @cz-ease, background 0.15s ease;
+    &:hover, &:focus, &:visited { color: #fff; text-decoration: none; }
+    &:hover { background: #178A45; transform: translateY(-2px); }
+    svg { flex: 0 0 auto; }
+}
+@media print { .cz-wa { display: none !important; } }
+
+// ---------- Tablets (shop round) ----------
+@media (max-width: 1023px) {
+    .cz-row .cz-row-grid .product-items { grid-template-columns: repeat(3, 1fr); }
+}
+
+// ---------- Phones (shop round) ----------
+.media-width(@extremum, @break) when (@extremum = 'max') and (@break = @screen__m) {
+    .cz-finder--hero {
+        margin: -18px 0 28px;
+        border-radius: @cz-radius;
+        .cz-finder-inner { padding: 18px 16px; }
+        .cz-finder-title strong { font-size: 19px; }
+    }
+    .cms-index-index .cz-slider .cz-dots { bottom: 40px; }
+    .cz-finder--compact .cz-finder-inner { padding: 12px 15px; }
+    .cz-finder--compact .cz-finder-title { display: none; }
+    .cz-finder .cz-finder-saved { flex-basis: 100%; font-size: 14px; }
+    // Rows swipe sideways on phones.
+    .cz-row:not(.cz-row--page) .cz-row-grid .product-items,
+    .cz-sale .block-products-list .products-grid .product-items {
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        margin-right: -15px;
+        padding: 2px 15px 8px 0;
+        scrollbar-width: none;
+        &::-webkit-scrollbar { display: none; }
+        > .product-item { flex: 0 0 46%; scroll-snap-align: start; }
+    }
+    .cz-row--page .cz-row-grid .product-items { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .cz-row { margin-bottom: 44px; }
+    .products-grid .product-item .product-item-actions .action.tocart { font-size: 12px; letter-spacing: 0.04em; padding: 10px 6px; }
+    // Round on phones, and clear of a product page's add-to-cart area.
+    .cz-wa { width: 52px; padding: 0; justify-content: center; right: 14px; }
+    .cz-wa .cz-wa-label { display: none; }
+    .catalog-product-view, .checkout-cart-index { --cz-wa-offset: 88px; }
+    // Clean slide-in drawer.
+    .nav-sections { background: @cz-dark; box-shadow: 12px 0 40px -12px rgba(0, 0, 0, 0.6); }
+    .nav-sections-item-title { background: @cz-black; border-color: @cz-line-dark; a { color: #E9ECF1; } }
+    .nav-sections-item-title.active { background: @cz-dark; }
+    .cz-nav.navigation {
+        padding: 6px 0 24px;
+        .level0 { border-top: 1px solid @cz-line-dark; }
+        .level0 > .level-top { padding: 14px 18px; color: #E9ECF1; font-size: 14px; }
+        .level0.active > .level-top { border-left: 3px solid @cz-red; }
+        .submenu:not(:first-child) { background: @cz-panel; }
+        .submenu:not(:first-child) .level1 > a, .submenu .all-category > a { color: #E9ECF1; padding: 10px 30px; }
+        .parent .level-top:after { color: @cz-soft; }
+        .cz-nav-brands { max-height: none; }
+    }
+}
+
+// ---------- Desktop (shop round) ----------
+.media-width(@extremum, @break) when (@extremum = 'min') and (@break = @screen__m) {
+    .cz-nav.navigation .level0 .submenu.cz-nav-brands a {
+        padding: 9px 18px;
+        text-transform: none;
+        letter-spacing: 0.01em;
+        font-family: @cz-font;
+        font-weight: 500;
+    }
+    .cz-row--page .cz-row-grid .product-items { grid-template-columns: repeat(4, 1fr); }
 }

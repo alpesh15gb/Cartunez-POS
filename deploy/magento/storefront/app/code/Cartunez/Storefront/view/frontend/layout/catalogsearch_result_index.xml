@@ -1,9 +1,22 @@
 <?xml version="1.0"?>
 <page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
     <body>
-        <!-- The finder on search results too, to change vehicle. -->
+        <!-- Compact finder on search results too, to change vehicle. -->
         <referenceContainer name="page.top">
-            <block class="Cartunez\Storefront\Block\VehicleFinder" name="cartunez.finder" template="Cartunez_Storefront::finder.phtml" after="navigation.sections"/>
+            <block class="Cartunez\Storefront\Block\VehicleFinder" name="cartunez.finder" template="Cartunez_Storefront::finder.phtml" after="navigation.sections">
+                <arguments>
+                    <argument name="mode" xsi:type="string">compact</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+        <!-- Vehicle-finder results: the parts that fit every car, under the matches. -->
+        <referenceContainer name="content">
+            <block class="Cartunez\Storefront\Block\ProductRow" name="cartunez.universal" template="Cartunez_Storefront::row.phtml" after="-">
+                <arguments>
+                    <argument name="list" xsi:type="string">universal</argument>
+                    <argument name="vehicle_search_only" xsi:type="boolean">true</argument>
+                </arguments>
+            </block>
         </referenceContainer>
     </body>
 </page>

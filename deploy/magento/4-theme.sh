@@ -51,7 +51,9 @@ si city 'Hyderabad'
 si postcode 500003
 si street_line1 'Shop No. 12 & 13, Veer Hanuman Temple'
 si street_line2 'S.P. Road, Secunderabad'
-mage config:set design/footer/copyright '© Car Tunez. All prices include GST.' >/dev/null
+mage config:set design/footer/copyright '© Car Tunez.' >/dev/null
+# No wish list on a parts shop (compare links are removed in the theme layout).
+mage config:set wishlist/general/active 0 >/dev/null
 
 echo '== Rebuilding code and theme files (5-10 minutes)'
 # Magento's cron container writes generated code too; it is paused so the
