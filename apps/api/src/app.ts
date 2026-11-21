@@ -26,6 +26,12 @@ import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
 import { pinRoutes } from "./routes/auth-pin.js"; // WS-D
+// WS-B: returns, customers and their checkout hooks (hooks register on import).
+import { returnRoutes } from "./returns.js";
+import { customerRoutes } from "./routes/customers.js";
+import "./hooks/exchange.js";
+import "./hooks/credit-limit.js";
+import "./hooks/advance.js";
 
 export type { Post } from "./routes/types.js";
 
@@ -229,6 +235,8 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   warrantyRoutes(app, db, post);
   reportRoutes(app, db);
   pinRoutes(app, db, post); // WS-D
+  returnRoutes(app, db); // WS-B
+  customerRoutes(app, db, post); // WS-B
   return app;
 }
 function withoutCost(value: any): any {

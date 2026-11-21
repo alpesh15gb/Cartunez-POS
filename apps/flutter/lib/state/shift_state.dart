@@ -32,7 +32,8 @@ class ShiftState extends ChangeNotifier {
     }
     for (final refund in [...list('returns'), ...list('coreReturns')]) {
       if (refund['shiftId'] == shift['id'] && (refund['refundType'] ?? 'Cash') == 'Cash') {
-        cash -= (refund['total'] ?? 0) as int;
+        // WS-B: an exchange credit note pays back only its refundTotal.
+        cash -= (refund['refundTotal'] ?? refund['total'] ?? 0) as int;
       }
     }
     for (final movement in cashMovements(shift)) {

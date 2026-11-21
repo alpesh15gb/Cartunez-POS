@@ -75,7 +75,8 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
       at: payment.createdAt,
       type: payment.refund ? "refund" : "payment",
       id: payment.id,
-      reference: [payment.mode, payment.reference].filter(Boolean).join(" · "),
+      // WS-B: advances (routes/customers.ts) are labelled as such.
+      reference: [payment.advance ? (payment.refund ? "Advance refund" : "Advance") : "", payment.mode, payment.reference].filter(Boolean).join(" · "),
       note: payment.notes || "",
       debit: payment.refund ? payment.amount : 0,
       credit: payment.refund ? 0 : payment.amount,
@@ -112,6 +113,21 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
       const onCredit = (invoice.tenders || [])
         .filter((t: any) => t.type === "Credit")
         .reduce((n: number, t: any) => n + t.amount, 0);
+      // WS-B: money held for the customer used on this bill (hooks/advance.ts).
+      const fromAdvance = (invoice.tenders || [])
+        .filter((t: any) => t.type === "Advance")
+        .reduce((n: number, t: any) => n + t.amount, 0);
+      if (fromAdvance)
+        add(invoice.customerId, {
+          date: String(invoice.createdAt).slice(0, 10),
+          at: invoice.createdAt,
+          type: "sale",
+          id: invoice.id + ":advance",
+          reference: `Invoice ${invoice.number}`,
+          note: "Advance used",
+          debit: fromAdvance,
+          credit: 0,
+        });
       if (!onCredit) continue;
       add(invoice.customerId, {
         date: String(invoice.createdAt).slice(0, 10),
@@ -140,6 +156,9 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
     }
     for (const ret of await records(db, org, "return")) {
       if (ret.refundType !== "Credit") continue;
+      // WS-B: an exchange credits the account only with what was not set against the new bill.
+      const amount = ret.refundTotal ?? ret.total;
+      if (!amount) continue;
       const invoice = await getRecord(db, org, "invoice", ret.invoiceId);
       add(invoice?.customerId, {
         date: String(ret.createdAt).slice(0, 10),
@@ -149,7 +168,7 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
         reference: `${ret.voided ? "Void of" : "Return on"} invoice ${ret.invoiceNumber}`,
         note: ret.reason || "",
         debit: 0,
-        credit: ret.total,
+        credit: amount,
       });
     }
   }

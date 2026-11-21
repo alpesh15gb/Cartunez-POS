@@ -7,6 +7,7 @@ import '../shell.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'receipt.dart';
+import '../orders/returns.dart' show startReturnForInvoice; // WS-B
 
 // WS-D: the shift screens moved to lib/ui/shift/.
 export '../shift/shift_dialogs.dart' show recordDrawerMovement, showDrawerActivity, closeShift;
@@ -42,7 +43,7 @@ class InvoicesScreen extends StatelessWidget {
               final status = app.invoiceStatus(r);
               return [
                 if (status != 'Voided' && status != 'Returned' && app.canSell)
-                  OutlinedButton(onPressed: () => returnInvoice(context, r), child: const Text('Return')),
+                  OutlinedButton(onPressed: () => startReturnForInvoice(context, r), child: const Text('Return')), // WS-B
                 if (app.isManager && status == 'Finalized')
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(foregroundColor: Brand.danger),
@@ -61,8 +62,11 @@ class InvoicesScreen extends StatelessWidget {
               Col('Credit note', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
               Col('Invoice', (r) => Text('${r['invoiceNumber']}')),
               Col('Date', (r) => Text(formatDate(r['createdAt']))),
-              Col('Type', (r) => Text(r['voided'] == true ? 'Void' : 'Return · ${titleCase('${r['condition']}')}')),
-              Col('Refund', (r) => Text('${app.money(r['total'] as num)} · ${r['refundType'] ?? 'Cash'}'), numeric: true),
+              // WS-B: exchanges and per-line dispositions.
+              Col('Type', (r) => Text(r['voided'] == true ? 'Void' : r['exchangeApplied'] != null ? 'Exchange' : 'Return · ${titleCase('${r['condition']}')}')),
+              Col('Refund', (r) => Text(r['refundType'] == 'Exchange'
+                  ? '${app.money(r['total'] as num)} · Exchange'
+                  : '${app.money((r['refundTotal'] ?? r['total']) as num)} · ${r['refundType'] ?? 'Cash'}'), numeric: true),
             ],
           ),
         ]);

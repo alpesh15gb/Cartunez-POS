@@ -45,7 +45,15 @@ class ReceiptView {
       ];
 
   List<(String, String)> get payments => [
-        if (credit) ('Refund · ${doc['refundType'] ?? 'Cash'}', money(doc['total'] as num?)),
+        // WS-B: an exchange credit note is set against the new bill; only any excess is paid back.
+        if (credit && doc['exchangeApplied'] != null) ('Set against new bill', money(doc['exchangeApplied'] as num?)),
+        if (credit && doc['exchangeApplied'] == null) ('Refund · ${doc['refundType'] ?? 'Cash'}', money(doc['total'] as num?)),
+        if (credit && doc['exchangeApplied'] != null && ((doc['refundTotal'] ?? 0) as int) > 0)
+          ('Refund · ${doc['refundType']}', money(doc['refundTotal'] as num?)),
+        if (doc['exchange'] is Map)
+          ('Exchange · credit note ${doc['exchange']['creditNoteNumber']} (bill ${doc['exchange']['originalInvoiceNumber']})',
+              '−${money(doc['exchange']['applied'] as num?)}'),
+        if ((doc['advanceApplied'] ?? 0) != 0) ('From advance', money(doc['advanceApplied'] as num?)),
         for (final t in doc['tenders'] as List? ?? [])
           ('Paid · ${t['type']}${'${t['reference'] ?? ''}'.isNotEmpty ? ' · ${t['reference']}' : ''}', money(t['amount'] as num)),
         if (doc['change'] != null) ('Change', money(doc['change'] as num)),
@@ -129,6 +137,12 @@ Future<void> showReceipt(BuildContext context, Json doc) {
           onPressed: () => printReceipt(app, doc),
           icon: const Icon(Icons.print_outlined),
           label: const Text('Print'),
+        ),
+        // WS-B: send the invoice or credit note as a PDF (WhatsApp, email) from the share sheet.
+        OutlinedButton.icon(
+          onPressed: () => shareReceipt(app, doc),
+          icon: const Icon(Icons.share_outlined),
+          label: const Text('Share'),
         ),
         FilledButton(onPressed: () => Navigator.pop(dialog), child: const Text('Done')),
       ],

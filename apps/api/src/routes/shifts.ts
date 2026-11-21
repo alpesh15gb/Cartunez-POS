@@ -71,7 +71,8 @@ export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
   });
   post("approvals", async (tx, actor, body) => {
     allow(actor, ["owner", "manager"]);
-    if (!["fitment", "discount", "return", "adjustment"].includes(body.action))
+    // WS-B: credit-limit (sell on credit above the limit), advance-refund (give an advance back).
+    if (!["fitment", "discount", "return", "adjustment", "credit-limit", "advance-refund"].includes(body.action))
       fail("Unknown approval action.");
     const approval = {
       id: id("approval"),

@@ -76,7 +76,8 @@ class ContactsScreen extends StatelessWidget {
           DataList(
             rows: rows,
             empty: kind == 'customers' ? 'No customers yet. Walk-in sales need none.' : 'No suppliers yet.',
-            onTap: (row) => showLedger(context, kind, row),
+            // WS-B: a customer opens their 360 page; suppliers keep the ledger.
+            onTap: (row) => kind == 'customers' ? shell.open('/people/customers/${row['id']}') : showLedger(context, kind, row),
             columns: [
               Col('Name', (r) => Text('${r['name']}'), flex: 2),
               Col('Phone', (r) => Text('${r['phone'] ?? '—'}')),
