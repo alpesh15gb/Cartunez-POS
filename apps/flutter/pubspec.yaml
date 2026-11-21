@@ -48,6 +48,8 @@ dependencies:
   image: ^4.13.1
   image_picker: ^1.2.4
   go_router: ^18.1.4
+  # WS-A: WhatsApp share links (wa.me)
+  url_launcher: ^6.3.1
   flutter_web_plugins:
     sdk: flutter
 

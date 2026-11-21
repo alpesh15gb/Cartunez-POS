@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../core/receipt_print.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
@@ -112,6 +114,17 @@ Future<void> showReceipt(BuildContext context, Json doc) {
         ]),
       ),
       actions: [
+        if (!r.credit)
+          TextButton.icon(
+            onPressed: () => shareReceiptWhatsApp(app, doc),
+            icon: const Icon(Icons.chat_outlined),
+            label: const Text('WhatsApp'),
+          ),
+        TextButton.icon(
+          onPressed: () => shareReceipt(app, doc),
+          icon: const Icon(Icons.ios_share),
+          label: const Text('Share PDF'),
+        ),
         OutlinedButton.icon(
           onPressed: () => printReceipt(app, doc),
           icon: const Icon(Icons.print_outlined),
@@ -141,8 +154,45 @@ Future<pw.ThemeData> pdfTheme() async {
   );
 }
 
-/// 80 mm roll receipt; the print dialog lets the shop pick A4 instead.
+/// 80 mm roll receipt. On Windows it goes straight to this device's receipt
+/// printer (Settings › Counter); elsewhere the print dialog lets the shop pick A4.
 Future<void> printReceipt(AppState app, Json doc) async {
+  final message = await sendReceiptPdf(await buildReceiptPdf(app, doc), '${doc['number'] ?? 'receipt'}');
+  if (message.isNotEmpty) app.toast(message);
+}
+
+/// Shares the receipt PDF through the system share sheet.
+Future<void> shareReceipt(AppState app, Json doc) async =>
+    shareReceiptPdf(await buildReceiptPdf(app, doc), '${doc['number'] ?? 'receipt'}.pdf');
+
+/// Short receipt text for WhatsApp: shop, bill number, items, total and payment.
+String receiptSummary(AppState app, Json doc) {
+  final r = ReceiptView(app, doc);
+  return [
+    '${r.business['tradingName'] ?? r.business['legalName'] ?? ''}'.trim(),
+    '${r.kind} ${doc['number'] ?? ''} · ${formatDate(doc['createdAt'])}',
+    if (doc['customer'] is Map) 'Customer: ${doc['customer']['name']}',
+    '',
+    for (final l in r.lines) '${r.lineQty(l)} × ${r.lineName(l)} — ${r.money(l['total'] as num? ?? 0)}',
+    '',
+    if ((doc['discount'] ?? 0) != 0) 'Discount: −${r.money(doc['discount'] as num)}',
+    '${r.credit ? 'Total refunded' : 'Total'}: ${r.money(doc['total'] as num? ?? 0)}',
+    for (final (label, value) in r.payments) '$label: $value',
+    if ('${doc['receiptFooter'] ?? ''}'.isNotEmpty) ...['', '${doc['receiptFooter']}'],
+  ].join('\n').trim();
+}
+
+/// Opens WhatsApp (wa.me) with the receipt summary for the customer's number.
+Future<void> shareReceiptWhatsApp(AppState app, Json doc) async {
+  final customer = doc['customer'] is Map ? doc['customer'] as Map : app.customerById('${doc['customerId']}');
+  final uri = whatsappUri('${customer?['phone'] ?? ''}', receiptSummary(app, doc));
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    app.toast('Could not open WhatsApp. Check that WhatsApp or a browser is installed.');
+  }
+}
+
+/// The receipt as an 80 mm roll PDF.
+Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
   final r = ReceiptView(app, doc);
   final pdf = pw.Document(theme: await pdfTheme());
   pw.Widget row(String a, String b, {bool strong = false}) => pw.Padding(
@@ -193,6 +243,6 @@ Future<void> printReceipt(AppState app, Json doc) async {
       ],
     ]),
   ));
-  await Printing.layoutPdf(name: '${doc['number'] ?? 'receipt'}', onLayout: (_) => pdf.save());
+  return pdf.save();
 }
 

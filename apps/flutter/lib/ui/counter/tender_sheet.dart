@@ -7,12 +7,15 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import '../screens/receipt.dart';
 import '../shift/shift_dialogs.dart' show showOpenShiftDialog; // WS-D
+import 'counter_flow.dart'; // WS-A: after-sale screen
+import 'upi_qr.dart'; // WS-A: static UPI QR
 
 // ---------------- checkout ----------------
 
-Future<void> startCheckout(BuildContext context) async {
+/// WS-A: [split] opens with a second payment (F10), [tender] preselects a
+/// payment type, [print] prints the receipt as soon as the sale completes (F12).
+Future<void> startCheckout(BuildContext context, {bool split = false, String? tender, bool print = false}) async {
   final app = context.appRead;
   if ((app.cart['lines'] as List).isEmpty || !app.canSell) return;
   if (!app.online) {
@@ -23,18 +26,17 @@ Future<void> startCheckout(BuildContext context) async {
     final opened = await openShiftDialog(context, forCheckout: true);
     if (!opened || !context.mounted) return;
   }
-  Quote bill;
-  try {
-    bill = app.currentQuote();
-  } catch (error) {
-    app.toast(errorText(error));
+  final blocker = checkoutBlocker(app);
+  if (blocker != null) {
+    app.toast(blocker);
     return;
   }
+  final bill = app.currentQuote();
   final invoice = await showDialog<Json>(
     context: context,
-    builder: (_) => AppScope(state: app, child: CheckoutDialog(total: bill.total)),
+    builder: (_) => AppScope(state: app, child: CheckoutDialog(total: bill.total, initialSplit: split, initialTender: tender)),
   );
-  if (invoice != null && context.mounted) await showReceipt(context, invoice);
+  if (invoice != null && context.mounted) await afterSale(context, invoice, print: print);
 }
 
 // WS-D: opening float with quick amounts lives in lib/ui/shift/shift_dialogs.dart.
@@ -42,8 +44,10 @@ Future<bool> openShiftDialog(BuildContext context, {bool forCheckout = false}) =
     showOpenShiftDialog(context, forCheckout: forCheckout);
 
 class CheckoutDialog extends StatefulWidget {
-  const CheckoutDialog({super.key, required this.total});
+  const CheckoutDialog({super.key, required this.total, this.initialSplit = false, this.initialTender});
   final int total;
+  final bool initialSplit;
+  final String? initialTender;
   @override
   State<CheckoutDialog> createState() => CheckoutDialogState();
 }
@@ -64,8 +68,15 @@ class CheckoutDialogState extends State<CheckoutDialog> {
   void initState() {
     super.initState();
     final app = context.appRead;
-    tender = app.tenderTypes.contains('Cash') ? 'Cash' : app.tenderTypes.first;
+    tender = widget.initialTender != null && _types.contains(widget.initialTender)
+        ? widget.initialTender!
+        : app.tenderTypes.contains('Cash') ? 'Cash' : app.tenderTypes.first;
     secondTender = _types.firstWhere((t) => t != tender, orElse: () => tender);
+    if (widget.initialSplit && _types.length > 1) {
+      split = true;
+      amount.text = '0.00';
+      second.text = (widget.total / 100).toStringAsFixed(2);
+    }
     place = TextEditingController(
         text: '${app.customerById('${app.cart['customerId']}')?['stateCode'] ?? app.business['stateCode'] ?? ''}');
   }
@@ -239,6 +250,25 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                   ),
                 ),
               ]),
+            // WS-A: static UPI QR for the UPI part of the payment.
+            if (tender == 'UPI' || (split && secondTender == 'UPI'))
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () async {
+                    final upiAmount = tender == 'UPI' ? _minor(amount.text) : _minor(second.text);
+                    final ref = await showUpiQr(context, amount: upiAmount, note: 'Bill ${app.cart['transactionId']}'.substring(0, 13));
+                    if (ref == null || !mounted) return;
+                    setState(() {
+                      confirmed = true;
+                      references['UPI']!.text = ref;
+                    });
+                  },
+                  icon: const Icon(Icons.qr_code_2),
+                  label: Text('Show UPI QR · ${app.money(tender == 'UPI' ? _minor(amount.text) : _minor(second.text))}'),
+                ),
+              ),
             if (nonCash) ...[
               const SizedBox(height: 12),
               SwitchListTile(

@@ -59,13 +59,14 @@ class CartState extends ChangeNotifier {
     _set(emptyCart());
   }
 
-  Future<void> parkCart() async {
+  /// [meta]: label, customerName, regNo, expiresAt shown in the held-bills drawer (WS-A).
+  Future<void> parkCart({Json meta = const {}}) async {
     if (_parking || _posting != null) return;
     final draft = cart;
     final cashier = _app.session;
     _parking = true;
     try {
-      final hold = await _app.mutate('/holds', {'id': draft['holdId'], 'cart': draft}, 'Sale parked. Its stock is reserved.');
+      final hold = await _app.mutate('/holds', {...meta, 'id': draft['holdId'], 'cart': draft}, 'Sale parked. Its stock is reserved.');
       if (!identical(cashier, _app.session)) return;
       if (identical(draft, cart)) {
         clearCart();

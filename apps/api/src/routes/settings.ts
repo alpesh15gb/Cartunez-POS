@@ -160,6 +160,15 @@ export function settingsRoutes(app: FastifyInstance, db: Database, post: Post) {
     if (body.labelLayout !== undefined) {
       settings.labelLayout = labelLayout(body.labelLayout);
     }
+    // WS-A: static UPI QR at the counter (upi://pay?pa=<upiVpa>&pn=<upiPayeeName>&am=...).
+    if (body.upiVpa !== undefined) {
+      const vpa = text(body.upiVpa, "UPI ID", false, 100).trim();
+      if (vpa && !/^[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9.-]{1,63}$/.test(vpa))
+        fail("Enter the shop's UPI ID in the form name@bank, for example cartunez@okhdfcbank.");
+      settings.upiVpa = vpa;
+    }
+    if (body.upiPayeeName !== undefined)
+      settings.upiPayeeName = text(body.upiPayeeName, "UPI payee name", false, 60).trim();
     if (body.taxRates !== undefined) {
       if (
         !Array.isArray(body.taxRates) ||

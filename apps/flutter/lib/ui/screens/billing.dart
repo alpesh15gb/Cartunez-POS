@@ -1,19 +1,27 @@
 import 'package:flutter/material.dart';
 
-import '../../main.dart';
 import '../counter/cart_table.dart';
 import '../counter/catalog_grid.dart';
+import '../counter/counter_keys.dart';
+import '../counter/counter_panes.dart';
 import '../theme.dart';
 
 export '../counter/cart_table.dart' show CartPanel;
 export '../counter/counter_actions.dart';
+export '../counter/counter_flow.dart' show expressCash, afterSale, parkWithPrompt, editCustomerVehicle;
+export '../counter/counter_keys.dart' show CounterKeyboard, counterKeyMap, showCounterKeys;
 export '../counter/held_bills.dart' show showParked;
 export '../counter/tender_sheet.dart' show startCheckout, openShiftDialog, CheckoutDialog;
 
 final billingKey = GlobalKey();
 
-/// The sales counter: catalog on the left, the current sale on the right
-/// (or in a bottom sheet on narrow screens).
+/// The sales counter.
+///
+/// * Desktop (>= 1200): 60/40. Left: dense parts list, photo grid or service
+///   tiles; right: cart table, customer / vehicle chip and the payment dock.
+///   Keyboard first (F-keys, ↑/↓, +/−, Del, ? for help) with a scanner guard.
+/// * 1000–1199: photo grid with the classic cart panel.
+/// * Narrower: compact rows (phone) or the grid, with a sticky cart pill.
 ///
 /// Rebuild scopes: the catalog listens to the search box, catalog/shift data and
 /// the cart's pricing terms; the cart pane listens to the cart. This widget
@@ -26,70 +34,49 @@ class BillingScreen extends StatefulWidget {
 
 class _BillingScreenState extends State<BillingScreen> {
   final category = ValueNotifier('All parts');
+  final counter = CounterController();
 
   @override
   void dispose() {
     category.dispose();
+    counter.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 1000;
-    final catalog = CounterCatalog(category: category, wide: wide);
-    if (wide) {
-      return Row(key: billingKey, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(child: catalog),
+    final width = MediaQuery.sizeOf(context).width;
+    final Widget body;
+    if (width >= 1200) {
+      final scheme = Theme.of(context).colorScheme;
+      body = Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(
+          flex: 6,
+          child: ListenableBuilder(listenable: counter, builder: (_, _) => CounterLeftPane(category: category, compact: false)),
+        ),
+        Expanded(
+          flex: 4,
+          child: DecoratedBox(
+            decoration: BoxDecoration(color: scheme.surface, border: Border(left: BorderSide(color: Theme.of(context).dividerColor))),
+            child: const DeskCartPane(),
+          ),
+        ),
+      ]);
+    } else if (width >= 1000) {
+      body = Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(child: CounterCatalog(category: category, wide: true)),
         Container(
           width: 380,
           decoration: const BoxDecoration(color: Colors.white, border: Border(left: BorderSide(color: Brand.line))),
           child: const CartPanel(),
         ),
       ]);
+    } else {
+      body = Stack(children: [
+        if (width < 600) CounterLeftPane(category: category, compact: true) else CounterCatalog(category: category, wide: false),
+        const Positioned(left: 0, right: 0, bottom: 0, child: CartPill()),
+      ]);
     }
-    return Stack(key: billingKey, children: [
-      catalog,
-      const _ViewSaleButton(),
-    ]);
-  }
-}
-
-/// Narrow screens: "View sale · 3 items  ₹1,250" pinned to the bottom.
-class _ViewSaleButton extends StatelessWidget {
-  const _ViewSaleButton();
-
-  @override
-  Widget build(BuildContext context) {
-    final app = context.appRead;
-    return ListenableBuilder(
-      listenable: app.cartState,
-      builder: (context, _) {
-        if ((app.cart['lines'] as List).isEmpty) return const SizedBox.shrink();
-        final units = app.cartState.units;
-        return Positioned(
-          left: 16,
-          right: 16,
-          bottom: 16,
-          child: FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-            onPressed: () => showModalBottomSheet<void>(
-              context: context,
-              isScrollControlled: true,
-              showDragHandle: true,
-              builder: (_) => FractionallySizedBox(heightFactor: 0.92, child: AppScope(state: app, child: const CartPanel(inSheet: true))),
-            ),
-            child: Row(children: [
-              const Icon(Icons.shopping_bag_outlined),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text('View sale · $units ${units == 1 ? 'item' : 'items'}', overflow: TextOverflow.ellipsis),
-              ),
-              const SizedBox(width: 8),
-              Text(app.money(app.bill?.total ?? 0), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),
-            ]),
-          ),
-        );
-      },
-    );
+    return CounterKeyboard(controller: counter, child: KeyedSubtree(key: billingKey, child: body));
   }
 }
