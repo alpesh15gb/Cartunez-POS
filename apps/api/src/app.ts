@@ -36,6 +36,11 @@ import "./hooks/advance.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { exportRoutes } from "./exports/routes.js";
 import { fulfilmentRoutes } from "./fulfilment.js"; // WS-E: online order fulfilment
+// WS-C (workshop): vehicles, estimates & job cards, kits, serial warranty. Importing registers their checkout hooks.
+import { vehicleRoutes } from "./routes/vehicles.js";
+import { jobRoutes } from "./routes/jobs.js";
+import "./hooks/kits.js";
+import { serialWarrantyRoutes } from "./hooks/serial-warranty.js";
 
 export type { Post } from "./routes/types.js";
 
@@ -245,6 +250,10 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   dashboardRoutes(app, db);
   exportRoutes(app, db);
   fulfilmentRoutes(app, db, post, () => options.fetch || globalThis.fetch); // WS-E
+  // WS-C (workshop)
+  vehicleRoutes(app, db, post);
+  jobRoutes(app, db, post);
+  serialWarrantyRoutes(app, db);
   return app;
 }
 function withoutCost(value: any): any {

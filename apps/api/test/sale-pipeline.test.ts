@@ -36,7 +36,7 @@ test("Checkout pipeline: hooks, staff on lines, Advance tender, number series", 
     const oil = { productId: "oil", qty: 1, binId: "bin-a1" };
 
     // Built-in behaviour is registered as ordered hooks.
-    // (Feature hooks from other modules, such as WS-B's "ws-b-*", sit among them.)
+    // (Feature hooks from other modules, such as "ws-b-*" and "ws-c-*", sit among them.)
     assert.deepEqual(saleHooks().map((hook) => hook.name).filter((name) => !name.startsWith("ws-")), [
       "account-tender-gate", "line-staff", "credit-tender", "tender-rules",
       "customer-check", "stock-and-serials", "release-hold", "audit",
