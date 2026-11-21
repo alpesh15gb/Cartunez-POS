@@ -3,7 +3,8 @@ import { randomInt } from "node:crypto";
 import { id, integer, fail, text, normalize, barcodeKey } from "./domain.js";
 import type { RecordData } from "./db.js";
 
-export function buildProduct(value: RecordData, productId = id("part")) {
+/** defaultTaxRate: 1800 (18%) for GST shops, 0 for shops that are not GST registered. */
+export function buildProduct(value: RecordData, productId = id("part"), defaultTaxRate = 1800) {
   const product: any = { id: productId };
   // Only the name is required. A blank SKU gets an item code (CT-12345678);
   // brand, category and unit may be filled in later.
@@ -29,7 +30,7 @@ export function buildProduct(value: RecordData, productId = id("part")) {
   ])
     // Blank (for example an unknown purchase price) counts as zero.
     product[key] = integer(value[key] === "" || value[key] == null ? 0 : value[key], key);
-  product.taxRate = integer(value.taxRate ?? 1800, "Tax rate", 0, 10000);
+  product.taxRate = integer(value.taxRate ?? defaultTaxRate, "Tax rate", 0, 10000);
   product.packSize = integer(value.packSize ?? 1, "Pack size", 1, 9999);
   for (const key of [
     "oemReferences",
@@ -132,7 +133,8 @@ function flag(value: string | undefined, label: string) {
   fail(`Use yes or no for ${label}.`);
 }
 
-export function previewCatalog(csv: unknown, codes: CatalogCodes, gst: boolean) {
+/** noTax: the shop is not GST registered, so every imported part has tax 0. */
+export function previewCatalog(csv: unknown, codes: CatalogCodes, gst: boolean, noTax = false) {
   if (typeof csv !== "string" || Buffer.byteLength(csv, "utf8") > 512 * 1024) fail("Choose a UTF-8 CSV up to 512 KiB.");
   let table: string[][];
   try {
@@ -171,9 +173,9 @@ export function previewCatalog(csv: unknown, codes: CatalogCodes, gst: boolean) 
       const product = buildProduct({
         ...input, barcodes, cost: input.cost ? hundredths(input.cost, "cost") : 0, retailPrice: hundredths(input.retailPrice, "retail price"),
         wholesalePrice: hundredths(input.wholesalePrice || input.retailPrice, "wholesale price"),
-        taxRate: input.taxPercent ? hundredths(input.taxPercent, "tax rate") : undefined, reorderLevel: input.reorderLevel || 0,
+        taxRate: noTax ? 0 : input.taxPercent ? hundredths(input.taxPercent, "tax rate") : undefined, reorderLevel: input.reorderLevel || 0,
         serialTracked: flag(input.serialTracked, "serial tracking"), universal: flag(input.universal, "universal fit"),
-      });
+      }, undefined, noTax ? 0 : 1800);
       if (product.type === "service" && product.serialTracked) fail("A service cannot track serial numbers.");
       codes.check(product);
       codes.add(product);

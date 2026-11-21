@@ -10,6 +10,8 @@ import {
   gstProfile,
   documentNumber,
   labelLayout,
+  TAX_SCHEMES,
+  NO_TAX_SCHEME,
 } from "../settings.js";
 
 export function settingsRoutes(app: FastifyInstance, db: Database, post: Post) {
@@ -56,8 +58,8 @@ export function settingsRoutes(app: FastifyInstance, db: Database, post: Post) {
         ...businessProfile(body.business),
       };
     if (body.taxScheme !== undefined) {
-      if (!["general", "india-gst"].includes(body.taxScheme))
-        fail("Choose a supported tax scheme.");
+      if (!TAX_SCHEMES.includes(body.taxScheme))
+        fail("Choose GST registered or Not GST registered.");
       settings.taxScheme = body.taxScheme;
     }
     if (body.localTaxName !== undefined) {
@@ -188,6 +190,18 @@ export function settingsRoutes(app: FastifyInstance, db: Database, post: Post) {
       "Configuration change",
       body,
     );
+    // Switching to "Not GST registered": optionally set every part's tax to 0 in one go.
+    if (body.zeroProductTax === true) {
+      if (settings.taxScheme !== NO_TAX_SCHEME)
+        fail("Choose Not GST registered before clearing the tax on every part.");
+      const changed = await tx.query(
+        "UPDATE records SET data = jsonb_set(data, '{taxRate}', '0'::jsonb) WHERE organization_id=$1 AND kind='product' AND COALESCE((data->>'taxRate')::numeric, 0) <> 0",
+        [actor.organizationId],
+      );
+      await audit(tx, actor, "settings", "products", "Tax set to 0 on all parts", {
+        products: changed.rowCount || 0,
+      });
+    }
     return putRecord(tx, actor.organizationId, "settings", settings);
   });
 }

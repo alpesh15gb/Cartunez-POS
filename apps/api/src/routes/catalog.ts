@@ -18,7 +18,7 @@ import {
 } from "../domain.js";
 import { buildProduct, CatalogCodes, previewCatalog } from "../catalog.js";
 import { queueMagentoSync } from "../online-queue.js";
-import { emailAddress } from "../settings.js";
+import { emailAddress, noTax } from "../settings.js";
 
 export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("products", async (tx, actor, body) => {
@@ -29,7 +29,8 @@ export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
     // A blank SKU only creates a new item code for a new part; edits keep the existing SKU.
     const input = { ...existing, ...body };
     if (existing && !String(body.sku ?? "").trim()) input.sku = existing.sku;
-    const product = buildProduct(input, existing?.id);
+    const settings = await getRecord(tx, actor.organizationId, "settings", "settings");
+    const product = buildProduct(input, existing?.id, noTax(settings) ? 0 : 1800);
     // Only an explicit manager action changes sale status, including on older-client edits.
     if (existing?.salesStopped) product.salesStopped = true;
     if (body.salesAction !== undefined) {
@@ -88,7 +89,7 @@ export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
       const existing = await records(tx, org, "product");
       const removed = await records(tx, org, "removedProduct");
       const settings = await getRecord(tx, org, "settings", "settings");
-      const result = previewCatalog(body.csv, new CatalogCodes([...existing, ...removed]), settings?.taxScheme === "india-gst");
+      const result = previewCatalog(body.csv, new CatalogCodes([...existing, ...removed]), settings?.taxScheme === "india-gst", noTax(settings));
       if (preview) return { rows: result.rows, valid: result.valid };
       if (!result.valid) {
         const first = result.rows.find((row) => row.error)!;

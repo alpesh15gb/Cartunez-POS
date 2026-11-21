@@ -32,8 +32,10 @@ class SettingsScreen extends StatelessWidget {
       if (app.isOwner)
         _Card(title: 'Shop', children: [
           Text('${business['tradingName'] ?? business['legalName'] ?? 'Your business'}', style: const TextStyle(fontWeight: FontWeight.w700)),
-          Text('${app.snapshot['branch']?['name'] ?? ''}${'${business['taxRegistrationId'] ?? ''}'.isNotEmpty ? ' · GSTIN ${business['taxRegistrationId']}' : ''}'),
-          Text('${app.gst ? 'India GST' : 'General tax'} · prices ${app.settings['taxMode'] == 'inclusive' ? 'include' : 'exclude'} tax · ${app.tenderTypes.join(', ')}'),
+          Text('${app.snapshot['branch']?['name'] ?? ''}${!app.noTax && '${business['taxRegistrationId'] ?? ''}'.isNotEmpty ? ' · GSTIN ${business['taxRegistrationId']}' : ''}'),
+          Text(app.noTax
+              ? 'Not GST registered · bills show final prices, no GST · ${app.tenderTypes.join(', ')}'
+              : '${app.gst ? 'GST registered (India GST)' : 'General tax'} · prices ${app.settings['taxMode'] == 'inclusive' ? 'include' : 'exclude'} tax · ${app.tenderTypes.join(', ')}'),
           Text('Modules on: ${allFeatures.where(app.feature).map((f) => _featureLabels[f]).join(', ').ifEmpty('billing and stock only')}',
               style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 8),
@@ -190,10 +192,12 @@ Future<void> editRegister(BuildContext context) async {
     context,
     title: 'Register settings',
     fields: [
-      FieldSpec('taxScheme', 'Tax', kind: FieldKind.select, value: s['taxScheme'] ?? 'general', options: const [
-        ('general', 'General tax'),
-        ('india-gst', 'India GST (domestic sales)'),
-      ], help: 'GST needs the business GSTIN and state, and an HSN/SAC on each part.'),
+      FieldSpec('taxScheme', 'GST registration', kind: FieldKind.select, value: s['taxScheme'] ?? 'general', options: const [
+        ('none', 'Not GST registered (bills without GST)'),
+        ('india-gst', 'GST registered (India GST)'),
+        ('general', 'Other sales tax (general)'),
+      ], help: 'Not GST registered: bills are titled Invoice with final prices, no GSTIN, HSN or tax lines. '
+          'GST registered needs the business GSTIN and state, and an HSN/SAC on each part.'),
       FieldSpec('taxMode', 'Catalog prices', kind: FieldKind.select, value: s['taxMode'] ?? 'exclusive', options: const [
         ('exclusive', 'Exclude tax (added at billing)'),
         ('inclusive', 'Include tax (MRP style)'),
@@ -217,12 +221,20 @@ Future<void> editRegister(BuildContext context) async {
     ],
     onSubmit: (v) async {
       if ((v['tenderTypes'] as List).isEmpty) throw FormProblem('Choose at least one payment type.');
+      final becomesNoTax = v['taxScheme'] == 'none' && s['taxScheme'] != 'none';
+      final taxed = app.products.where((p) => ((p['taxRate'] ?? 0) as num) != 0).length;
+      // Switching to "Not GST registered": offer to clear the tax on every existing part in one go.
+      final zeroTax = becomesNoTax && taxed > 0 && context.mounted &&
+          await confirm(context, 'Set tax to 0 on all parts?',
+              '$taxed ${taxed == 1 ? 'part has' : 'parts have'} a tax rate. Bills will carry no tax either way; '
+              'this also clears the rate stored on each part.', action: 'Set all to 0');
       final rates = splitList(v['taxRates']).map(parsePaymentAmount).toList();
       if (rates.isEmpty || rates.any((r) => r == null || r > 10000)) {
         throw FormProblem('Enter tax rates between 0 and 100, separated by commas, with up to two decimal places.');
       }
       await app.mutate('/settings', {
         'taxScheme': v['taxScheme'],
+        if (zeroTax) 'zeroProductTax': true,
         'taxMode': v['taxMode'],
         'taxRates': rates,
         'tenderTypes': v['tenderTypes'],

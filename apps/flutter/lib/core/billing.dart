@@ -101,7 +101,8 @@ class BillingError implements Exception {
   String toString() => message;
 }
 
-Quote quote(Json cart, List<Json> products, {int roundingIncrement = 1, String taxMode = 'exclusive'}) {
+/// [noTax]: the shop is not GST registered, so prices are final and no line carries tax.
+Quote quote(Json cart, List<Json> products, {int roundingIncrement = 1, String taxMode = 'exclusive', bool noTax = false}) {
   int amount(int value, String label, [int max = 100000000000]) {
     if (value < 0 || value > max) throw BillingError('$label exceeds the supported amount.');
     return value;
@@ -137,7 +138,7 @@ Quote quote(Json cart, List<Json> products, {int roundingIncrement = 1, String t
     final allocated = cumulative - allocation;
     allocation = cumulative;
     final gross = value - allocated;
-    final rate = (line.product['taxRate'] ?? 0) as int;
+    final rate = noTax ? 0 : (line.product['taxRate'] ?? 0) as int;
     line
       ..subtotal = value
       ..discount = allocated

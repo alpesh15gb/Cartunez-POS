@@ -89,7 +89,8 @@ class CartState extends ChangeNotifier {
 
   Quote currentQuote([Json? value]) => quote(value ?? cart, _app.products,
       roundingIncrement: (_app.settings['roundingIncrement'] ?? 1) as int,
-      taxMode: '${_app.settings['taxMode'] ?? 'exclusive'}');
+      taxMode: '${_app.settings['taxMode'] ?? 'exclusive'}',
+      noTax: _app.noTax);
 
   /// Saves the sale locally first so it survives a crash, then sends it.
   /// Returns the invoice, or null when it was kept for later sending.

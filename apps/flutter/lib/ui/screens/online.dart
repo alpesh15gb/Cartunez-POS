@@ -13,7 +13,7 @@ import '../widgets.dart';
 /// MRP (price including tax) and the online selling price, in paise.
 ({int mrp, int selling}) onlinePrices(AppState app, Json product, Json? listing) {
   final retail = (product['retailPrice'] as num?)?.toInt() ?? 0;
-  final tax = (product['taxRate'] as num?)?.toInt() ?? 0;
+  final tax = app.noTax ? 0 : (product['taxRate'] as num?)?.toInt() ?? 0;
   final mrp = app.settings['taxMode'] == 'inclusive' ? retail : (retail + retail * tax / 10000).round();
   final pricing = (listing?['pricing'] as Map?) ?? const {'mode': 'mrp'};
   final selling = switch (pricing['mode']) {

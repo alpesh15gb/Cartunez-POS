@@ -28,7 +28,7 @@ class LabelItem {
 /// A part's label, with its brand, part number, main bin, price and MRP.
 LabelItem productLabel(AppState app, Json p, {String? binId}) {
   final price = p['type'] == 'service' ? null : p['retailPrice'] as int?;
-  final taxRate = (p['taxRate'] as num?)?.toInt() ?? 0;
+  final taxRate = app.noTax ? 0 : (p['taxRate'] as num?)?.toInt() ?? 0;
   final mrp = price == null ? null : (app.settings['taxMode'] == 'inclusive' ? price : (price + price * taxRate / 10000).round());
   var bin = binId == null ? '' : app.locationName(binId);
   if (binId == null) {

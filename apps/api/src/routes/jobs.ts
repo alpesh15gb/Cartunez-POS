@@ -21,7 +21,7 @@ import { getRecord, putRecord, records } from "../db.js";
 import { type Actor, allow, audit, fail, heldUnits, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text } from "../domain.js";
 import { reserveKitComponents } from "../hooks/kit-reserve.js";
 import { nextNumber } from "../number-series.js";
-import { invoiceProfile } from "../settings.js";
+import { invoiceProfile, noTax } from "../settings.js";
 import { finalizeSale, JOB_INVOICE } from "../sales.js";
 import { queueMagentoSync } from "../online-queue.js";
 import { registerSaleHook } from "../sale-pipeline.js";
@@ -99,7 +99,7 @@ async function documentLines(
       kind,
       qty,
       unitPrice,
-      taxRate: product.taxRate,
+      taxRate: noTax(settings) ? 0 : product.taxRate,
       coreCharge: product.coreCharge || 0,
       description: text(raw.description || "", "line note", false, 200),
       ...(staffId ? { staffId } : {}),

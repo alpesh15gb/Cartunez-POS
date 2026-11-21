@@ -25,6 +25,7 @@ import {
   documentNumber,
   splitTax,
   taxTotals,
+  NO_TAX_SCHEME,
 } from "./settings.js";
 import type { InvoiceDraft, SaleContext, SaleLine, SaleTender } from "./sale-types.js";
 import { runStage, runValidateLine } from "./sale-pipeline.js";
@@ -289,7 +290,8 @@ async function buildLines(ctx: SaleContext) {
       serials: input.serials || [],
       unitPrice: price,
       cost: product.cost,
-      taxRate: product.taxRate,
+      // Not GST registered: the price is final, no tax on any line.
+      taxRate: profile.taxScheme === NO_TAX_SCHEME ? 0 : product.taxRate,
       coreCharge: product.coreCharge || 0,
       subtotal: lineSubtotal,
       fitment: decision,

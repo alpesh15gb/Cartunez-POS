@@ -112,6 +112,10 @@ class _AccountingExportsState extends State<AccountingExports> {
               Padding(padding: const EdgeInsets.only(top: 12),
                   child: Text(problem!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
             const SizedBox(height: 16),
+            if (app.noTax)
+              Text('GSTR-1 is not needed: this shop is not GST registered, so its bills carry no GST. '
+                  'Change this in Settings › Register settings.', style: text.bodySmall)
+            else ...[
             Text('GSTR-1', style: text.titleMedium),
             const SizedBox(height: 4),
             Text('Sales invoices and credit notes for the period. Upload the JSON on the GST portal (Returns > GSTR-1 > '
@@ -144,6 +148,7 @@ class _AccountingExportsState extends State<AccountingExports> {
               if (s['multipleMonths'] == true)
                 Text('The dates cover more than one month. GSTR-1 is filed per month (or quarter); the period is taken from the end date.',
                     style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error)),
+            ],
             ],
             const SizedBox(height: 20),
             Text('Tally', style: text.titleMedium),

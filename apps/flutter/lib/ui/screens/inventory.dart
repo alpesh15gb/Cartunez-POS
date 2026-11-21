@@ -249,8 +249,11 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
       FieldSpec('retailPrice', 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
       FieldSpec('wholesalePrice', 'Wholesale price', kind: FieldKind.money, value: money('wholesalePrice'), help: 'Blank uses the retail price.'),
       FieldSpec('cost', 'Purchase cost', kind: FieldKind.money, value: money('cost'), help: 'Optional. Supplier bills update it.'),
-      FieldSpec('taxRate', 'Tax rate (%)', kind: FieldKind.money, value: ((product['taxRate'] ?? commonRate) as int) / 100, required: true),
-      FieldSpec('hsnSac', 'HSN / SAC', value: product['hsnSac'], advanced: !app.gst, required: app.gst),
+      // Not GST registered: prices are final, so there is no tax rate or HSN to enter.
+      if (!app.noTax) ...[
+        FieldSpec('taxRate', 'Tax rate (%)', kind: FieldKind.money, value: ((product['taxRate'] ?? commonRate) as int) / 100, required: true),
+        FieldSpec('hsnSac', 'HSN / SAC', value: product['hsnSac'], advanced: !app.gst, required: app.gst),
+      ],
       FieldSpec('reorderLevel', 'Reorder when stock falls to', kind: FieldKind.number, value: product['reorderLevel'] ?? 0),
       FieldSpec('universal', 'Fits',
           kind: FieldKind.select,
@@ -312,7 +315,7 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
         'wholesalePrice': '${v['wholesalePrice']}'.isEmpty ? retail : _minor(v['wholesalePrice']),
         'cost': '${v['cost'] ?? ''}'.trim().isEmpty && product['id'] != null ? (product['cost'] ?? 0) : _minor(v['cost']),
         'coreCharge': _minor(v['coreCharge']),
-        'taxRate': _minor(v['taxRate']),
+        'taxRate': app.noTax ? 0 : _minor(v['taxRate']),
         'reorderLevel': int.tryParse('${v['reorderLevel']}') ?? 0,
         'packSize': int.tryParse('${v['packSize']}') ?? 1,
         'universal': v['universal'] == 'true',
