@@ -189,8 +189,9 @@ export async function returnInvoice(
   options: ReturnOptions = {},
 ) {
   allow(actor, ["owner", "manager", "cashier"]);
-  await approved(db, actor, "return", body.approvalId, body.transactionId);
   const invoice = await scoped(db, actor, "invoice", invoiceId);
+  // Security: a return approval only covers the invoice it was given for.
+  await approved(db, actor, "return", body.approvalId, body.transactionId, { subjectId: invoice.id });
   // An exchange refunds through the sale's till (it may be a cashier's till a manager is using).
   const shift =
     options.shift && !options.shift.closedAt
