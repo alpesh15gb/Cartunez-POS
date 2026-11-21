@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace Cartunez\Storefront\Plugin;
 
 use Cartunez\Storefront\Model\Catalog;
+use Cartunez\Storefront\Model\Icons;
+use Cartunez\Storefront\Model\ShopCategories;
 use Magento\Catalog\Block\Product\AbstractProduct;
 use Magento\Framework\Data\Collection;
 use Magento\Framework\Escaper;
@@ -13,8 +15,10 @@ use Magento\Framework\Escaper;
  * widgets, related parts) get the brand above the name ("Universal" or the
  * vehicle make when the part has no brand). Both list templates print
  * getProductDetailsHtml() for every card; the label is placed above the name
- * with CSS (.cz-card-brand, order: -1). The labels of a whole list are loaded
- * at once.
+ * with CSS (.cz-card-brand, order: -1). Parts the studio fits (Audio, Interior,
+ * Lighting, Installation departments) also get the cyan "Studio fitting" tag,
+ * placed on the photo with CSS (.cz-card-badges); scripts.phtml adds "Save N%"
+ * to the same corner. The labels of a whole list are loaded at once.
  */
 class CardLabel
 {
@@ -23,6 +27,7 @@ class CardLabel
 
     public function __construct(
         private readonly Catalog $catalog,
+        private readonly ShopCategories $shopCategories,
         private readonly Escaper $escaper
     ) {
     }
@@ -39,10 +44,15 @@ class CardLabel
         }
         $this->prime($subject);
         $label = $this->catalog->cardLabel((int)$product->getId());
-        if ($label === '') {
-            return $result;
+        $html = '';
+        if ($label !== '') {
+            $html .= '<span class="cz-card-brand">' . $this->escaper->escapeHtml($label) . '</span>';
         }
-        return '<span class="cz-card-brand">' . $this->escaper->escapeHtml($label) . '</span>' . (string)$result;
+        if ($this->shopCategories->isStudioFit((int)$product->getId())) {
+            $html .= '<span class="cz-card-badges"><span class="cz-tag cz-tag--studio">' . Icons::svg('wrench', 12)
+                . $this->escaper->escapeHtml(__('Studio fitting')) . '</span></span>';
+        }
+        return $html . (string)$result;
     }
 
     private function prime(AbstractProduct $subject): void
@@ -58,7 +68,9 @@ class CardLabel
                 $collection = $subject->getLoadedProductCollection();
             }
             if ($collection instanceof Collection && $collection->isLoaded()) {
-                $this->catalog->preload(array_map('intval', array_keys($collection->getItems())));
+                $ids = array_map('intval', array_keys($collection->getItems()));
+                $this->catalog->preload($ids);
+                $this->shopCategories->preloadProducts($ids);
             }
         } catch (\Throwable $e) {
             // Labels then load one by one.

@@ -61,6 +61,18 @@ studio services and a "visit us" panel, after saving the previous versions as th
 first hero photo loads up front; the others load once the page has finished. Every photo is sized
 for the screen and lazy-loaded.
 
+**Stitch design system (November 2026).** The whole shop follows the owner's Google Stitch design:
+carbon-dark surfaces, racing red for buying, turbo cyan for fitment, Montserrat headings and labels
+(Google Fonts, `display=swap`, replacing Saira) with self-hosted Inter for text. The next `4-theme.sh`
+run applies two data patches once. `StitchMenu` swaps the `cartunez-menu` block to the new menu only
+while it still holds the launch default. `StitchStorefront` rewrites the home page, `cartunez-hero`,
+`cartunez-announcement` and `cartunez-footer` (the previous versions are kept as disabled
+`*-backup-stitch` blocks) and creates `cartunez-reviews`, the "Loved by Hyderabad drivers" band whose
+button opens the shop's Google reviews: put the exact Google Business link there in
+**Content › Blocks › cartunez-reviews**. Department tiles, menu items and the cyan "Studio fitting"
+tag look for POS categories named Audio, Interior, Lighting, Dashcams, Styling, Performance and
+Installation (longer names such as "Audio & Speakers" also work).
+
 Each script stops with a clear message if something is not as expected, and can be run again.
 
 ## Connect the POS

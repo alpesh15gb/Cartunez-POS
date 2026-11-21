@@ -1,15 +1,26 @@
 <?php
 /** @var \Cartunez\Storefront\Block\ProductPage $block */
 /** @var \Magento\Framework\Escaper $escaper */
+use Cartunez\Storefront\Model\Icons;
+
+// Trust row and "Fit inquiry" under the buy box. Only true claims: no stock,
+// GST or warranty wording.
+$product = $block->getProduct();
 $points = [
-    __('Genuine parts'),
-    __('Fitting at our S.P. Road studio'),
-    __('Pickup or delivery across India'),
-    __('Invoice with every order'),
+    ['shield', __('Genuine accessories')],
+    ['wrench', __('Expert fitting at our S.P. Road studio')],
+    ['truck', __("Free delivery above \u{20B9}1,999 or studio pickup")],
+    ['cash', __('Cash on delivery & UPI')],
 ];
 ?>
+<?php if ($product !== null): ?>
+    <a class="cz-pdp-fit" href="<?= $escaper->escapeUrl($block->getWhatsappUrl((string)__('Hi Car Tunez, will this fit my car? %1 %2', (string)$product->getName(), (string)$product->getProductUrl()))) ?>" target="_blank" rel="noopener" data-cz-fit>
+        <?= /* @noEscape */ Icons::svg('whatsapp', 18) ?>
+        <span><?= $escaper->escapeHtml(__('Fit inquiry: ask if it fits your car')) ?></span>
+    </a>
+<?php endif; ?>
 <ul class="cz-pdp-trust">
-    <?php foreach ($points as $point): ?>
-        <li><?= $escaper->escapeHtml($point) ?></li>
+    <?php foreach ($points as [$icon, $point]): ?>
+        <li><?= /* @noEscape */ Icons::svg($icon, 18) ?><span><?= $escaper->escapeHtml($point) ?></span></li>
     <?php endforeach; ?>
 </ul>

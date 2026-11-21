@@ -1,10 +1,14 @@
 <?xml version="1.0"?>
 <page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
     <head>
-        <!-- Self-hosted variable fonts (Inter for text, Saira for headings), preloaded.
-             They replace Google Fonts and Luma's four Open Sans files, which the theme never shows. -->
+        <!-- Inter (text) is self-hosted and preloaded. Montserrat (headings, labels,
+             buttons) comes from Google Fonts with display=swap; cartunez.css gives it a
+             size-matched local fallback so the swap does not move the page.
+             fonts.googleapis.com / fonts.gstatic.com are allowed in the module's csp_whitelist.xml.
+             Luma's four Open Sans files are not used by the theme. -->
         <font src="fonts/inter-var-latin.woff2"/>
-        <font src="fonts/saira-var-latin.woff2"/>
+        <link src="https://fonts.googleapis.com" rel="preconnect" src_type="url"/>
+        <css src="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&amp;display=swap" src_type="url"/>
         <remove src="fonts/opensans/light/opensans-300.woff2"/>
         <remove src="fonts/opensans/regular/opensans-400.woff2"/>
         <remove src="fonts/opensans/semibold/opensans-600.woff2"/>

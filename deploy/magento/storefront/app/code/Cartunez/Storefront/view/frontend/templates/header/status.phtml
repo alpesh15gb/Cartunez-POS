@@ -1,0 +1,10 @@
+<?php
+/** @var \Magento\Framework\View\Element\Template $block */
+/** @var \Magento\Framework\Escaper $escaper */
+// "Studio open / closed" in the header, worked out in the browser from the
+// studio hours in India time (scripts.phtml): Mon-Sat 11 am - 10 pm, Sun 11:30 am - 6 pm.
+?>
+<a class="cz-hstatus" href="<?= $escaper->escapeUrl($block->getUrl('contact')) ?>" data-cz-status>
+    <span class="cz-hstatus-label"><span class="cz-dot" aria-hidden="true"></span><span data-cz-status-label><?= $escaper->escapeHtml(__('Studio hours')) ?></span></span>
+    <span class="cz-hstatus-value" data-cz-status-value><?= $escaper->escapeHtml(__("Mon\u{2013}Sat 11 AM \u{2013} 10 PM")) ?></span>
+</a>

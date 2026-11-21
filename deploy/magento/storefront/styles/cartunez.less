@@ -1,37 +1,64 @@
-// Cartunez storefront: a premium dark "studio" look with the logo's red and
-// blue, on top of Luma (its own variables are left alone, so Magento upgrades
-// keep working). Everything here is plain CSS: no extra scripts, no web fonts
-// from other sites. Desktop-only Luma rules are repeated at the bottom inside
-// the min-width block.
+// Cartunez storefront: the owner's Google Stitch design ("Apex Motorsport
+// Digital"), on top of Luma (its own variables are left alone, so Magento
+// upgrades keep working). Carbon-dark surfaces, racing red for buying, turbo
+// cyan for fitment and focus, Montserrat for headings / labels / buttons and
+// Inter for text. Plain CSS output, no extra scripts. Desktop-only Luma rules
+// are repeated inside the min-width block near the end; phone rules are in the
+// max-width block.
 
-// ---------- Tokens ----------
-@cz-black: #0A0B0E;
-@cz-dark: #111318;
-@cz-panel: #171A20;
-@cz-raise: #1E222A;
-@cz-line-dark: #262B33;
-@cz-red: #E3141B;
-@cz-red-dark: #C20F15;
-@cz-blue: #1AA0F0;
-@cz-blue-dark: #0B7FC4;
-@cz-ink: #0F1115;
-@cz-text: #2A2F37;
-@cz-muted: #646B76;
-@cz-soft: #A3AAB5;
-@cz-line: #E6E8EC;
-@cz-canvas: #F5F6F8;
-@cz-radius: 14px;
-@cz-radius-s: 10px;
-@cz-shadow: 0 1px 2px rgba(15, 17, 21, 0.06), 0 14px 34px -14px rgba(15, 17, 21, 0.22);
-@cz-shadow-dark: 0 24px 60px -24px rgba(0, 0, 0, 0.8);
+// ---------- Tokens (DESIGN.md) ----------
+@cz-void: #06080B;          // carbon-void: header strip, hero, footer
+@cz-surface: #0B0E14;       // carbon-surface: page canvas, fields
+@cz-elevated: #121722;      // carbon-elevated: cards and panels (level 1)
+@cz-raised: #161D2B;        // level 3: drawers, modals, floating bars
+@cz-stroke: #1E2738;        // carbon-stroke: 1px structural outlines
+@cz-stroke-hi: #2A374E;     // level 2 outline (hover / active)
+@cz-red: #D91424;           // racing red: buying, sale, hot badges
+@cz-red-hover: #B00D1B;
+@cz-red-text: #FF5A66;      // red as text on dark (readable contrast)
+@cz-cyan: #00D2FF;          // turbo cyan: fitment, focus, technical highlights
+@cz-cyan-soft: #A5E7FF;
+@cz-cyan-deep: #0077FE;
+@cz-wa: #25D366;            // WhatsApp only
+@cz-wa-ink: #04220F;
+@cz-amber: #FBBF24;         // review stars (only when a part has reviews)
+@cz-text: #F8FAFC;          // text-primary
+@cz-soft: #CBD5E1;          // body copy on dark
+@cz-muted: #94A3B8;         // text-muted
+@cz-well: #F3F5F8;          // light photo well (product photos have white backgrounds)
+@cz-r-sm: 4px;
+@cz-r-md: 8px;
+@cz-r-lg: 12px;
+@cz-gutter: 24px;
+@cz-gutter-phone: 16px;
+@cz-max: 1248px;            // 1200px content + gutters
+@cz-lift: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+@cz-float: 0 16px 40px -10px rgba(0, 0, 0, 0.85);
+@cz-bloom: 0 4px 20px rgba(217, 20, 36, 0.35);
+@cz-bloom-strong: 0 4px 25px rgba(217, 20, 36, 0.45);
 @cz-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 @cz-font: 'Inter Variable', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-@cz-display: 'Saira Variable', 'Inter Variable', 'Segoe UI', Arial, sans-serif;
-@cz-stripe: linear-gradient(90deg, @cz-blue 0%, @cz-blue 46%, @cz-red 54%, @cz-red 100%);
+@cz-display: 'Montserrat', 'Montserrat Fallback', 'Segoe UI', Arial, sans-serif;
 
-// Two self-hosted variable fonts (Latin, SIL Open Font License) replace
-// Google Fonts and Luma's four Open Sans files. Preloaded in default_head_blocks.xml.
-// The rupee sign is outside the Latin set and comes from the system font.
+// The same tokens for inline styles and future components.
+:root {
+    --cz-void: @cz-void;
+    --cz-surface: @cz-surface;
+    --cz-elevated: @cz-elevated;
+    --cz-stroke: @cz-stroke;
+    --cz-red: @cz-red;
+    --cz-cyan: @cz-cyan;
+    --cz-wa: @cz-wa;
+    --cz-text: @cz-text;
+    --cz-muted: @cz-muted;
+    color-scheme: dark;
+}
+
+// ---------- Fonts ----------
+// Inter is self-hosted (Latin, SIL Open Font License) and preloaded; Montserrat
+// comes from Google Fonts with display=swap (default_head_blocks.xml). The
+// fallback below is Arial resized to Montserrat's metrics, so text does not
+// move when Montserrat arrives.
 @font-face {
     font-family: 'Inter Variable';
     font-style: normal;
@@ -41,21 +68,46 @@
     unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-    font-family: 'Saira Variable';
-    font-style: normal;
-    font-display: swap;
-    font-weight: 100 900;
-    src: url('../fonts/saira-var-latin.woff2') format('woff2-variations'), url('../fonts/saira-var-latin.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    font-family: 'Montserrat Fallback';
+    src: local('Arial'), local('ArialMT');
+    size-adjust: 113.39%;
+    ascent-override: 85.43%;
+    descent-override: 22.15%;
+    line-gap-override: 0%;
+}
+
+// ---------- Shared pieces ----------
+.cz-type(@size: 12px, @weight: 600, @track: 0.06em) {
+    font-family: @cz-display;
+    font-size: @size;
+    font-weight: @weight;
+    letter-spacing: @track;
+    text-transform: uppercase;
+}
+.cz-card-surface() {
+    background: @cz-elevated;
+    border: 1px solid @cz-stroke;
+}
+.cz-swipe(@basis) {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    margin-right: -@cz-gutter-phone;
+    padding: 2px @cz-gutter-phone 8px 0;
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+    > .product-item { flex: 0 0 @basis; scroll-snap-align: start; }
 }
 
 // ---------- Base ----------
+html { background: @cz-void; }
 body {
     font-family: @cz-font;
     font-size: 15px;
     line-height: 1.6;
-    color: @cz-text;
-    background: @cz-canvas;
+    color: @cz-soft;
+    background: @cz-surface;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -64,292 +116,754 @@ body {
 // Luma's input rules are more specific, hence !important; icons live on ::before and keep their font.
 button, input, select, textarea { font-family: inherit !important; }
 .action, .field .label, .fieldset > .legend { font-family: inherit; }
-.page-wrapper { background: @cz-canvas; }
-h1, h2, h3, h4, .page-title {
+.page-wrapper { background: @cz-surface; }
+h1, h2, h3, h4, h5, .page-title {
     font-family: @cz-display;
     font-weight: 700;
     letter-spacing: -0.01em;
-    line-height: 1.12;
-    color: @cz-ink;
+    line-height: 1.2;
+    color: @cz-text;
 }
-.page-title-wrapper .page-title { font-size: 36px; letter-spacing: -0.02em; }
-a, .alink { color: @cz-blue-dark; transition: color 0.15s ease; }
-a:hover, .alink:hover { color: @cz-blue; }
+.page-title-wrapper .page-title {
+    font-size: 36px;
+    line-height: 44px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+}
+a, a:visited, .alink { color: @cz-cyan; transition: color 0.15s ease; }
+a:hover, .alink:hover { color: @cz-cyan-soft; }
 ::selection { background: @cz-red; color: #fff; }
-:focus-visible { outline: 2px solid @cz-blue; outline-offset: 2px; }
-.cz-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.breadcrumbs { font-size: 12px; letter-spacing: 0.02em; .item a { color: @cz-muted; } }
-
-// ---------- Offer bar ----------
-.cz-announcement {
-    background: @cz-black;
-    color: @cz-soft;
-    text-align: center;
-    font-size: 12px;
-    font-weight: 500;
-    letter-spacing: 0.08em;
-    padding: 9px 16px;
-    border-bottom: 1px solid @cz-line-dark;
-    a { color: #fff; font-weight: 600; text-decoration: none; border-bottom: 1px solid @cz-red; }
-    a:hover { color: #fff; border-color: #fff; }
+:focus-visible { outline: 2px solid @cz-cyan; outline-offset: 2px; }
+// Luma draws its own focus glow; ours is the visible cyan ring.
+a:focus-visible, button:focus-visible, .action:focus-visible, [tabindex]:focus-visible { box-shadow: none; }
+.cz-visually-hidden { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.cz-ico { flex: none; display: inline-block; vertical-align: middle; }
+hr { border-color: @cz-stroke; }
+.breadcrumbs {
+    .cz-type(11px, 600, 0.06em);
+    .items { color: @cz-muted; }
+    .item a, .item a:visited { color: @cz-muted; }
+    .item a:hover { color: @cz-text; }
+    strong { color: @cz-soft; font-weight: 600; }
+    .item:not(:last-child):after { color: @cz-stroke-hi; }
 }
 
-// ---------- Header ----------
-.page-header {
-    position: relative;
-    background: @cz-dark;
-    border-bottom: 0;
-    margin-bottom: 0;
-    &:after {
-        content: '';
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        height: 2px;
-        background: @cz-stripe;
-    }
-    .panel.wrapper { background: @cz-black; border-bottom: 1px solid @cz-line-dark; }
-    .panel.header {
-        .header.links > li, .header.links > li > a, .greet.welcome { color: @cz-soft; font-size: 12px; letter-spacing: 0.02em; }
-        .header.links > li > a:hover { color: #fff; }
-    }
-    .header.content { padding-top: 14px; padding-bottom: 14px; }
+// ---------- Form fields (DESIGN 5) ----------
+input[type="text"], input[type="password"], input[type="url"], input[type="tel"], input[type="search"],
+input[type="number"], input[type="datetime"], input[type="email"], input[type="date"], select, textarea {
+    background-color: @cz-surface;
+    border: 1px solid @cz-stroke;
+    border-radius: @cz-r-sm;
+    color: @cz-text;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    &::placeholder { color: @cz-muted; opacity: 1; }
+    &:focus { border-color: @cz-cyan; box-shadow: 0 0 0 1px @cz-cyan; outline: 0; }
+    &:disabled { opacity: 0.55; }
 }
-.logo { margin: 0; }
-.logo img { width: 120px; height: 103px; }
-.block-search {
-    .input-text {
-        background: @cz-panel;
-        border: 1px solid @cz-line-dark;
-        border-radius: 999px;
-        color: #fff;
-        height: 44px;
-        padding-left: 18px;
-        padding-right: 44px;
-        transition: border-color 0.15s ease, background 0.15s ease;
-        &::placeholder { color: @cz-soft; }
-        &:focus { border-color: @cz-blue; background: @cz-raise; box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.18); }
-    }
-    .action.search:before { color: @cz-soft; }
+select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px 16px;
 }
-.minicart-wrapper .action.showcart {
-    &:before, &.active:before { color: #fff; }
-    .counter.qty { background: @cz-red; color: #fff; font-weight: 800; border-radius: 999px; }
-}
-.nav-toggle:before { color: #fff; }
+select option { background: @cz-elevated; color: @cz-text; }
+input[type="checkbox"], input[type="radio"] { accent-color: @cz-red; }
+label, .label, .field .label, .fieldset > .field > .label, .fieldset > .fields > .field > .label { color: @cz-soft; }
+.fieldset > .legend, .legend { color: @cz-text; border-color: @cz-stroke; font-family: @cz-display; }
+.field-tooltip .field-tooltip-content { background: @cz-raised; border-color: @cz-stroke; color: @cz-soft; }
+.field .note, .field-note, .note { color: @cz-muted; }
+div.mage-error, .field-error, .mage-error { color: @cz-red-text; }
+input.mage-error, select.mage-error, textarea.mage-error { border-color: @cz-red-text; }
 
-// ---------- Menu (categories from the POS) ----------
-.nav-sections, .nav-sections-item-content { background: @cz-dark; }
-.navigation {
-    background: @cz-dark;
+// ---------- Buttons (DESIGN 3) ----------
+button, .action.secondary, .action.default, a.action.secondary {
+    background: @cz-elevated;
+    border: 1px solid @cz-stroke;
+    border-radius: @cz-r-sm;
+    color: @cz-text;
     font-family: @cz-display;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 13px;
-    .level0 > .level-top {
-        color: #E9ECF1;
-        transition: color 0.15s ease;
-        &:hover, &.ui-state-focus { color: #fff; }
-    }
-    .level0.active > .level-top, .level0.has-active > .level-top { border-color: @cz-red; color: #fff; }
-    .level0 .submenu { background: @cz-panel; border-color: @cz-line-dark; border-radius: 0 0 @cz-radius-s @cz-radius-s; box-shadow: @cz-shadow-dark; }
-    .level0 .submenu a { color: #E9ECF1; &:hover { background: @cz-raise; color: #fff; } }
+    box-shadow: none;
+    &:hover, &:focus, &:active { background: @cz-raised; border-color: @cz-stroke-hi; color: @cz-text; }
 }
-
-// ---------- Vehicle finder ----------
-.cz-finder {
-    background: radial-gradient(120% 140% at 0% 0%, #1D2330 0%, @cz-panel 55%);
-    border-bottom: 1px solid @cz-line-dark;
-    .cz-finder-inner {
-        max-width: 1280px;
-        margin: 0 auto;
-        padding: 20px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px 28px;
-        align-items: center;
-    }
-    .cz-finder-title {
-        color: #fff;
-        display: flex;
-        flex-direction: column;
-        border-left: 3px solid @cz-red;
-        padding-left: 14px;
-        .cz-finder-kicker { color: @cz-blue; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em; }
-        strong { font-family: @cz-display; font-size: 20px; font-weight: 600; }
-    }
-    .cz-finder-form {
-        flex: 1 1 520px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        select {
-            flex: 1 1 150px;
-            height: 48px;
-            border-radius: @cz-radius-s;
-            border: 1px solid @cz-line-dark;
-            background-color: @cz-raise;
-            color: #fff;
-            font-size: 15px;
-            font-weight: 500;
-            padding: 0 14px;
-            &:disabled { opacity: 0.5; }
-            &:focus { border-color: @cz-blue; box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.18); }
-        }
-        .cz-finder-go { flex: 0 0 auto; height: 48px; padding: 0 30px; }
-    }
-}
-
-// ---------- Buttons ----------
-.action.primary, button.action.primary, .action.tocart.primary, .action.checkout {
-    background: @cz-red;
-    border: 1px solid @cz-red;
-    border-radius: @cz-radius-s;
-    color: #fff;
-    font-family: @cz-display;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.09em;
-    box-shadow: 0 8px 20px -10px rgba(227, 20, 27, 0.7);
-    transition: background 0.15s ease, transform 0.15s @cz-ease, box-shadow 0.15s ease;
-    &:hover, &:focus, &:active { background: @cz-red-dark; border-color: @cz-red-dark; color: #fff; }
-    &:hover { transform: translateY(-1px); box-shadow: 0 12px 24px -10px rgba(227, 20, 27, 0.8); }
-}
-.action.secondary, button.action.secondary { border-radius: @cz-radius-s; }
-.cz-button {
+.action.primary, button.action.primary, a.action.primary, .action.tocart.primary, .action.checkout, .cz-button {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
     background: @cz-red;
     border: 1px solid @cz-red;
+    border-radius: @cz-r-sm;
     color: #fff;
-    font-family: @cz-display;
-    font-weight: 600;
-    font-size: 14px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    padding: 14px 28px;
-    border-radius: 999px;
+    .cz-type(14px, 700, 0.05em);
+    line-height: 1.2;
     text-decoration: none;
-    box-shadow: 0 12px 28px -12px rgba(227, 20, 27, 0.85);
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s @cz-ease;
-    &:after { content: '\2192'; font-family: @cz-font; transition: transform 0.2s @cz-ease; }
-    &:hover, &:visited:hover { background: @cz-red-dark; border-color: @cz-red-dark; color: #fff; text-decoration: none; transform: translateY(-1px); }
-    &:hover:after { transform: translateX(3px); }
+    box-shadow: none;
+    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s @cz-ease;
     &:visited { color: #fff; }
+    &:hover, &:focus, &:active, &:visited:hover { background: @cz-red-hover; border-color: @cz-red-hover; color: #fff; text-decoration: none; box-shadow: @cz-bloom; }
+}
+.action.primary[disabled], .action.primary.disabled { opacity: 0.6; box-shadow: none; }
+.cz-button {
+    padding: 0 24px;
+    min-height: 48px;
+    .cz-ico { margin: 0 -2px; }
+    &:hover .cz-ico:last-child:not(:first-child) { transform: translateX(2px); }
+    .cz-ico { transition: transform 0.2s @cz-ease; }
+}
+.cz-button--bloom { box-shadow: @cz-bloom-strong; }
+.cz-button--dark {
+    &, &:visited { background: fade(@cz-elevated, 85%); border-color: @cz-stroke; color: @cz-text; }
+    .cz-ico { color: @cz-cyan; }
+    &:hover, &:focus, &:visited:hover { background: @cz-raised; border-color: @cz-stroke-hi; color: @cz-text; box-shadow: @cz-lift; }
 }
 .cz-button--ghost {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.3);
-    box-shadow: none;
-    &:hover, &:visited:hover { background: rgba(255, 255, 255, 0.14); border-color: #fff; }
-    &:after { content: none; }
+    &, &:visited { background: transparent; border-color: rgba(255, 255, 255, 0.28); color: @cz-text; }
+    &:hover, &:focus, &:visited:hover { background: rgba(255, 255, 255, 0.08); border-color: #fff; color: #fff; box-shadow: none; }
 }
+.cz-button--wa {
+    &, &:visited { background: @cz-wa; border-color: @cz-wa; color: @cz-wa-ink; }
+    &:hover, &:focus, &:visited:hover { background: #1EBE5A; border-color: #1EBE5A; color: @cz-wa-ink; box-shadow: 0 4px 20px rgba(37, 211, 102, 0.35); }
+}
+.cz-button--light {
+    &, &:visited { background: #fff; border-color: #fff; color: @cz-void; }
+    &:hover, &:focus, &:visited:hover { background: @cz-cyan-soft; border-color: @cz-cyan-soft; color: @cz-void; box-shadow: 0 4px 20px rgba(0, 210, 255, 0.3); }
+}
+.cz-button--lg { min-height: 56px; padding: 0 28px; font-size: 15px; }
+// Secondary CTA (fitment / specs): cyan outline, cyan fill on hover.
+.cz-button--cyan {
+    &, &:visited { background: transparent; border-color: @cz-cyan; color: @cz-cyan; }
+    &:hover, &:focus, &:visited:hover { background: @cz-cyan; border-color: @cz-cyan; color: @cz-void; box-shadow: none; }
+}
+
+// ---------- Labels, kickers, section heads ----------
 .cz-kicker {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    color: @cz-blue;
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
     margin-bottom: 8px;
-    &:before { content: ''; width: 18px; height: 2px; background: @cz-red; }
+    color: @cz-cyan;
+    .cz-type(11px, 700, 0.1em);
+    line-height: 14px;
+}
+.cz-kicker--red { color: @cz-red-text; }
+.cz-kicker--live:before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: @cz-cyan;
+    box-shadow: 0 0 0 3px rgba(0, 210, 255, 0.2);
+}
+.cz-label { display: block; color: @cz-muted; .cz-type(10px, 700, 0.08em); line-height: 14px; }
+.cz-section-head {
+    margin: 0 0 28px;
+    h2 { margin: 0; font-size: 36px; line-height: 44px; text-transform: uppercase; }
+    p { margin: 8px 0 0; color: @cz-muted; font-size: 14px; line-height: 22px; max-width: 420px; }
+}
+.cz-section-head--split {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px 24px;
+}
+.cz-row-all, .cz-row-all:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    color: @cz-cyan;
+    .cz-type(12px, 700, 0.06em);
+    text-decoration: none;
+    &:hover, &:focus { color: @cz-cyan-soft; text-decoration: none; }
+}
+.cz-tone-cyan { color: @cz-cyan; }
+.cz-tone-red { color: @cz-red-text; }
+.cz-tone-green { color: @cz-wa; }
+.cz-tone-blue { color: #3B9BFF; }
+
+// ---------- Offer bar ----------
+.cz-announcement {
+    background: @cz-void;
+    color: @cz-muted;
+    border-bottom: 1px solid @cz-stroke;
+    .cz-type(10px, 700, 0.08em);
+    line-height: 14px;
+    .cz-ann-inner {
+        max-width: @cz-max;
+        margin: 0 auto;
+        padding: 9px @cz-gutter;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px 24px;
+    }
+    p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cz-ann-points > span + span:before { content: '\2022'; margin: 0 10px; color: @cz-stroke-hi; }
+    .cz-ann-contact { display: flex; gap: 10px; flex: none; }
+    a, a:visited { color: @cz-text; text-decoration: none; }
+    a:hover { color: @cz-cyan; }
+    .cz-ann-hours { color: @cz-cyan; }
 }
 
-// ---------- Prices: selling price first, MRP struck through ----------
+// ---------- Header ----------
+.page-header {
+    background: fade(@cz-surface, 96%);
+    border-bottom: 0;
+    margin-bottom: 0;
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.4);
+    .panel.wrapper { background: @cz-void; border-bottom: 1px solid @cz-stroke; }
+    .panel.header {
+        max-width: @cz-max;
+        padding: 4px @cz-gutter;
+        box-sizing: border-box;
+        .header.links > li, .header.links > li > a, .header.links > li > a:visited, .greet.welcome { color: @cz-muted; font-size: 12px; }
+        .header.links > li > a:hover { color: @cz-text; }
+    }
+    .header.content {
+        max-width: @cz-max;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        &:before { display: none; }
+        &:after { display: none; }
+    }
+}
+.customer-welcome .action.switch, .customer-welcome .action.switch:before { color: @cz-muted; }
+.customer-menu .header.links, .customer-welcome .customer-menu ul {
+    background: @cz-raised;
+    border: 1px solid @cz-stroke;
+    box-shadow: @cz-float;
+    &:before { border-bottom-color: @cz-raised; }
+    li a, li a:visited { color: @cz-soft; }
+    li:hover { background: @cz-elevated; }
+}
+.logo {
+    order: 1;
+    float: none;
+    flex: none;
+    margin: 0;
+    max-width: none;
+    img { display: block; width: auto; height: 52px; }
+}
+.nav-toggle {
+    order: 0;
+    &:before { color: @cz-text; }
+}
+.cz-carchip {
+    order: 2;
+    flex: 0 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    height: 48px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    .cz-card-surface();
+    border-radius: @cz-r-md;
+    text-decoration: none;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    &, &:visited { color: @cz-text; }
+    &:hover, &:focus { border-color: @cz-stroke-hi; background: @cz-raised; color: @cz-text; text-decoration: none; }
+    .cz-carchip-icon { color: @cz-cyan; display: flex; }
+    .cz-carchip-text { display: flex; flex-direction: column; min-width: 0; }
+    .cz-carchip-label { color: @cz-muted; .cz-type(10px, 700, 0.08em); line-height: 14px; }
+    .cz-carchip-value { .cz-type(12px, 600, 0.04em); text-transform: none; line-height: 16px; max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cz-carchip-caret { color: @cz-muted; display: flex; }
+    &.is-set .cz-carchip-value { color: @cz-cyan; }
+}
+.block-search {
+    order: 3;
+    float: none;
+    flex: 1 1 auto;
+    width: auto;
+    max-width: 560px;
+    margin: 0;
+    padding: 0;
+    position: relative;
+    z-index: 4;
+    .label { display: none; }
+    .control { border: 0; margin: 0; padding: 0; clear: none; }
+    input, input#search {
+        position: static;
+        left: auto;
+        width: 100%;
+        box-sizing: border-box;
+        margin: 0;
+        height: 48px;
+        padding: 0 48px 0 16px;
+        background: @cz-void;
+        border: 1px solid @cz-stroke;
+        border-radius: @cz-r-md;
+        color: @cz-text;
+        font-size: 14px;
+    }
+    .actions .action.search {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: absolute;
+        right: 2px;
+        top: 2px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        margin: 0;
+        background: none;
+        border: 0;
+        box-shadow: none;
+        z-index: 1;
+        &:before { color: @cz-muted; font-size: 18px; line-height: 44px; margin: 0; }
+        &:hover:before { color: @cz-cyan; }
+        > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    }
+    .nested { display: none; }
+}
+.search-autocomplete {
+    background: @cz-raised;
+    border: 1px solid @cz-stroke;
+    border-radius: 0 0 @cz-r-sm @cz-r-sm;
+    box-shadow: @cz-float;
+    ul li { color: @cz-soft; border-color: @cz-stroke; }
+    ul li:hover, ul li.selected { background: @cz-elevated; color: @cz-text; }
+    ul li .amount { color: @cz-muted; }
+}
+.cz-hstatus {
+    order: 4;
+    flex: none;
+    display: none;
+    flex-direction: column;
+    align-items: flex-end;
+    text-decoration: none;
+    &:hover, &:focus { text-decoration: none; }
+    .cz-hstatus-label { display: inline-flex; align-items: center; gap: 6px; color: @cz-muted; .cz-type(10px, 700, 0.08em); line-height: 14px; }
+    .cz-hstatus-value { color: @cz-soft; .cz-type(12px, 700, 0.03em); line-height: 16px; }
+    &.is-open .cz-hstatus-value { color: @cz-wa; }
+    &.is-closed .cz-hstatus-value { color: @cz-muted; }
+}
+.cz-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: @cz-muted; }
+.is-open .cz-dot { background: @cz-wa; box-shadow: 0 0 0 3px rgba(37, 211, 102, 0.2); }
+.is-closed .cz-dot { background: @cz-red-text; }
+.minicart-wrapper {
+    order: 5;
+    float: none;
+    flex: none;
+    margin: 0;
+    .action.showcart {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 48px;
+        padding: 0 12px;
+        box-sizing: border-box;
+        .cz-card-surface();
+        border-radius: @cz-r-md;
+        white-space: nowrap;
+        text-decoration: none;
+        &:before, &.active:before { color: #FFB3AD; font-size: 22px; line-height: 1; margin: 0; }
+        &:hover { border-color: @cz-stroke-hi; }
+        .counter.qty {
+            position: static;
+            margin: 0;
+            min-width: 20px;
+            height: 20px;
+            line-height: 20px;
+            padding: 0 6px;
+            box-sizing: border-box;
+            border-radius: 999px;
+            background: @cz-red;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 800;
+        }
+        .counter.qty.empty { display: none; }
+    }
+    .cz-cart-total { color: @cz-text; .cz-type(12px, 700, 0.02em); line-height: 1; text-transform: none; }
+    // Dropdown cart.
+    .block-minicart {
+        background: @cz-raised;
+        border: 1px solid fade(@cz-cyan, 30%);
+        border-radius: @cz-r-md;
+        box-shadow: @cz-float;
+        color: @cz-soft;
+        &:before { border-bottom-color: @cz-raised; }
+        &:after { border-bottom-color: fade(@cz-cyan, 30%); }
+        .block-title strong, .subtitle { color: @cz-text; }
+        .items-total, .subtotal .label { color: @cz-muted; }
+        .subtotal .price-wrapper .price { color: @cz-text; font-family: @cz-display; }
+        .block-content > .actions > .secondary .action.viewcart, .block-content > .actions > .secondary .action.viewcart:visited { color: @cz-cyan; }
+    }
+    .minicart-items-wrapper { border-color: @cz-stroke; }
+    .minicart-items {
+        .product-item { border-color: @cz-stroke; }
+        .product-item-name a, .product-item-name a:visited { color: @cz-text; }
+        .product-item-details .price { color: @cz-text; }
+        .details-qty .label { color: @cz-muted; }
+        .action.edit:before, .action.delete:before { color: @cz-muted; }
+        .action.edit:hover:before, .action.delete:hover:before { color: @cz-text; }
+        .product-image-container { background: @cz-well; border-radius: @cz-r-sm; }
+    }
+    .action.close:before { color: @cz-muted; }
+}
+
+// ---------- Curated menu ----------
+.nav-sections { background: @cz-elevated; }
+.nav-sections-item-content { background: @cz-elevated; }
+.navigation {
+    background: transparent;
+    .level0 .submenu { background: @cz-raised; border-color: @cz-stroke; box-shadow: @cz-float; }
+    .level0 .submenu a, .level0 .submenu a:visited { color: @cz-soft; }
+    .level0 .submenu a:hover, .level0 .submenu a.ui-state-focus { background: @cz-elevated; color: @cz-text; }
+}
+.cz-nav.navigation {
+    .level-top { font-family: @cz-display; text-decoration: none; }
+    .level-top .cz-ico { margin-right: 6px; }
+    .cz-nav-brands { min-width: 220px; max-height: 70vh; overflow-y: auto; }
+}
+
+// ---------- Vehicle finder (DESIGN 1) ----------
+.cz-finder {
+    [hidden] { display: none !important; }
+    .cz-finder-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: @cz-cyan;
+        .cz-type(10px, 700, 0.1em);
+        line-height: 14px;
+    }
+    .cz-finder-title {
+        strong { display: block; color: @cz-text; font-family: @cz-display; font-weight: 700; font-size: 16px; text-transform: uppercase; letter-spacing: 0.02em; }
+        h2 { margin: 4px 0 4px; font-size: 24px; line-height: 32px; text-transform: uppercase; }
+        p { margin: 0; color: @cz-muted; font-size: 14px; line-height: 22px; }
+    }
+    .cz-finder-form { display: grid; gap: 16px; align-items: end; }
+    .cz-finder-field label { display: block; margin: 0 0 6px; color: @cz-muted; .cz-type(10px, 700, 0.08em); line-height: 14px; }
+    .cz-finder-field select {
+        width: 100%;
+        height: 48px;
+        background-color: @cz-surface;
+        font-size: 14px;
+        padding-left: 14px;
+        cursor: pointer;
+    }
+    .cz-finder-go { width: 100%; height: 48px; padding: 0 20px; box-shadow: 0 4px 15px rgba(217, 20, 36, 0.35); }
+    .cz-finder-saved {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        margin-top: 16px;
+        padding: 14px 16px;
+        border-radius: @cz-r-sm;
+        background: fade(@cz-void, 80%);
+        border: 1px solid fade(@cz-cyan, 18%);
+        > .cz-ico { color: @cz-cyan; }
+        p { margin: 0; flex: 1 1 260px; color: @cz-text; font-size: 14px; }
+        .cz-finder-saved-text { color: @cz-cyan; font-weight: 700; }
+    }
+    .cz-finder-saved-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+    .cz-finder-shop, .cz-finder-shop:visited { color: @cz-text; .cz-type(11px, 700, 0.08em); text-decoration: none; border-bottom: 2px solid @cz-red; }
+    .cz-finder-change, .cz-finder-reset {
+        min-height: 44px;
+        padding: 0 4px;
+        background: none;
+        border: 0;
+        box-shadow: none;
+        color: @cz-muted;
+        .cz-type(11px, 700, 0.08em);
+        cursor: pointer;
+        &:hover, &:focus { background: none; border: 0; color: @cz-text; }
+    }
+    .cz-finder-help {
+        margin: 0;
+        color: @cz-muted;
+        font-size: 13px;
+        a, a:visited { color: @cz-text; font-weight: 600; text-decoration: none; border-bottom: 1px solid fade(@cz-wa, 60%); }
+    }
+    .cz-finder-empty {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 22px;
+        p { color: @cz-soft; margin: 0; flex: 1 1 260px; }
+    }
+    .cz-finder-empty-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+    .cz-finder-contact, .cz-finder-contact:visited { color: @cz-text; font-size: 14px; }
+}
+// Home: the "Select your vehicle" command deck.
+.cz-finder--hero {
+    position: relative;
+    overflow: hidden;
+    margin: 0 0 72px;
+    padding: 40px;
+    border-radius: @cz-r-lg;
+    .cz-card-surface();
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+    scroll-margin-top: 24px;
+    &:before {
+        content: '';
+        position: absolute;
+        right: -80px;
+        top: -80px;
+        width: 320px;
+        height: 320px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 210, 255, 0.08), transparent 70%);
+        pointer-events: none;
+    }
+    .cz-finder-inner { position: relative; }
+    .cz-finder-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 24px; margin-bottom: 24px; }
+    .cz-finder-title { flex: 1 1 420px; }
+    .cz-finder-form { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.cz-finder-ask, .cz-finder-ask:visited {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: @cz-r-sm;
+    background: rgba(37, 211, 102, 0.1);
+    color: @cz-wa;
+    .cz-type(12px, 600, 0.04em);
+    text-transform: none;
+    text-decoration: none;
+    &:hover, &:focus { background: rgba(37, 211, 102, 0.2); color: @cz-wa; text-decoration: none; }
+}
+// Category and search pages: a slim bar under the menu.
+.cz-finder--compact {
+    background: @cz-elevated;
+    border-bottom: 1px solid @cz-stroke;
+    scroll-margin-top: 16px;
+    .cz-finder-inner {
+        max-width: @cz-max;
+        margin: 0 auto;
+        padding: 12px @cz-gutter;
+        box-sizing: border-box;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 24px;
+    }
+    .cz-finder-head { flex: none; }
+    .cz-finder-form { flex: 1 1 560px; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; }
+    .cz-finder-field label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .cz-finder-field select, .cz-finder-go { height: 44px; }
+    .cz-finder-saved { flex: 1 1 520px; margin: 0; padding: 4px 4px 4px 14px; }
+    .cz-finder-help { flex: 1 1 100%; }
+}
+
+// ---------- Prices ----------
 .price-box {
-    .price { color: @cz-ink; font-weight: 800; font-feature-settings: 'tnum'; }
-    .special-price .price { color: @cz-red; }
+    .price { color: @cz-text; font-family: @cz-display; font-weight: 800; font-feature-settings: 'tnum'; }
     .special-price .price-label, .old-price .price-label { display: none; }
     .old-price {
-        .price-wrapper .price, .price { color: @cz-muted; font-weight: 500; font-size: 0.85em; text-decoration: line-through; }
+        .price-wrapper .price, .price { color: @cz-muted; font-family: @cz-font; font-weight: 500; font-size: 13px; text-decoration: line-through; }
     }
-    .old-price:before { content: 'MRP '; color: @cz-muted; font-size: 0.85em; }
+    .old-price:before { content: 'MRP '; color: @cz-muted; font-size: 12px; }
+    .minimal-price-link, .price-label { color: @cz-muted; }
 }
-.product-info-main .price-box .price-wrapper .price { font-size: 32px; letter-spacing: -0.01em; }
 
-// ---------- Product cards ----------
-.products-grid .product-item {
-    .product-item-info {
-        position: relative;
-        height: 100%;
-        box-sizing: border-box;
-        border: 1px solid @cz-line;
-        border-radius: @cz-radius;
-        padding: 12px 12px 16px;
-        background: #fff;
-        box-shadow: 0 1px 2px rgba(15, 17, 21, 0.04);
-        transition: box-shadow 0.25s @cz-ease, transform 0.25s @cz-ease, border-color 0.25s ease;
-        &:hover {
-            border-color: transparent;
-            box-shadow: @cz-shadow;
-            transform: translateY(-3px);
-            margin: 0;
-            padding: 12px 12px 16px;
-        }
-    }
-    .product-image-container { display: block; border-radius: @cz-radius-s; overflow: hidden; background: @cz-canvas; }
-    .product-image-photo { transition: transform 0.5s @cz-ease; }
-    .product-item-info:hover .product-image-photo { transform: scale(1.04); }
-    .product-item-name { margin: 12px 0 6px; }
-    .product-item-name a { color: @cz-ink; font-weight: 600; line-height: 1.35; }
-    .product-item-actions .action.tocart { width: 100%; }
-    .product-item-inner { margin: 0; padding: 0; border: 0; box-shadow: none; }
+// ---------- Product cards (DESIGN 2) ----------
+.products-grid .product-items {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
-// "Save N%" on the card photo (and the product gallery) when the price is below the MRP.
-.cz-badge {
+.products-grid .product-item {
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0;
+    display: block;
+    &[hidden] { display: none !important; }
+}
+.products-grid .product-item-info, .products-list .product-item-info {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: auto;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 12px 12px 16px;
+    .cz-card-surface();
+    border-radius: @cz-r-sm;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s @cz-ease;
+    &:hover { border-color: fade(@cz-cyan, 40%); box-shadow: @cz-lift; }
+}
+.product-items .product-item-photo {
+    position: relative;
+    display: block;
+    margin: 0 0 12px;
+    background: @cz-well;
+    border-radius: @cz-r-sm;
+    overflow: hidden;
+}
+.product-items .product-image-container { display: block; width: 100% !important; }
+.product-items .product-image-photo { mix-blend-mode: multiply; transition: transform 0.5s @cz-ease; }
+.product-items .product-item-info:hover .product-image-photo { transform: scale(1.04); }
+.product-items .product-item-details { display: flex; flex-direction: column; flex: 1 1 auto; }
+.product-items .product-item-name {
+    margin: 4px 0 8px;
+    font-family: @cz-display;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    a, a:visited {
+        color: @cz-text;
+        text-decoration: none;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    a:hover { color: @cz-cyan; text-decoration: none; }
+}
+.cz-card-brand {
+    order: -1;
+    display: block;
+    color: @cz-muted;
+    .cz-type(10px, 700, 0.08em);
+    line-height: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.product-items .price-box { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: 2px 0 12px; }
+.product-items .price-box .price { font-size: 20px; line-height: 1.2; }
+.product-items .product-reviews-summary { margin: 0 0 8px; }
+// Badges on the photo: "Save N%" (red) and "Studio fitting" (cyan), from real data only.
+.cz-card-badges {
     position: absolute;
-    top: 10px;
-    left: 10px;
+    top: 20px;
+    left: 20px;
     z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    pointer-events: none;
+}
+.cz-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 2px;
     background: @cz-red;
     color: #fff;
-    font-family: @cz-display;
-    font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 0.04em;
-    padding: 4px 10px;
-    border-radius: 999px;
-    box-shadow: 0 6px 16px -6px rgba(227, 20, 27, 0.8);
+    .cz-type(10px, 800, 0.08em);
+    line-height: 14px;
+    box-shadow: @cz-bloom;
 }
+.cz-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 7px;
+    border-radius: 2px;
+    .cz-type(10px, 700, 0.06em);
+    line-height: 14px;
+}
+.cz-tag--studio { background: fade(@cz-void, 88%); border: 1px solid @cz-cyan; color: @cz-cyan; }
 .product.media { position: relative; }
-.product.media .cz-badge { top: 14px; left: 14px; }
-// Parts are always orderable: no stock signal anywhere on the shop.
-.stock.available, .stock.unavailable, .product-info-stock-sku .stock,
+.product.media > .cz-badge { position: absolute; top: 14px; left: 14px; z-index: 3; }
+// Add to cart + Fit inquiry, always visible (Luma shows actions only on hover on desktop).
+.products-grid .product-item .product-item-inner, .products-list .product-item .product-item-inner {
+    display: block !important;
+    position: static !important;
+    margin: auto 0 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+}
+.product-items .product-item-actions { display: block; margin: 0; }
+.product-items .product-item-actions .actions-primary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    > form, > .stock { margin: 0; min-width: 0; }
+}
+.product-items .product-item-actions .action.tocart {
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 10px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+.cz-fit, .cz-fit:visited {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    min-width: 0;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    border-radius: @cz-r-sm;
+    background: @cz-raised;
+    border: 1px solid @cz-stroke;
+    color: @cz-text;
+    .cz-type(12px, 700, 0.04em);
+    white-space: nowrap;
+    text-decoration: none;
+    transition: border-color 0.15s ease, color 0.15s ease;
+    .cz-ico { color: @cz-wa; }
+    &:hover, &:focus { border-color: @cz-cyan; color: @cz-cyan; text-decoration: none; }
+}
+// No stock signal, compare or wish list anywhere: every part is orderable.
+.stock.available, .stock.unavailable, .product-info-stock-sku .stock, .product-items .product-item .stock,
 .availability.only, .product-info-main .availability, .product-alert-stock { display: none !important; }
-.product.attribute.overview { color: @cz-text; }
-.product-info-main .page-title-wrapper .page-title { font-size: 32px; }
+.action.tocompare, .action.towishlist, .block-compare, .block-wishlist, .link.wishlist, .link.compare,
+.product-addto-links, .product-item-actions .actions-secondary { display: none !important; }
+// Stars only appear when a part has reviews (Magento prints nothing otherwise).
+.rating-summary .rating-result:before { color: @cz-stroke-hi; }
+.rating-summary .rating-result > span:before { color: @cz-amber; }
+.product-reviews-summary .reviews-actions a, .product-reviews-summary .reviews-actions a:visited { color: @cz-muted; font-size: 12px; }
+.products-list .product-item-info { flex-direction: row; gap: 16px; }
 
-// ---------- Home page ----------
+// ---------- Home ----------
+.cms-index-index .page-main { padding-top: 24px; }
 .cms-index-index .column.main { padding-bottom: 0; }
+.cms-index-index .page-wrapper { overflow-x: clip; }
 
 // Hero slider: real <img> elements so the browser finds the first photo at
 // once; the other photos load only after the page has finished loading.
 .cz-slider {
     position: relative;
-    height: 560px;
-    margin: 0 0 18px;
-    background: @cz-black;
-    border-radius: 20px;
+    height: 600px;
+    margin: 0 0 16px;
+    background: @cz-void;
+    border-radius: @cz-r-lg;
     overflow: hidden;
     isolation: isolate;
-    box-shadow: @cz-shadow-dark;
+    box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.9);
     .cz-slide {
         position: absolute;
         top: 0;
         right: 0;
         bottom: 0;
         left: 0;
-        background-size: cover;
-        background-position: center;
         opacity: 0;
         transition: opacity 0.9s ease;
         &.is-active { opacity: 1; z-index: 1; }
-        // The first slide shows even if the slider script does not run.
+        // The first slide shows even if the slider script does not run
+        // (after the badge row in the Stitch hero, first child in older content).
         &:first-child { opacity: 1; z-index: 1; }
         &:before {
             content: '';
@@ -360,10 +874,13 @@ a:hover, .alink:hover { color: @cz-blue; }
             left: 0;
             z-index: 1;
             background:
-                linear-gradient(90deg, rgba(8, 9, 12, 0.94) 0%, rgba(8, 9, 12, 0.7) 38%, rgba(8, 9, 12, 0.15) 75%),
-                linear-gradient(0deg, rgba(8, 9, 12, 0.7) 0%, rgba(8, 9, 12, 0) 40%);
+                radial-gradient(700px 350px at 50% 25%, rgba(0, 210, 255, 0.10), transparent 70%),
+                radial-gradient(450px 450px at 100% 40%, rgba(217, 20, 36, 0.12), transparent 70%),
+                linear-gradient(90deg, @cz-void 0%, fade(@cz-surface, 90%) 42%, transparent 100%),
+                linear-gradient(0deg, @cz-surface 0%, transparent 40%, fade(@cz-void, 80%) 100%);
         }
     }
+    .cz-hero-badges + .cz-slide { opacity: 1; z-index: 1; }
     .cz-slide-img {
         position: absolute;
         top: 0;
@@ -371,125 +888,237 @@ a:hover, .alink:hover { color: @cz-blue; }
         width: 100%;
         height: 100%;
         object-fit: cover;
-        transform: scale(1.06);
+        opacity: 0.6;
+        filter: saturate(0.8);
+        transform: scale(1.05);
         transition: transform 7s ease-out;
     }
     .cz-slide.is-active .cz-slide-img { transform: scale(1); }
-    &:not(.cz-ready) .cz-slide:first-child .cz-slide-img { transform: none; }
-    &.cz-ready .cz-slide:first-child:not(.is-active) { opacity: 0; z-index: 0; }
+    &:not(.cz-ready) .cz-slide-img { transform: none; }
+    &.cz-ready .cz-slide:not(.is-active) { opacity: 0; z-index: 0; }
     .cz-slide-content {
         position: relative;
         z-index: 2;
-        max-width: 600px;
-        padding: 100px 64px;
-        color: #fff;
-        h1, h2 { color: #fff; font-family: @cz-display; font-size: 60px; font-weight: 700; text-transform: uppercase; letter-spacing: -0.01em; line-height: 0.98; margin: 0 0 18px; }
-        p { color: #CDD2DA; font-size: 17px; line-height: 1.6; margin: 0 0 30px; max-width: 480px; }
+        height: 100%;
+        box-sizing: border-box;
+        max-width: 720px;
+        padding: 112px 64px 96px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
-    .cz-slide-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .cz-slide-kicker { margin: 0 0 6px; color: #47D6FF; .cz-type(12px, 600, 0.12em); }
+    .cz-slide-title {
+        margin: 0;
+        color: @cz-text;
+        font-family: @cz-display;
+        font-size: 56px;
+        line-height: 64px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        text-transform: uppercase;
+    }
+    .cz-grad {
+        background: linear-gradient(90deg, @cz-text 0%, #B6EBFF 45%, @cz-cyan 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+    }
+    .cz-slide-text { margin: 16px 0 0; max-width: 560px; color: @cz-muted; font-size: 16px; line-height: 26px; }
+    .cz-slide-actions { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 36px; }
+    .cz-hero-badges {
+        position: absolute;
+        z-index: 3;
+        top: 40px;
+        left: 64px;
+        right: 64px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 14px;
+    }
+    .cz-hero-est { color: @cz-cyan; .cz-type(10px, 700, 0.08em); }
+    .cz-hero-note {
+        position: absolute;
+        z-index: 3;
+        right: 64px;
+        bottom: 34px;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: @cz-muted;
+        font-size: 12px;
+        .cz-ico { color: @cz-wa; }
+    }
     .cz-dots {
         position: absolute;
         z-index: 3;
         left: 64px;
         bottom: 34px;
         display: flex;
-        gap: 8px;
+        align-items: center;
+        gap: 4px;
         button {
-            width: 26px;
-            height: 4px;
+            position: relative;
+            width: 28px;
+            height: 24px;
             min-height: 0;
             padding: 0;
             border: 0;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.35);
+            background: none;
             box-shadow: none;
-            transition: width 0.3s @cz-ease, background 0.3s ease;
-            &.is-active { width: 46px; background: @cz-red; }
+            &:after {
+                content: '';
+                position: absolute;
+                left: 0;
+                right: 0;
+                top: 10px;
+                height: 4px;
+                border-radius: 999px;
+                background: @cz-stroke-hi;
+                transition: background 0.3s ease;
+            }
+            &:hover, &:focus { background: none; border: 0; }
+            &.is-active { width: 36px; }
+            &.is-active:after { background: @cz-red; }
         }
     }
 }
+.cz-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border-radius: @cz-r-sm;
+    .cz-type(10px, 700, 0.08em);
+    line-height: 14px;
+}
+.cz-pill--red { background: rgba(217, 20, 36, 0.15); color: #FFDAD6; }
+.cz-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: @cz-red;
+    animation: cz-pulse 2s ease-in-out infinite;
+}
+@keyframes cz-pulse { 50% { opacity: 0.35; } }
 
 // Trust strip under the hero.
 .cz-trust {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
     margin: 0 0 56px;
     padding: 0;
     list-style: none;
-    background: @cz-line;
-    border: 1px solid @cz-line;
-    border-radius: @cz-radius;
-    overflow: hidden;
-    li {
-        margin: 0;
-        padding: 18px 20px;
-        background: #fff;
+    > li {
         display: flex;
-        flex-direction: column;
-        strong { font-family: @cz-display; font-size: 17px; font-weight: 600; color: @cz-ink; letter-spacing: 0.01em; }
-        span { color: @cz-muted; font-size: 13px; }
+        align-items: center;
+        gap: 12px;
+        margin: 0;
+        padding: 16px;
+        border-radius: @cz-r-sm;
+        background: @cz-elevated;
     }
+    strong { display: block; color: @cz-text; .cz-type(12px, 700, 0.06em); line-height: 16px; }
+    li > span:last-child > span { display: block; color: @cz-muted; font-size: 12px; line-height: 18px; }
+}
+.cz-trust-icon, .cz-feature-icon {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: @cz-r-sm;
+    background: @cz-void;
 }
 
-.cz-section-head {
+// Department tiles.
+.cz-cats { margin: 0 0 72px; }
+.cz-cat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    > li { margin: 0; }
+}
+.cz-cat {
+    @accent: @cz-cyan;
+    position: relative;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    text-align: center;
-    margin: 0 0 26px;
-    h2 { font-size: 38px; letter-spacing: -0.02em; margin: 0; }
-    p { color: @cz-muted; max-width: 620px; margin: 10px 0 0; }
-}
-
-// Category tiles.
-.cz-promos {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    justify-content: space-between;
     gap: 16px;
-    margin: 0 0 64px;
-}
-.cz-promo {
-    position: relative;
-    display: block;
-    height: 260px;
-    border-radius: @cz-radius;
-    overflow: hidden;
-    background: @cz-panel center / cover no-repeat;
+    height: 100%;
+    min-height: 220px;
+    box-sizing: border-box;
+    padding: 24px;
+    border-radius: @cz-r-md;
+    border: 1px solid @cz-stroke;
+    background: radial-gradient(120% 90% at 100% 0%, fade(@accent, 9%), transparent 60%), @cz-elevated;
     text-decoration: none;
-    isolation: isolate;
-    img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: -1; transition: transform 0.6s @cz-ease; }
-    &:before {
-        content: '';
-        position: absolute;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 0;
-        background: linear-gradient(0deg, rgba(8, 9, 12, 0.92) 0%, rgba(8, 9, 12, 0.2) 70%);
-    }
-    &:hover img { transform: scale(1.06); }
-    .cz-promo-text {
-        position: absolute;
-        left: 24px;
-        right: 24px;
-        bottom: 22px;
-        color: #fff;
-        strong { display: block; font-family: @cz-display; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
-        span { display: block; color: #CDD2DA; font-size: 14px; }
-        em { display: inline-block; margin-top: 10px; font-style: normal; font-weight: 600; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #fff; border-bottom: 2px solid @cz-red; padding-bottom: 2px; }
-    }
-    &:hover { text-decoration: none; }
+    transition: transform 0.25s @cz-ease, border-color 0.2s ease, box-shadow 0.2s ease;
+    &, &:visited { color: @cz-text; }
+    &:hover, &:focus { transform: translateY(-4px); border-color: @cz-stroke-hi; box-shadow: @cz-lift; text-decoration: none; color: @cz-text; }
+    .cz-cat-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .cz-cat-icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: @cz-r-sm; background: @cz-surface; color: @accent; }
+    .cz-cat-count { padding: 4px 8px; border-radius: @cz-r-sm; background: fade(@cz-void, 80%); color: @accent; .cz-type(10px, 700, 0.08em); line-height: 14px; }
+    .cz-cat-body { display: flex; flex-direction: column; gap: 4px; }
+    .cz-cat-title { font-family: @cz-display; font-size: 18px; line-height: 26px; font-weight: 600; letter-spacing: 0.01em; text-transform: uppercase; transition: color 0.2s ease; }
+    .cz-cat-text { color: @cz-muted; font-size: 13px; line-height: 20px; }
+    .cz-cat-cta { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; color: @cz-text; .cz-type(11px, 700, 0.08em); transition: color 0.2s ease; }
+    &:hover .cz-cat-title { color: @accent; }
+    &:hover .cz-cat-cta { color: @cz-red-text; }
 }
+.cz-cat--red { .cz-cat-icon, .cz-cat-count, &:hover .cz-cat-title { color: @cz-red-text; } background: radial-gradient(120% 90% at 100% 0%, fade(@cz-red, 10%), transparent 60%), @cz-elevated; }
+.cz-cat--green { .cz-cat-icon, .cz-cat-count, &:hover .cz-cat-title { color: @cz-wa; } background: radial-gradient(120% 90% at 100% 0%, fade(@cz-wa, 8%), transparent 60%), @cz-elevated; }
+
+// Product sections on the home page.
+.cz-sale, .cz-featured, .cz-row, .cz-brands-wrap { margin: 0 0 72px; }
+.cz-sale .block.widget.block-products-list { margin-bottom: 0; }
+.cz-sale .block-products-list .block-content { margin: 0; }
+.cz-sale-all, .cz-sale-all:visited { color: @cz-red-text; }
+.cz-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.cz-chip {
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: @cz-r-sm;
+    background: @cz-elevated;
+    border: 1px solid @cz-stroke;
+    color: @cz-muted;
+    .cz-type(12px, 600, 0.04em);
+    text-transform: none;
+    cursor: pointer;
+    &:hover, &:focus { background: @cz-raised; border-color: @cz-stroke-hi; color: @cz-text; }
+    &[aria-pressed="true"] { background: rgba(217, 20, 36, 0.08); border-color: @cz-red; color: @cz-red-text; }
+}
+.cz-featured-grid .product-items { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.cz-featured-grid .product-item-info { padding: 16px 16px 20px; }
+.cz-featured-grid .product-item-name { font-size: 17px; }
+.cz-featured-grid .product-items .price-box .price { font-size: 24px; }
+// MRP stays small next to the selling price in every card size.
+.product-items .price-box .old-price .price, .cz-featured-grid .product-items .price-box .old-price .price { font-size: 13px; line-height: 1.4; }
+.cz-featured-empty { margin: 16px 0 0; color: @cz-muted; }
+.cz-featured-all { margin: 16px 0 0; text-align: center; }
+.catalogsearch-result-index .cz-row { margin-top: 48px; }
+.cz-row--page { margin-top: 8px; }
 
 // Brands.
 .cz-brands {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 14px;
+    gap: 12px;
     list-style: none;
     padding: 0;
-    margin: 0 0 64px;
+    margin: 0;
     > li { margin: 0; }
 }
 .cz-brand {
@@ -499,17 +1128,16 @@ a:hover, .alink:hover { color: @cz-blue; }
     gap: 6px;
     height: 100%;
     box-sizing: border-box;
-    padding: 22px 14px 18px;
-    background: #fff;
-    border: 1px solid @cz-line;
-    border-radius: @cz-radius;
+    padding: 20px 14px 16px;
+    .cz-card-surface();
+    border-radius: @cz-r-md;
     text-align: center;
     text-decoration: none;
-    color: @cz-ink;
-    transition: border-color 0.2s ease, box-shadow 0.25s @cz-ease, transform 0.25s @cz-ease;
-    strong { font-family: @cz-display; font-size: 17px; font-weight: 600; line-height: 1.2; color: @cz-ink; }
+    transition: border-color 0.2s ease, transform 0.25s @cz-ease, box-shadow 0.2s ease;
+    &, &:visited { color: @cz-text; }
+    strong { font-family: @cz-display; font-size: 15px; font-weight: 700; line-height: 1.2; text-transform: uppercase; letter-spacing: 0.04em; color: @cz-text; }
     .cz-brand-count { font-size: 12px; color: @cz-muted; }
-    &:hover, &:focus { text-decoration: none; border-color: transparent; box-shadow: @cz-shadow; transform: translateY(-3px); }
+    &:hover, &:focus { border-color: fade(@cz-cyan, 40%); transform: translateY(-3px); box-shadow: @cz-lift; text-decoration: none; color: @cz-text; }
 }
 .cz-brand-logo {
     display: flex;
@@ -518,7 +1146,9 @@ a:hover, .alink:hover { color: @cz-blue; }
     width: 100%;
     height: 72px;
     margin-bottom: 6px;
-    img { max-width: 100%; max-height: 72px; object-fit: contain; filter: grayscale(1); opacity: 0.85; transition: filter 0.2s ease, opacity 0.2s ease; }
+    border-radius: @cz-r-sm;
+    img { max-width: 86%; max-height: 56px; object-fit: contain; mix-blend-mode: multiply; filter: grayscale(1); opacity: 0.9; transition: filter 0.2s ease, opacity 0.2s ease; }
+    &:has(img) { background: @cz-well; }
 }
 .cz-brand:hover .cz-brand-logo img { filter: none; opacity: 1; }
 .cz-brand-initials {
@@ -528,721 +1158,896 @@ a:hover, .alink:hover { color: @cz-blue; }
     width: 64px;
     height: 64px;
     border-radius: 50%;
-    background: radial-gradient(circle at 30% 25%, #2A303A, @cz-black);
-    color: #fff;
+    background: radial-gradient(circle at 30% 25%, @cz-stroke-hi, @cz-void);
+    color: @cz-text;
     font-family: @cz-display;
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 800;
     letter-spacing: 0.04em;
     box-shadow: inset 0 -3px 0 @cz-red;
 }
 
-// Featured products widget on the home page.
-.cms-index-index .block.widget.block-products-list { margin-bottom: 64px; }
-.cms-index-index .block-products-list .products-grid .product-items { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 0; }
-// Luma sizes each card as a percentage of the row; inside the grid each card fills its cell.
-.cms-index-index .block.widget.block-products-list .products-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
-.cms-index-index .page-wrapper { overflow-x: clip; }
-
-// "On sale" section: the parts the POS put on sale (Sale category), red kicker.
-.cz-sale {
-    margin: 0 0 64px;
-    .block.widget.block-products-list { margin-bottom: 0; }
-    .product-item-info { position: relative; }
-    // Each card shows its "Save N%" badge (scripts.phtml).
-}
-.cz-section-head--sale { position: relative; }
-.cz-kicker--sale {
-    color: @cz-red;
-    &:before { background: @cz-red; }
-}
-.cz-sale-all {
-    margin-top: 10px;
-    color: @cz-red;
-    font-weight: 600;
-    font-size: 14px;
-    text-decoration: none;
-    &:after { content: ' \2192'; }
-    &:hover, &:focus { color: @cz-red-dark; text-decoration: underline; }
-    &:visited { color: @cz-red; }
-}
-
-// Studio services: a dark band across the full page width.
-.cz-studio {
-    position: relative;
-    left: 50%;
-    width: 100vw;
-    margin: 0 0 64px -50vw;
-    padding: 72px 20px;
-    box-sizing: border-box;
-    background: radial-gradient(70% 90% at 15% 0%, #1B2130 0%, @cz-black 60%);
-    color: #fff;
-    .cz-section-head { h2 { color: #fff; } p { color: @cz-soft; } }
-}
-.cz-services {
+// Studio: copy, three features, location panel with live open / closed.
+.cz-studio { margin: 0 0 72px; }
+.cz-studio-inner {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    max-width: 1240px;
-    margin: 0 auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 48px;
+    align-items: center;
+}
+.cz-studio-copy {
+    h2 { margin: 0 0 16px; font-size: 36px; line-height: 44px; text-transform: uppercase; }
+    > p { margin: 0 0 24px; color: @cz-muted; font-size: 16px; line-height: 26px; }
+}
+.cz-features {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 28px;
     padding: 0;
     list-style: none;
-    > li { margin: 0; }
+    > li { display: flex; align-items: flex-start; gap: 14px; margin: 0; padding: 14px 16px; border-radius: @cz-r-sm; background: fade(@cz-elevated, 70%); border: 1px solid @cz-stroke; }
+    strong { display: block; color: @cz-text; font-family: @cz-display; font-size: 15px; font-weight: 700; line-height: 22px; }
+    li > span:last-child > span { display: block; color: @cz-muted; font-size: 13px; line-height: 20px; }
 }
-.cz-service {
+.cz-studio-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.cz-location {
+    padding: 24px;
+    border-radius: @cz-r-lg;
+    .cz-card-surface();
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    .cz-location-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 20px; margin-bottom: 16px; }
+    .cz-location-head strong { display: block; margin-top: 4px; color: @cz-text; font-family: @cz-display; font-size: 17px; line-height: 24px; font-weight: 700; text-transform: uppercase; }
+    .cz-location-status { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 0; max-width: 220px; }
+    .cz-location-status [data-cz-status-label] { color: @cz-text; .cz-type(10px, 700, 0.08em); }
+    .cz-location-status [data-cz-status-next] { flex: 0 0 100%; color: @cz-muted; font-size: 12px; }
+    &.is-open .cz-location-status [data-cz-status-label] { color: @cz-wa; }
+    .cz-hours-line { margin: 14px 0 0; color: @cz-muted; font-size: 12px; text-align: center; }
+}
+.cz-map {
     position: relative;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    border-radius: @cz-radius;
+    display: block;
+    aspect-ratio: 16 / 9;
+    border-radius: @cz-r-md;
     overflow: hidden;
-    background: @cz-panel;
-    border: 1px solid @cz-line-dark;
-    color: #fff;
+    border: 1px solid @cz-stroke;
+    background-color: @cz-void;
+    background-image:
+        radial-gradient(260px 160px at 50% 50%, rgba(0, 210, 255, 0.12), transparent 70%),
+        linear-gradient(118deg, transparent 47%, rgba(203, 213, 225, 0.12) 47.5%, rgba(203, 213, 225, 0.12) 49.5%, transparent 50%),
+        linear-gradient(28deg, transparent 58%, rgba(203, 213, 225, 0.09) 58.5%, rgba(203, 213, 225, 0.09) 60%, transparent 60.5%),
+        linear-gradient(rgba(30, 39, 56, 0.7) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 39, 56, 0.7) 1px, transparent 1px);
+    background-size: auto, auto, auto, 28px 28px, 28px 28px;
     text-decoration: none;
-    transition: transform 0.3s @cz-ease, border-color 0.3s ease, box-shadow 0.3s ease;
-    .cz-service-photo { display: block; aspect-ratio: 16 / 10; overflow: hidden; background: @cz-raise; }
-    img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s @cz-ease; }
-    .cz-service-body { display: block; padding: 18px 20px 22px; }
-    strong { display: block; font-family: @cz-display; font-size: 21px; font-weight: 600; color: #fff; margin-bottom: 4px; }
-    .cz-service-body > span { display: block; color: @cz-soft; font-size: 14px; }
-    &:hover, &:focus, &:visited:hover {
-        color: #fff;
-        text-decoration: none;
-        transform: translateY(-4px);
-        border-color: rgba(227, 20, 27, 0.6);
-        box-shadow: @cz-shadow-dark;
-        img { transform: scale(1.06); }
+    .cz-map-pin {
+        position: absolute;
+        left: 50%;
+        top: 46%;
+        transform: translate(-50%, -100%);
+        color: @cz-red;
+        filter: drop-shadow(0 4px 10px rgba(217, 20, 36, 0.6));
+        &:after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            bottom: -6px;
+            width: 18px;
+            height: 6px;
+            margin-left: -9px;
+            border-radius: 50%;
+            background: rgba(217, 20, 36, 0.35);
+        }
     }
+    .cz-map-addr {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: @cz-r-sm;
+        background: fade(@cz-void, 85%);
+        color: @cz-cyan;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .cz-map-open { position: absolute; right: 12px; top: 12px; padding: 4px 8px; border-radius: @cz-r-sm; background: fade(@cz-void, 85%); color: @cz-text; .cz-type(10px, 700, 0.08em); }
+    &:hover .cz-map-open, &:focus .cz-map-open { background: @cz-red; }
 }
-.cz-studio-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 34px; }
+.cz-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+    > li { margin: 0; padding: 12px 8px; border-radius: @cz-r-sm; background: @cz-surface; text-align: center; }
+    strong { display: block; font-family: @cz-display; font-size: 20px; line-height: 28px; font-weight: 800; color: @cz-cyan; }
+    li:nth-child(2) strong { color: @cz-red-text; }
+    li:nth-child(3) strong { color: @cz-wa; }
+    span { color: @cz-muted; .cz-type(10px, 600, 0.06em); }
+}
 
+// "Loved by Hyderabad drivers" (cartunez-reviews block).
+.cz-reviews {
+    position: relative;
+    overflow: hidden;
+    margin: 0 0 72px;
+    padding: 56px 24px;
+    border-radius: @cz-r-lg;
+    border: 1px solid @cz-stroke;
+    background: radial-gradient(60% 120% at 50% 0%, rgba(217, 20, 36, 0.12), transparent 70%), @cz-elevated;
+    text-align: center;
+    h2 { margin: 0 auto 12px; max-width: 760px; font-size: 36px; line-height: 44px; text-transform: uppercase; }
+    p { margin: 0 auto 28px; max-width: 620px; color: @cz-muted; font-size: 16px; line-height: 26px; }
+    .cz-kicker { display: flex; justify-content: center; }
+    .cz-reviews-icon { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; margin-bottom: 16px; border-radius: 50%; background: @cz-surface; color: @cz-cyan; }
+}
+
+// "Upgrade your car this weekend".
+.cz-cta {
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 32px;
+    margin: 0 0 24px;
+    padding: 48px;
+    border-radius: @cz-r-lg;
+    border: 1px solid @cz-stroke;
+    background: radial-gradient(70% 140% at 0% 100%, rgba(217, 20, 36, 0.22), transparent 60%), linear-gradient(135deg, #140A0E 0%, @cz-elevated 60%);
+    h2 { margin: 0 0 12px; font-size: 36px; line-height: 44px; text-transform: uppercase; }
+    p { margin: 0 0 20px; color: @cz-muted; font-size: 16px; line-height: 26px; }
+    .cz-cta-points { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; padding: 0; list-style: none; }
+    .cz-cta-points li { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: @cz-soft; font-size: 13px; }
+    .cz-cta-points .cz-ico { color: @cz-wa; }
+    .cz-cta-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+}
+
+// Policy pages.
 .cz-policy {
     max-width: 820px;
     h2 { font-size: 22px; margin: 28px 0 10px; }
-    p, li { font-size: 15px; color: #374151; }
+    p, li { font-size: 15px; color: @cz-soft; }
     ul { padding-left: 20px; }
-    a { color: @cz-blue-dark; }
 }
 
-.cz-cta {
-    position: relative;
+// ---------- Footer (4 columns) ----------
+.page-wrapper .page-footer, .page-footer, .page-footer .footer.content { background: @cz-void; color: @cz-muted; }
+.page-footer { margin-top: 72px; border-top: 1px solid @cz-stroke; }
+.footer.content {
+    max-width: @cz-max;
+    box-sizing: border-box;
+    border-top: 0;
+    padding-top: 56px;
+    a, a:visited, .links a, .links a:visited { color: @cz-soft; }
+    a:hover { color: @cz-cyan; }
+    ul.footer.links { border-top: 1px solid @cz-stroke; padding-top: 16px; }
+    ul.footer.links > li { background: transparent; border-color: @cz-stroke; font-size: 13px; }
+    .block.newsletter .title { color: @cz-text; }
+    .block.newsletter .field .control:before { color: @cz-muted; }
+    .block.newsletter input { background: @cz-surface; border-color: @cz-stroke; color: @cz-text; }
+    .block.newsletter .action.subscribe { background: @cz-red; border-color: @cz-red; color: #fff; border-radius: 0 @cz-r-sm @cz-r-sm 0; }
+}
+.cz-footer {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1.3fr;
+    gap: 40px;
+    margin-bottom: 40px;
+    h4 { margin: 0 0 16px; color: @cz-text; .cz-type(14px, 700, 0.05em); }
+    p, li { margin: 0 0 8px; color: @cz-muted; font-size: 13px; line-height: 20px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    a, a:visited { color: @cz-soft; text-decoration: none; }
+    a:hover, a:focus { color: @cz-cyan; }
+    .cz-footer-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .cz-footer-logo img { width: auto; height: 40px; }
+    .cz-footer-logo span { color: @cz-text; .cz-type(18px, 700, 0.06em); }
+    .cz-footer-est { color: @cz-soft; }
+    .cz-footer-trust li { display: flex; align-items: flex-start; gap: 8px; }
+    .cz-footer-trust .cz-ico { margin-top: 2px; color: @cz-cyan; }
+}
+.copyright, .page-footer .copyright { display: block; text-align: center; background: @cz-void; color: @cz-muted; border-top: 1px solid @cz-stroke; .cz-type(10px, 600, 0.08em); padding: 16px; }
+
+// ---------- Category and search pages ----------
+.category-description, .category-cms { color: @cz-soft; }
+.category-image .image { border-radius: @cz-r-md; }
+.toolbar { color: @cz-muted; }
+.toolbar-products {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    gap: 24px;
-    background: linear-gradient(120deg, @cz-dark 0%, #1A1F29 100%);
-    border-radius: 20px;
-    padding: 40px 44px;
-    margin: 0 0 24px;
-    color: #fff;
-    overflow: hidden;
-    &:after {
-        content: '';
-        position: absolute;
-        right: -80px;
-        top: -80px;
-        width: 260px;
-        height: 260px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(227, 20, 27, 0.35), transparent 70%);
-        pointer-events: none;
+    gap: 10px 20px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    border-radius: @cz-r-md;
+    .cz-card-surface();
+    text-align: left;
+    &:before, &:after { display: none; }
+    .modes { display: none !important; }
+    .toolbar-amount { order: 1; flex: 1 1 auto; position: static; float: none; margin: 0; padding: 0; line-height: 1.4; font-size: 13px; }
+    .toolbar-number { color: @cz-text; font-weight: 700; }
+    .sorter { order: 2; float: none; position: static; margin: 0 0 0 auto; padding: 0; display: flex; align-items: center; gap: 8px; }
+    .sorter-label, .limiter-label, .limiter .limiter-text { color: @cz-muted; .cz-type(10px, 700, 0.08em); }
+    .sorter-options, .limiter-options { height: 40px; min-width: 150px; margin: 0; font-size: 14px; }
+    .limiter-options { min-width: 80px; }
+    .sorter-action { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid @cz-stroke; border-radius: @cz-r-sm; text-decoration: none; }
+    .sorter-action:before { color: @cz-muted; font-size: 22px; line-height: 1; margin: 0; }
+    .sorter-action:hover:before { color: @cz-cyan; }
+    .limiter { float: none; margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .pages { flex: 1 1 100%; float: none; margin: 0; }
+}
+.products.wrapper ~ .toolbar-products { margin-top: 24px; background: transparent; border: 0; padding: 0; }
+.pages {
+    .items { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; font-size: 14px; letter-spacing: 0; }
+    .item { margin: 0; }
+    .item .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    a.page, strong.page, .action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        height: 44px;
+        padding: 0 8px;
+        box-sizing: border-box;
+        border: 1px solid @cz-stroke;
+        border-radius: @cz-r-sm;
+        background: @cz-elevated;
+        color: @cz-soft;
+        font-family: @cz-display;
+        font-weight: 600;
+        line-height: 1;
+        text-decoration: none;
     }
-    > * { position: relative; z-index: 1; }
-    h2 { color: #fff; font-size: 32px; letter-spacing: -0.02em; margin: 0 0 8px; }
-    p { color: @cz-soft; margin: 0; max-width: 640px; }
+    a.page:visited, .action:visited { color: @cz-soft; }
+    a.page:hover, .action:hover { border-color: @cz-stroke-hi; color: @cz-text; background: @cz-raised; }
+    .item.current strong.page, strong.page { background: rgba(217, 20, 36, 0.08); border-color: @cz-red; color: @cz-red-text; }
+    .action:before { color: @cz-muted; font-size: 28px; line-height: 1; margin: 0; }
+    .action:hover:before { color: @cz-text; }
 }
-
-.cz-benefits {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin: 0 0 24px;
-    padding: 0;
-    list-style: none;
-    li {
-        margin: 0;
-        padding: 20px;
-        background: #fff;
-        border: 1px solid @cz-line;
-        border-radius: @cz-radius;
-        strong { display: block; font-family: @cz-display; font-size: 17px; font-weight: 600; color: @cz-ink; }
-        span { color: @cz-muted; font-size: 13px; }
+// Layered navigation (filters).
+.block.filter {
+    .filter-title strong { color: @cz-text; .cz-type(14px, 700, 0.05em); }
+    .block-subtitle, .filter-subtitle { color: @cz-muted; .cz-type(10px, 700, 0.08em); border-color: @cz-stroke; }
+    .filter-options-item { border-color: @cz-stroke; }
+    .filter-options-title {
+        color: @cz-text;
+        .cz-type(12px, 700, 0.06em);
+        border-color: @cz-stroke;
+        &:after { color: @cz-muted; }
+        &:hover { color: @cz-cyan; }
     }
+    .filter-options-content {
+        .item { margin: 0; }
+        a, a:visited { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; color: @cz-soft; text-decoration: none; }
+        a:hover { background: none; color: @cz-cyan; text-decoration: none; }
+        .count { color: @cz-muted; font-size: 12px; }
+        .count:before, .count:after { color: @cz-stroke-hi; }
+    }
+    .filter-current .items { margin: 0 0 8px; }
+    .filter-current .item { color: @cz-soft; }
+    .filter-current .filter-label { color: @cz-muted; }
+    .filter-current .action.remove:before { color: @cz-muted; }
+    .filter-actions a, .filter-actions a:visited { color: @cz-red-text; }
 }
-
-// Visit the studio.
-.cz-visit {
-    display: grid;
-    grid-template-columns: 1.15fr 1fr;
-    margin: 0 0 24px;
-    border-radius: 20px;
-    overflow: hidden;
-    background: #fff;
-    border: 1px solid @cz-line;
-    .cz-visit-photo { position: relative; min-height: 340px; background: @cz-panel; }
-    .cz-visit-photo img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-    .cz-visit-body { padding: 40px 44px; }
-    h2 { font-size: 32px; letter-spacing: -0.02em; margin: 0 0 16px; }
-    dl { margin: 0 0 26px; display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; }
-    dt { color: @cz-muted; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; padding-top: 3px; }
-    dd { margin: 0; color: @cz-ink; font-weight: 500; }
-    dd a { color: @cz-ink; font-weight: 600; }
-    .cz-visit-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-    .cz-button--ghost, .cz-button--ghost:visited { color: @cz-ink; background: transparent; border-color: #CDD2DA; }
-    .cz-button--ghost:hover, .cz-button--ghost:visited:hover { color: @cz-ink; border-color: @cz-ink; background: @cz-canvas; }
+.sidebar .block.filter {
+    padding: 16px 20px;
+    border-radius: @cz-r-md;
+    .cz-card-surface();
 }
-
-// ---------- Footer ----------
-.page-wrapper .page-footer,
-.page-footer .footer.content { background: @cz-black; color: @cz-soft; }
-.page-footer { margin-top: 56px; border-top: 0; position: relative; }
-.page-footer:before { content: ''; display: block; height: 2px; background: @cz-stripe; }
-.footer.content {
-    border-top: 0;
-    padding-top: 44px;
-    a, .links a { color: #fff; }
-    a:hover { color: @cz-red; }
-    .block.newsletter .title { color: #fff; }
-    .block.newsletter input { background: @cz-panel; border-color: @cz-line-dark; color: #fff; }
-}
-.cz-footer {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 32px;
-    margin-bottom: 28px;
-    > div { flex: 1 1 220px; }
-    h4 { color: #fff; font-family: @cz-display; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 14px; margin: 0 0 12px; }
-    h4:after { content: ''; display: block; width: 28px; height: 2px; background: @cz-red; margin-top: 10px; }
-    p, li { color: @cz-soft; font-size: 13px; line-height: 1.7; margin: 0 0 5px; }
-    ul { list-style: none; padding: 0; margin: 0; }
-    a { color: #fff; text-decoration: none; border-bottom: 1px solid rgba(255, 255, 255, 0.25); }
-    a:hover { color: #fff; border-color: @cz-red; }
-}
-.copyright { background: #060708; color: #6B7280; letter-spacing: 0.04em; }
-
-// ---------- Cart, checkout, account ----------
-.cart-summary, .opc-block-summary { background: #fff; border: 1px solid @cz-line; border-radius: @cz-radius; }
-.fieldset > .field:not(.choice) > .control input[type="text"], .fieldset > .field:not(.choice) > .control input[type="email"],
-.fieldset > .field:not(.choice) > .control input[type="password"], .fieldset > .field:not(.choice) > .control input[type="tel"],
-.fieldset > .field:not(.choice) > .control select, .fieldset > .field:not(.choice) > .control textarea {
-    border-radius: @cz-radius-s;
-    border-color: #D5D9E0;
-    &:focus { border-color: @cz-blue; box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.15); }
-}
-.message.success, .message.error, .message.info, .message.warning { border-radius: @cz-radius-s; }
+.sidebar .block, .sidebar-additional .block { color: @cz-soft; }
+.sidebar .block .block-title strong { color: @cz-text; font-family: @cz-display; }
 
 // ---------- Product page ----------
-.cz-pdp-brand {
-    display: inline-block;
-    margin: 0 0 6px;
-    color: @cz-red;
-    font-family: @cz-display;
-    font-size: 13px;
+.catalog-product-view .page-title-wrapper .page-title,
+.product-info-main .page-title-wrapper .page-title {
+    font-size: 30px;
+    line-height: 38px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
-    text-decoration: none;
-    &:hover, &:visited { color: @cz-red-dark; text-decoration: none; }
+    text-transform: none;
+    letter-spacing: -0.01em;
 }
-.product-info-main .product-info-price { display: block; border-bottom: 1px solid @cz-line; padding-bottom: 14px; margin-bottom: 18px; }
-.product-info-main .product-info-price .product-info-stock-sku { display: block; padding: 6px 0 0; text-align: left; color: @cz-muted; font-size: 12px; }
+.product-info-main {
+    color: @cz-soft;
+    .product-reviews-summary { margin-bottom: 12px; }
+    .product-info-price { display: block; border-bottom: 1px solid @cz-stroke; padding-bottom: 16px; margin-bottom: 20px; }
+    .product-info-stock-sku { display: block; padding: 6px 0 0; text-align: left; color: @cz-muted; font-size: 12px; }
+    .product.attribute.sku .type { color: @cz-muted; }
+    .product.attribute.overview { color: @cz-soft; }
+}
+.cz-pdp-brand, .cz-pdp-brand:visited {
+    display: inline-block;
+    margin: 0 0 8px;
+    color: @cz-cyan;
+    .cz-type(12px, 700, 0.1em);
+    text-decoration: none;
+    &:hover { color: @cz-cyan-soft; text-decoration: none; }
+}
 .cz-pdp-price {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 14px;
     margin: 0;
-    .special-price .price, .cz-pdp-now .price { color: @cz-ink; font-size: 34px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
-    .special-price .price { color: @cz-red; }
-    .cz-pdp-mrp { color: @cz-muted; font-size: 15px; }
+    .special-price .price, .cz-pdp-now .price { color: @cz-text; font-size: 36px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1; }
+    .cz-pdp-mrp { color: @cz-muted; font-size: 14px; }
     .old-price { display: inline; }
     .old-price:before { content: none; }
-    .old-price .price { font-size: 15px; font-weight: 500; color: @cz-muted; text-decoration: line-through; }
+    .old-price .price { font-size: 14px; font-weight: 500; color: @cz-muted; text-decoration: line-through; }
     .cz-pdp-save {
+        flex-basis: 100%;
         align-self: flex-start;
-        background: #ECFDF3;
-        color: #15803D;
-        font-size: 13px;
-        font-weight: 700;
-        padding: 3px 10px;
-        border-radius: 999px;
+        max-width: max-content;
+        padding: 4px 10px;
+        border-radius: 2px;
+        background: rgba(217, 20, 36, 0.14);
+        border: 1px solid fade(@cz-red, 45%);
+        color: @cz-red-text;
+        .cz-type(11px, 700, 0.06em);
     }
 }
 .cz-buybox {
     .fieldset { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
     .field.qty { margin: 0; padding: 0; }
-    .field.qty .label { display: block; font-size: 12px; color: @cz-muted; margin: 0 0 6px; }
+    .field.qty .label { display: block; margin: 0 0 6px; color: @cz-muted; .cz-type(10px, 700, 0.08em); }
     .actions { display: flex; flex: 1 1 320px; gap: 10px; padding: 0; }
     .actions .action.tocart, .actions .cz-buynow { flex: 1 1 0; width: auto; min-height: 52px; margin: 0; font-size: 15px; }
+    .actions .action.tocart { box-shadow: @cz-bloom; }
     .cz-buynow {
-        background: @cz-dark;
-        border: 1px solid @cz-dark;
-        border-radius: @cz-radius-s;
-        color: #fff;
-        font-family: @cz-display;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.09em;
+        background: transparent;
+        border: 1px solid @cz-cyan;
+        border-radius: @cz-r-sm;
+        color: @cz-cyan;
+        .cz-type(15px, 700, 0.05em);
         cursor: pointer;
-        transition: background 0.15s ease, transform 0.15s @cz-ease;
-        &:hover, &:focus { background: @cz-black; border-color: @cz-black; color: #fff; transform: translateY(-1px); }
+        transition: background 0.15s ease, color 0.15s ease;
+        &:hover, &:focus { background: @cz-cyan; border-color: @cz-cyan; color: @cz-void; }
     }
 }
 .cz-qty {
     display: inline-flex;
     align-items: stretch;
-    border: 1px solid #D5D9E0;
-    border-radius: @cz-radius-s;
-    overflow: hidden;
-    background: #fff;
     height: 52px;
+    border: 1px solid @cz-stroke;
+    border-radius: @cz-r-sm;
+    overflow: hidden;
+    background: @cz-surface;
     .cz-qty-btn {
         width: 44px;
+        padding: 0;
         border: 0;
         border-radius: 0;
-        background: @cz-canvas;
-        color: @cz-ink;
+        background: @cz-elevated;
+        color: @cz-text;
         font-size: 20px;
         font-weight: 600;
         line-height: 1;
-        padding: 0;
         cursor: pointer;
         box-shadow: none;
-        &:hover { background: @cz-line; }
+        &:hover, &:focus { background: @cz-raised; border: 0; color: @cz-text; }
     }
     input.input-text.qty {
         width: 52px;
         height: 100%;
         border: 0;
         border-radius: 0;
+        background: transparent;
         text-align: center;
         font-weight: 700;
         -moz-appearance: textfield;
+        &:focus { box-shadow: inset 0 0 0 1px @cz-cyan; }
         &::-webkit-outer-spin-button, &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     }
     div.mage-error { position: absolute; }
 }
+.cz-pdp-fit, .cz-pdp-fit:visited {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    margin: 12px 0 0;
+    padding: 0 16px;
+    border-radius: @cz-r-sm;
+    background: rgba(37, 211, 102, 0.1);
+    border: 1px solid fade(@cz-wa, 35%);
+    color: @cz-wa;
+    .cz-type(13px, 700, 0.03em);
+    text-transform: none;
+    text-decoration: none;
+    &:hover, &:focus { background: rgba(37, 211, 102, 0.18); color: @cz-wa; text-decoration: none; }
+}
 .cz-pdp-trust {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 16px 0 8px;
+    padding: 0;
     list-style: none;
-    margin: 18px 0 8px;
-    padding: 14px 16px;
-    background: #fff;
-    border: 1px solid @cz-line;
-    border-radius: @cz-radius-s;
-    li { position: relative; margin: 0; padding-left: 20px; color: @cz-text; font-size: 13px; font-weight: 600; }
-    li:before { content: '\2713'; position: absolute; left: 0; top: 0; color: @cz-red; font-weight: 800; }
+    li { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 12px; border-radius: @cz-r-sm; background: @cz-elevated; border: 1px solid @cz-stroke; color: @cz-soft; font-size: 13px; font-weight: 600; line-height: 18px; }
+    .cz-ico { color: @cz-cyan; }
 }
+// Photo gallery on a light well (product photos have white backgrounds).
+.product.media .gallery-placeholder, .product.media .fotorama__stage { background: @cz-well; border-radius: @cz-r-md; }
+.product.media .fotorama__nav-wrap .fotorama__thumb { background: @cz-well; }
+.product.media .fotorama__thumb-border { border-color: @cz-cyan; }
+.product.media .fotorama__nav { background: transparent; }
 .product.info.detailed {
-    .product.data.items > .item.title > .switch {
-        font-family: @cz-display;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        color: @cz-ink;
+    clear: both;
+    .product.data.items > .item.title > .switch, .product.data.items > .item.title > .switch:visited {
+        background: @cz-elevated;
+        border: 1px solid @cz-stroke;
+        color: @cz-muted;
+        .cz-type(13px, 700, 0.05em);
+        text-decoration: none;
     }
-    .product.data.items > .item.title.active > .switch { color: @cz-ink; box-shadow: inset 0 -3px 0 @cz-red; }
-    .product.data.items > .item.content { background: #fff; }
+    .product.data.items > .item.title:not(.disabled) > .switch:hover,
+    .product.data.items > .item.title:not(.disabled) > .switch:focus { background: @cz-raised; color: @cz-text; }
+    .product.data.items > .item.title.active > .switch,
+    .product.data.items > .item.title.active > .switch:hover,
+    .product.data.items > .item.title.active > .switch:focus { background: @cz-surface; color: @cz-text; box-shadow: inset 0 -2px 0 @cz-red; }
+    .product.data.items > .item.content { background: @cz-elevated; border-color: @cz-stroke; color: @cz-soft; }
+    .data.table th, .data.table td { border-color: @cz-stroke; color: @cz-soft; }
 }
 .cz-pdp-tab {
-    color: @cz-text;
+    color: @cz-soft;
     ul { margin: 0 0 14px; padding-left: 20px; }
     li { margin-bottom: 8px; }
-    .cz-pdp-lead, .cz-pdp-universal { font-weight: 700; color: @cz-ink; font-size: 16px; }
-    .cz-pdp-universal:before { content: '\2713\00a0'; color: #15803D; }
+    strong { color: @cz-text; }
+    .cz-pdp-lead, .cz-pdp-universal { font-weight: 700; color: @cz-text; font-size: 16px; }
+    .cz-pdp-universal:before { content: '\2713\00a0'; color: @cz-cyan; }
     .cz-pdp-note { color: @cz-muted; font-size: 13px; margin: 0; }
     .cz-pdp-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
-    .cz-pdp-link {
+    .cz-pdp-link, .cz-pdp-link:visited {
         display: inline-flex;
         align-items: center;
-        padding: 10px 18px;
-        border-radius: 999px;
-        border: 1px solid @cz-ink;
-        color: @cz-ink;
-        font-weight: 700;
+        min-height: 44px;
+        padding: 0 18px;
+        border-radius: @cz-r-sm;
+        border: 1px solid @cz-cyan;
+        color: @cz-cyan;
+        .cz-type(12px, 700, 0.05em);
         text-decoration: none;
-        &:hover { background: @cz-ink; color: #fff; text-decoration: none; }
+        &:hover { background: @cz-cyan; color: @cz-void; text-decoration: none; }
     }
-    .cz-pdp-link--wa { background: #25D366; border-color: #25D366; color: #08311A; &:hover { background: #1EBE5A; border-color: #1EBE5A; color: #08311A; } }
+    .cz-pdp-link--wa, .cz-pdp-link--wa:visited { background: @cz-wa; border-color: @cz-wa; color: @cz-wa-ink; &:hover { background: #1EBE5A; border-color: #1EBE5A; color: @cz-wa-ink; } }
 }
-.cz-pdp-vehicles {
-    columns: 2;
-    column-gap: 24px;
-    li { break-inside: avoid; }
-}
+.cz-pdp-vehicles { columns: 2; column-gap: 24px; li { break-inside: avoid; } }
+// Reviews (stars only where real reviews exist).
+.review-control-vote label:before { color: @cz-stroke-hi; }
+.review-control-vote input[type="radio"]:checked + label:before, .review-control-vote label:hover:before, .review-control-vote label:hover ~ label:before { color: @cz-amber; }
+.review-list .review-item, .review-items .review-item { border-color: @cz-stroke; }
+.review-list .block-title strong, .review-add .block-title strong { color: @cz-text; }
+.review-list .review-title { color: @cz-text; }
+.review-list .review-details, .review-list .review-content { color: @cz-soft; }
 .cz-also {
     clear: both;
-    margin: 48px 0 24px;
-    .cz-section-head { align-items: flex-start; text-align: left; margin-bottom: 18px; h2 { font-size: 28px; } }
+    margin: 56px 0 24px;
     .products-grid { margin: 0; }
-    .products-grid .product-items { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 0; }
-    .products-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
 }
 
-// Respect "reduce motion": no zooms, lifts or cross-fades.
-@media (prefers-reduced-motion: reduce) {
-    *, *:before, *:after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
-    .cz-slider .cz-slide-img { transform: none !important; }
+// ---------- Cart, account, messages, modals ----------
+.cart-summary {
+    background: @cz-elevated;
+    border: 1px solid @cz-stroke;
+    border-radius: @cz-r-md;
+    color: @cz-soft;
+    > .title, .block > .title strong { color: @cz-text; font-family: @cz-display; }
+    .block .title { border-color: @cz-stroke; }
+}
+.cart-totals, .cart-totals .totals th, .cart-totals .totals td { color: @cz-soft; border-color: @cz-stroke; }
+.cart-totals .grand .amount strong, .cart-totals .grand .mark strong, .opc-block-summary .grand .amount strong { color: @cz-text; font-family: @cz-display; }
+.cart.table-wrapper {
+    .item { border-color: @cz-stroke; }
+    .cart.item { border-color: @cz-stroke; }
+    .product-item-name a, .product-item-name a:visited { color: @cz-text; }
+    .col.price .price, .col.subtotal .price { color: @cz-text; }
+    .product-image-container { background: @cz-well; border-radius: @cz-r-sm; }
+    .actions-toolbar > .action:before { color: @cz-muted; }
+    th { color: @cz-muted; border-color: @cz-stroke; }
+}
+.table-wrapper, .data.table, .table { color: @cz-soft; }
+.data.table > thead > tr > th, .data.table > tbody > tr > td, .data.table > tbody > tr > th, .data.table > tfoot > tr > td,
+.table > thead > tr > th, .table > tbody > tr > td, .table > tbody > tr > th, .table > tfoot > tr > td,
+.table-wrapper .table, .table-wrapper { border-color: @cz-stroke; }
+.data.table > caption, .table caption { color: @cz-muted; }
+.block .block-title strong, .block-title > strong, .box-title > span, .account .page-title-wrapper .page-title { color: @cz-text; }
+.block-collapsible-nav {
+    .content { background: @cz-elevated; border: 1px solid @cz-stroke; border-radius: @cz-r-md; }
+    .item a, .item a:visited { color: @cz-soft; border-left-color: transparent; }
+    .item a:hover { background: @cz-raised; color: @cz-text; }
+    .item.current a, .item.current > strong { border-color: @cz-red; color: @cz-text; }
+    .delimiter { border-color: @cz-stroke; }
+}
+.block-customer-login, .block-new-customer, .login-container .block .block-title { border-color: @cz-stroke; }
+.message.info, .message.notice, .message.warning {
+    background: rgba(0, 210, 255, 0.08);
+    color: @cz-cyan-soft;
+    border-radius: @cz-r-sm;
+    border: 1px solid rgba(0, 210, 255, 0.25);
+    a, a:visited { color: @cz-text; }
+    > *:first-child:before { color: @cz-cyan; }
+}
+.message.success {
+    background: rgba(37, 211, 102, 0.1);
+    color: #86EFAC;
+    border-radius: @cz-r-sm;
+    border: 1px solid rgba(37, 211, 102, 0.3);
+    a, a:visited { color: @cz-text; }
+    > *:first-child:before { color: @cz-wa; }
+}
+.message.error {
+    background: rgba(217, 20, 36, 0.12);
+    color: #FECACA;
+    border-radius: @cz-r-sm;
+    border: 1px solid rgba(217, 20, 36, 0.4);
+    a, a:visited { color: @cz-text; }
+    > *:first-child:before { color: @cz-red-text; }
+}
+.modal-popup .modal-inner-wrap, .modal-slide .modal-inner-wrap, .modal-custom .modal-inner-wrap {
+    background-color: @cz-raised;
+    color: @cz-soft;
+    border: 1px solid fade(@cz-cyan, 30%);
+    box-shadow: @cz-float;
+}
+.modal-popup .modal-title, .modal-slide .modal-title { color: @cz-text; border-color: @cz-stroke; font-family: @cz-display; }
+.modal-popup .action-close:before, .modal-slide .action-close:before { color: @cz-muted; }
+.modals-overlay { background-color: rgba(6, 8, 11, 0.8); }
+.loading-mask { background: rgba(6, 8, 11, 0.5); }
+
+// Checkout keeps Luma's light forms on a white panel: its many steps,
+// shipping and payment widgets are designed and tested for light colours.
+.checkout-index-index {
+    .page-main {
+        color: #1F2937;
+        background: #fff;
+        border-radius: @cz-r-lg;
+        margin-top: 24px;
+        margin-bottom: 24px;
+        padding-top: 24px;
+        padding-bottom: 24px;
+        h1, h2, h3, h4, .page-title, .step-title, .title, label, .label, .legend, .field .label { color: #0F172A; }
+        a, a:visited { color: #0B66C3; }
+        input[type="text"], input[type="password"], input[type="tel"], input[type="email"], input[type="number"], select, textarea {
+            background-color: #fff;
+            border-color: #CBD5E1;
+            color: #0F172A;
+            &:focus { border-color: @cz-cyan-deep; box-shadow: 0 0 0 1px @cz-cyan-deep; }
+        }
+        select option { background: #fff; color: #0F172A; }
+        button:not(.primary):not(.action-close):not(.action-auth-toggle) { background: #F1F5F9; border-color: #CBD5E1; color: #0F172A; }
+        .price-box .price, .price { color: #0F172A; }
+        .opc-block-summary { color: #1F2937; }
+        .message.info, .message.notice, .message.warning { background: #EFF6FF; color: #1E3A8A; border-color: #BFDBFE; }
+        .message.error { background: #FEF2F2; color: #991B1B; border-color: #FECACA; }
+        .message.success { background: #F0FDF4; color: #166534; border-color: #BBF7D0; }
+    }
 }
 
-// ---------- Tablets ----------
-@media (max-width: 1023px) {
-    .cz-services { grid-template-columns: repeat(2, 1fr); }
-    .cz-trust { grid-template-columns: repeat(2, 1fr); }
-    .cms-index-index .block-products-list .products-grid .product-items { grid-template-columns: repeat(3, 1fr); }
-    .cz-visit { grid-template-columns: 1fr; }
-    .cz-slider .cz-slide-content h1, .cz-slider .cz-slide-content h2 { font-size: 48px; }
-}
-
-// ---------- Phones ----------
-.media-width(@extremum, @break) when (@extremum = 'max') and (@break = @screen__m) {
-    .cz-slider { height: 500px; border-radius: 0; margin-left: -15px; margin-right: -15px; box-shadow: none; }
-    .cz-slider .cz-slide:before { background: linear-gradient(0deg, rgba(8, 9, 12, 0.96) 0%, rgba(8, 9, 12, 0.6) 55%, rgba(8, 9, 12, 0.2) 100%); }
-    .cz-slider .cz-slide-content { position: absolute; left: 0; right: 0; bottom: 60px; padding: 0 22px; }
-    .cz-slider .cz-slide-content h1, .cz-slider .cz-slide-content h2 { font-size: 36px; overflow-wrap: anywhere; }
-    .cz-slider .cz-slide-content p { font-size: 15px; margin-bottom: 20px; }
-    .cz-slider .cz-dots { left: 22px; bottom: 26px; }
-    .cz-trust { margin-bottom: 40px; li { padding: 14px 16px; } }
-    .cz-section-head h2 { font-size: 30px; }
-    .cz-promos, .cz-benefits { grid-template-columns: 1fr; }
-    // Services become a swipeable row on phones instead of six tall cards.
-    .cz-services {
-        display: flex;
-        gap: 12px;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        margin-right: -15px;
-        padding-right: 15px;
-        scrollbar-width: none;
-        &::-webkit-scrollbar { display: none; }
-        > li { flex: 0 0 80%; scroll-snap-align: start; }
-    }
-    .cz-promos { margin-bottom: 44px; }
-    .cz-promo { height: 200px; }
-    .cz-brands { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .cz-sale { margin-bottom: 44px; }
-    .cms-index-index .block-products-list .products-grid .product-items { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .cz-studio { padding: 48px 15px; }
-    .cz-finder .cz-finder-form { flex-basis: 100%; }
-    .cz-finder .cz-finder-form select { flex: 1 1 100%; }
-    .cz-finder .cz-finder-form .cz-finder-go { flex: 1 1 100%; }
-    .cz-cta { padding: 28px 22px; border-radius: @cz-radius; h2 { font-size: 26px; } }
-    .cz-visit .cz-visit-body { padding: 28px 22px; }
-    .cz-visit .cz-visit-photo { min-height: 220px; }
-    .nav-sections, .nav-sections-item-content, .navigation { background: @cz-dark; }
-    .logo img { width: 70px; height: 60px; }
-    .page-title-wrapper .page-title { font-size: 28px; }
-    // Product page: full-width buttons, one-column vehicles, swipeable "You may also like".
-    .product-info-main .page-title-wrapper .page-title { font-size: 24px; }
-    .cz-pdp-price .special-price .price, .cz-pdp-price .cz-pdp-now .price { font-size: 30px; }
-    .cz-buybox .actions { flex-basis: 100%; }
-    .cz-pdp-vehicles { columns: 1; }
-    .cz-also .products-grid .product-items {
-        display: flex;
-        gap: 10px;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        margin-right: -15px;
-        padding-right: 15px;
-        scrollbar-width: none;
-        &::-webkit-scrollbar { display: none; }
-        > .product-item { flex: 0 0 44%; scroll-snap-align: start; }
-    }
-}
-
-// ---------- Desktop (Luma sets these again in its desktop styles) ----------
-.media-width(@extremum, @break) when (@extremum = 'min') and (@break = @screen__m) {
-    .page-header { background: @cz-dark; border-bottom: 0; }
-    .page-header .panel.wrapper { background-color: @cz-black; }
-    .nav-sections, .navigation { background: @cz-dark; }
-    .navigation .level0 > .level-top { color: #E9ECF1; }
-    .page-wrapper .page-footer,
-    .page-footer .footer.content { background: @cz-black; color: @cz-soft; }
-    .footer.content {
-        .links > li { background: transparent; }
-        .links a, .links strong { color: #fff; }
-        .links a:hover { color: @cz-red; }
-    }
-}
-
-// =====================================================================
-// Shop round: vehicle finder, curated menu, product cards, product rows,
-// WhatsApp button. Phone and desktop rules are at the end of this part.
-// =====================================================================
-
-// ---------- Vehicle finder (hero bar on the home page, compact elsewhere) ----------
-.cz-finder {
-    [hidden] { display: none !important; }
-    .cz-finder-saved {
-        flex: 1 1 420px;
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 6px 12px;
-        margin: 0;
-        color: #fff;
-        font-size: 15px;
-        font-weight: 600;
-        > span[aria-hidden] { color: @cz-soft; }
-    }
-    .cz-finder-shop {
-        color: #fff;
-        font-weight: 700;
-        text-decoration: none;
-        border-bottom: 2px solid @cz-red;
-        &:hover, &:visited { color: #fff; }
-    }
-    .cz-finder-change {
-        background: none;
-        border: 0;
-        box-shadow: none;
-        padding: 0;
-        min-height: 0;
-        color: @cz-blue;
-        font-weight: 600;
-        font-size: 15px;
-        cursor: pointer;
-        text-decoration: underline;
-        &:hover, &:focus { background: none; border: 0; color: #fff; }
-    }
-    .cz-finder-help {
-        flex: 1 1 100%;
-        margin: -4px 0 0;
-        color: @cz-soft;
-        font-size: 13px;
-        a { color: #fff; font-weight: 600; text-decoration: none; border-bottom: 1px solid rgba(255, 255, 255, 0.35); }
-        a:hover { border-color: #25D366; }
-    }
-    .cz-finder-empty {
-        flex: 1 1 420px;
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 12px 22px;
-        p { color: #CDD2DA; margin: 0; flex: 1 1 260px; }
-    }
-    .cz-finder-empty-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-    .cz-finder-contact { color: #fff; font-size: 14px; text-decoration: underline; &:visited, &:hover { color: #fff; } }
-}
-.cz-button--wa {
-    background: #1FA855;
-    border-color: #1FA855;
-    box-shadow: 0 12px 28px -12px rgba(31, 168, 85, 0.8);
-    &:hover, &:visited:hover { background: #178A45; border-color: #178A45; }
-}
-.cz-finder--hero {
-    position: relative;
-    z-index: 4;
-    margin: -84px 32px 40px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 18px;
-    background: rgba(17, 19, 24, 0.94);
-    box-shadow: @cz-shadow-dark;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    scroll-margin-top: 90px;
-    .cz-finder-inner { padding: 20px 24px; }
-}
-// The finder covers the bottom of the hero: the dots move up.
-.cms-index-index .cz-slider { margin-bottom: 0; }
-.cms-index-index .cz-slider .cz-dots { bottom: 104px; }
-.cz-finder--compact {
-    scroll-margin-top: 20px;
-    .cz-finder-inner { padding: 12px 20px; gap: 10px 22px; }
-    .cz-finder-title strong { font-size: 17px; }
-    .cz-finder-form select, .cz-finder-form .cz-finder-go { height: 42px; }
-    .cz-finder-help { display: none; }
-}
-
-// ---------- Curated menu ----------
-.cz-nav.navigation {
-    .cz-nav-finder > .level-top span:before {
-        content: '';
-        display: inline-block;
-        width: 7px;
-        height: 7px;
-        margin-right: 8px;
-        border-radius: 50%;
-        background: @cz-blue;
-        vertical-align: middle;
-        box-shadow: 0 0 0 3px rgba(26, 160, 240, 0.2);
-    }
-    .cz-nav-sale > .level-top, .cz-nav-sale > .level-top:visited { color: #FF5A5F; }
-    .cz-nav-brands { min-width: 220px; max-height: 70vh; overflow-y: auto; }
-}
-
-// ---------- Product cards ----------
-// Brand (or Universal / vehicle make) above the name; no stock, compare or wish list.
-.product-items .product-item-details { display: flex; flex-direction: column; }
-.product-items .product-item-details > .product-item-inner { margin-top: auto; }
-.cz-card-brand {
-    order: -1;
-    display: block;
-    margin: 12px 0 -6px;
-    color: @cz-muted;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.product-items .product-item-photo { position: relative; display: block; }
-.product-items .product-item .stock { display: none !important; }
-.action.tocompare, .action.towishlist, .block-compare, .block-wishlist, .link.wishlist, .link.compare,
-.product-addto-links, .product-item-actions .actions-secondary { display: none !important; }
-.products-grid .product-item {
-    .product-item-info { display: flex; flex-direction: column; }
-    .product-item-details { flex: 1 1 auto; }
-    // Add to cart always on the card (Luma shows it only on hover on desktop).
-    .product-item-inner {
-        display: block !important;
-        position: static !important;
-        margin: 10px 0 0 !important;
-        padding: 0 !important;
-        background: none !important;
-    }
-    .product-item-actions { display: block; margin: 0; }
-    .product-item-actions .actions-primary { display: block; width: 100%; }
-    .product-item-actions .action.tocart {
-        width: 100%;
-        min-height: 42px;
-        padding: 10px 12px;
-        font-size: 13px;
-        white-space: nowrap;
-    }
-    .price-box { margin: 6px 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
-}
-
-// ---------- Product rows (Best sellers, New arrivals, Universal parts) ----------
-.cz-row { margin: 0 0 64px; }
-.cz-row-all {
-    margin-top: 10px;
-    color: @cz-blue-dark;
-    font-weight: 600;
-    font-size: 14px;
-    text-decoration: none;
-    &:after { content: ' \2192'; }
-    &:hover, &:focus { text-decoration: underline; }
-}
-.cz-row .cz-row-grid { margin: 0; }
-.cz-row .cz-row-grid .product-items {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin: 0;
-    padding: 0;
-}
-.cz-row .cz-row-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
-.catalogsearch-result-index .cz-row { margin-top: 48px; }
-.cz-row--page { margin-top: 8px; }
-
-// ---------- WhatsApp button ----------
+// ---------- Floating studio bar: phone + WhatsApp (DESIGN 6) ----------
 .cz-wa {
     position: fixed;
     right: 16px;
     bottom: calc(var(--cz-wa-offset, 20px) + env(safe-area-inset-bottom, 0px));
     z-index: 900;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 8px;
-    height: 52px;
-    padding: 0 18px 0 14px;
+    gap: 4px;
+    padding: 4px;
     border-radius: 999px;
-    background: #1FA855;
-    color: #fff;
-    font-weight: 700;
-    font-size: 14px;
-    text-decoration: none;
-    box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.45);
-    transition: transform 0.15s @cz-ease, background 0.15s ease;
-    &:hover, &:focus, &:visited { color: #fff; text-decoration: none; }
-    &:hover { background: #178A45; transform: translateY(-2px); }
-    svg { flex: 0 0 auto; }
+    background: rgba(11, 14, 20, 0.85);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border: 1px solid fade(@cz-wa, 35%);
+    box-shadow: @cz-float;
+    a { text-decoration: none; }
+    .cz-wa-call, .cz-wa-call:visited {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.06);
+        color: @cz-text;
+        &:hover, &:focus { background: rgba(255, 255, 255, 0.14); color: #fff; }
+    }
+    .cz-wa-chat, .cz-wa-chat:visited {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 44px;
+        padding: 0 18px 0 13px;
+        border-radius: 999px;
+        background: @cz-wa;
+        color: @cz-wa-ink;
+        .cz-type(12px, 700, 0.04em);
+        transition: background 0.15s ease, transform 0.15s @cz-ease;
+        &:hover, &:focus { background: #1EBE5A; color: @cz-wa-ink; transform: translateY(-1px); }
+    }
 }
 @media print { .cz-wa { display: none !important; } }
 
-// ---------- Tablets (shop round) ----------
-@media (max-width: 1023px) {
-    .cz-row .cz-row-grid .product-items { grid-template-columns: repeat(3, 1fr); }
+// Respect "reduce motion": no zooms, lifts, pulses or cross-fades.
+@media (prefers-reduced-motion: reduce) {
+    *, *:before, *:after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+    .cz-slider .cz-slide-img { transform: none !important; }
 }
 
-// ---------- Phones (shop round) ----------
+// ---------- Large desktop ----------
+@media (min-width: 1100px) {
+    .cz-hstatus { display: flex; }
+}
+
+// ---------- Tablets ----------
+@media (max-width: 1023px) {
+    .products-grid .product-items, .cz-featured-grid .product-items { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .page-layout-2columns-left .products-grid .product-items, .page-layout-2columns-right .products-grid .product-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cz-cat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cz-trust { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cz-finder--hero .cz-finder-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cz-studio-inner, .cz-cta { grid-template-columns: 1fr; }
+    .cz-cta .cz-cta-actions { justify-content: flex-start; }
+    .cz-footer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cz-slider { height: 560px; }
+    .cz-slider .cz-slide-title { font-size: 44px; line-height: 52px; }
+    .cz-slider .cz-hero-note { display: none; }
+    .cz-carchip .cz-carchip-value { max-width: 130px; }
+}
+
+// ---------- Phones ----------
 .media-width(@extremum, @break) when (@extremum = 'max') and (@break = @screen__m) {
-    .cz-finder--hero {
-        margin: -18px 0 28px;
-        border-radius: @cz-radius;
-        .cz-finder-inner { padding: 18px 16px; }
-        .cz-finder-title strong { font-size: 19px; }
+    body { font-size: 15px; }
+    .page-main { padding-left: @cz-gutter-phone; padding-right: @cz-gutter-phone; }
+    .page-title-wrapper .page-title { font-size: 26px; line-height: 34px; }
+    .cz-announcement {
+        .cz-ann-inner { justify-content: center; padding: 8px @cz-gutter-phone; }
+        .cz-ann-extra { display: none; }
+        .cz-ann-points { min-width: 0; }
+        .cz-ann-hours { display: none; }
     }
-    .cms-index-index .cz-slider .cz-dots { bottom: 40px; }
-    .cz-finder--compact .cz-finder-inner { padding: 12px 15px; }
-    .cz-finder--compact .cz-finder-title { display: none; }
-    .cz-finder .cz-finder-saved { flex-basis: 100%; font-size: 14px; }
-    // Rows swipe sideways on phones.
-    .cz-row:not(.cz-row--page) .cz-row-grid .product-items,
-    .cz-sale .block-products-list .products-grid .product-items {
-        display: flex;
+    // Header: menu, logo, cart / search and the car chip.
+    .page-header .header.content {
+        flex-wrap: wrap;
         gap: 10px;
-        overflow-x: auto;
-        scroll-snap-type: x mandatory;
-        margin-right: -15px;
-        padding: 2px 15px 8px 0;
-        scrollbar-width: none;
-        &::-webkit-scrollbar { display: none; }
-        > .product-item { flex: 0 0 46%; scroll-snap-align: start; }
+        padding: 10px @cz-gutter-phone 12px;
+        &:after { content: ''; display: block; order: 3; flex: 0 0 100%; height: 0; }
     }
-    .cz-row--page .cz-row-grid .product-items { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .cz-row { margin-bottom: 44px; }
-    .products-grid .product-item .product-item-actions .action.tocart { font-size: 12px; letter-spacing: 0.04em; padding: 10px 6px; }
-    // Round on phones, and clear of a product page's add-to-cart area.
-    .cz-wa { width: 52px; padding: 0; justify-content: center; right: 14px; }
-    .cz-wa .cz-wa-label { display: none; }
-    .catalog-product-view, .checkout-cart-index { --cz-wa-offset: 88px; }
-    // Clean slide-in drawer.
-    .nav-sections { background: @cz-dark; box-shadow: 12px 0 40px -12px rgba(0, 0, 0, 0.6); }
-    .nav-sections-item-title { background: @cz-black; border-color: @cz-line-dark; a { color: #E9ECF1; } }
-    .nav-sections-item-title.active { background: @cz-dark; }
+    .nav-toggle {
+        position: static;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin: 0 -6px 0 -10px;
+        &:before { font-size: 26px; line-height: 44px; }
+    }
+    .logo { margin: 0; img { height: 44px; } }
+    .minicart-wrapper { order: 2; margin-left: auto; }
+    .minicart-wrapper .action.showcart { height: 44px; }
+    .block-search { order: 4; flex: 1 1 160px; max-width: none; margin: 0; }
+    .block-search input, .block-search input#search { height: 44px; font-size: 16px; }
+    .cz-carchip { order: 5; height: 44px; max-width: 42%; padding: 0 10px; gap: 6px; }
+    .cz-carchip .cz-carchip-label, .cz-carchip .cz-carchip-caret { display: none; }
+    .cz-carchip .cz-carchip-value { max-width: 100px; font-size: 12px; }
+    .cz-hstatus { display: none; }
+    // Slide-in drawer.
+    .nav-sections { background: @cz-raised; box-shadow: 12px 0 40px -12px rgba(0, 0, 0, 0.8); }
+    .nav-sections-item-content { background: @cz-raised; }
+    .nav-sections-item-title { background: @cz-void; border-color: @cz-stroke; a, a:visited { color: @cz-soft; } }
+    .nav-sections-item-title.active { background: @cz-raised; }
+    .nav-sections .header.links { border-color: @cz-stroke; li { border-color: @cz-stroke; } a, a:visited { color: @cz-soft; } }
     .cz-nav.navigation {
-        padding: 6px 0 24px;
-        .level0 { border-top: 1px solid @cz-line-dark; }
-        .level0 > .level-top { padding: 14px 18px; color: #E9ECF1; font-size: 14px; }
+        padding: 8px 0 24px;
+        background: transparent;
+        .level0 { border-top: 1px solid @cz-stroke; }
+        .level0 > .level-top {
+            display: flex;
+            align-items: center;
+            min-height: 48px;
+            padding: 0 18px;
+            color: @cz-soft;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .level0 > .level-top:visited { color: @cz-soft; }
+        .cz-nav-finder > .level-top, .cz-nav-finder > .level-top:visited { margin: 8px 16px 12px; border-radius: @cz-r-sm; background: @cz-red; color: #fff; justify-content: center; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+        .cz-nav-sale > .level-top, .cz-nav-sale > .level-top:visited { color: @cz-red-text; }
+        .cz-nav-studio > .level-top, .cz-nav-studio > .level-top:visited { color: @cz-cyan; }
         .level0.active > .level-top { border-left: 3px solid @cz-red; }
-        .submenu:not(:first-child) { background: @cz-panel; }
-        .submenu:not(:first-child) .level1 > a, .submenu .all-category > a { color: #E9ECF1; padding: 10px 30px; }
-        .parent .level-top:after { color: @cz-soft; }
+        .submenu:not(:first-child) { background: @cz-elevated; }
+        .submenu:not(:first-child) .level1 > a, .submenu .all-category > a { color: @cz-soft; padding: 12px 30px; }
+        .parent .level-top:after { color: @cz-muted; }
         .cz-nav-brands { max-height: none; }
     }
+    // Home.
+    .cms-index-index .page-main { padding-top: 12px; }
+    .cz-section-head { margin-bottom: 20px; }
+    .cz-section-head h2, .cz-studio-copy h2, .cz-reviews h2, .cz-cta h2 { font-size: 26px; line-height: 34px; }
+    .cz-slider { height: 620px; margin-left: -@cz-gutter-phone; margin-right: -@cz-gutter-phone; border-radius: 0; box-shadow: none; }
+    .cz-slider .cz-slide:before {
+        background:
+            radial-gradient(400px 260px at 50% 20%, rgba(0, 210, 255, 0.10), transparent 70%),
+            linear-gradient(0deg, @cz-surface 0%, fade(@cz-surface, 85%) 55%, fade(@cz-void, 55%) 100%);
+    }
+    .cz-slider .cz-slide-content { justify-content: flex-end; padding: 80px 20px 72px; }
+    .cz-slider .cz-slide-title { font-size: 36px; line-height: 44px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+    .cz-slider .cz-slide-text { font-size: 15px; line-height: 24px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .cz-slider .cz-slide-actions { gap: 10px; margin-top: 24px; }
+    .cz-slider .cz-slide-actions .cz-button { flex: 1 1 100%; }
+    .cz-slider .cz-hero-badges { top: 24px; left: 20px; right: 20px; }
+    .cz-slider .cz-dots { left: 20px; bottom: 24px; }
+    .cz-trust { margin-bottom: 40px; > li { flex-direction: column; align-items: flex-start; gap: 8px; padding: 14px; } }
+    .cz-trust-icon { width: 36px; height: 36px; }
+    .cz-finder--hero { margin-bottom: 48px; padding: 20px 16px; .cz-finder-title h2 { font-size: 20px; line-height: 28px; } }
+    .cz-finder--hero .cz-finder-form, .cz-finder--compact .cz-finder-form { grid-template-columns: 1fr; gap: 12px; }
+    .cz-finder--compact .cz-finder-inner { padding: 12px @cz-gutter-phone; }
+    .cz-finder--compact .cz-finder-head { display: none; }
+    .cz-finder--compact .cz-finder-form { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .cz-finder--compact .cz-finder-go { grid-column: 1 / -1; }
+    .cz-finder .cz-finder-saved { flex-basis: 100%; }
+    .cz-finder-ask { width: 100%; justify-content: center; box-sizing: border-box; }
+    .cz-cats, .cz-sale, .cz-featured, .cz-row, .cz-brands-wrap, .cz-studio, .cz-reviews { margin-bottom: 48px; }
+    .cz-cat-grid { grid-template-columns: 1fr; gap: 12px; }
+    .cz-cat { min-height: 0; padding: 20px; }
+    .cz-chips { flex-wrap: nowrap; overflow-x: auto; margin-right: -@cz-gutter-phone; padding-right: @cz-gutter-phone; scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+    .cz-chip { flex: none; min-height: 44px; }
+    .cz-brands { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .cz-studio-inner { gap: 28px; }
+    .cz-location { padding: 16px; }
+    .cz-reviews { padding: 40px 18px; }
+    .cz-cta { padding: 28px 20px; gap: 24px; }
+    .cz-cta .cz-cta-actions .cz-button { flex: 1 1 100%; }
+    // Cards: two-column grids; swipe rows on the home page and product page.
+    .products-grid .product-items, .page-layout-2columns-left .products-grid .product-items { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .cz-row:not(.cz-row--page) .cz-row-grid .product-items,
+    .cz-sale .block-products-list .products-grid .product-items,
+    .cz-also .products-grid .product-items { .cz-swipe(62%); }
+    .cz-featured-grid .product-items { .cz-swipe(80%); }
+    .products-grid .product-item-info { padding: 8px 8px 12px; }
+    .cz-card-badges { top: 14px; left: 14px; }
+    .product-items .product-item-name { font-size: 14px; }
+    .product-items .price-box .price { font-size: 18px; }
+    .product-items .product-item-actions .actions-primary { grid-template-columns: 1fr; }
+    .cz-row--page .cz-row-grid .product-items { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    // Listing toolbar and filters.
+    .toolbar-products { padding: 10px 12px; }
+    .toolbar-products .sorter-options { min-width: 0; }
+    .block.filter .filter-title strong {
+        position: static;
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 0 16px;
+        border-radius: @cz-r-sm;
+        background: @cz-elevated;
+        border: 1px solid @cz-stroke;
+        box-shadow: none;
+    }
+    .filter.active .filter-title, .filter.active .filter-options, .filter.active .filter-title strong { background: @cz-raised; border-color: @cz-stroke; }
+    .filter.active .filter-title .action.close:before, .filter-title strong:after { color: @cz-muted; }
+    .filter-options-title { padding: 14px 0; }
+    // Product page.
+    .catalog-product-view .page-title-wrapper .page-title, .product-info-main .page-title-wrapper .page-title { font-size: 22px; line-height: 30px; }
+    .cz-pdp-price .special-price .price, .cz-pdp-price .cz-pdp-now .price { font-size: 30px; }
+    .cz-buybox .actions { flex-basis: 100%; }
+    .cz-pdp-trust { grid-template-columns: 1fr; }
+    .cz-pdp-vehicles { columns: 1; }
+    .product.info.detailed .product.data.items > .item.title > .switch { min-height: 48px; display: flex; align-items: center; border-left: 0; border-right: 0; }
+    .product.info.detailed .product.data.items > .item.content { border-left: 0; border-right: 0; }
+    // Footer.
+    .cz-footer { grid-template-columns: 1fr; gap: 28px; }
+    .footer.content ul.footer.links > li { margin: 0; padding: 0; }
+    .checkout-index-index .page-main { border-radius: 0; margin-top: 0; }
+    // Floating bar: compact, and clear of a product page's add-to-cart area.
+    .cz-wa .cz-wa-label { display: none; }
+    .cz-wa .cz-wa-chat { width: 44px; padding: 0; justify-content: center; }
+    .catalog-product-view, .checkout-cart-index { --cz-wa-offset: 88px; }
 }
 
-// ---------- Desktop (shop round) ----------
+// ---------- Desktop (Luma sets these again in its desktop styles) ----------
 .media-width(@extremum, @break) when (@extremum = 'min') and (@break = @screen__m) {
+    .page-main, .breadcrumbs, .page-header .header.content, .page-header .panel.header, .navigation, .footer.content {
+        max-width: @cz-max;
+        padding-left: @cz-gutter;
+        padding-right: @cz-gutter;
+        box-sizing: border-box;
+    }
+    .page-header { background: fade(@cz-surface, 96%); border-bottom: 0; margin-bottom: 0; }
+    .page-header .panel.wrapper { background-color: @cz-void; }
+    .page-header .header.content { padding-top: 16px; padding-bottom: 16px; min-height: 80px; }
+    .nav-toggle { display: none; }
+    .logo { margin: 0; }
+    .minicart-wrapper { margin-left: 0; }
+    .block-search { float: none; width: auto; padding-left: 0; margin: 0; }
+    .block-search .control { padding-bottom: 0; }
+    // Menu bar under the header.
+    .nav-sections { background: @cz-elevated; margin-bottom: 0; border-top: 1px solid @cz-stroke; border-bottom: 1px solid @cz-stroke; }
+    .navigation { background: transparent; font-weight: 600; }
+    .navigation > ul { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 48px; padding: 6px 0; box-sizing: border-box; }
+    .cz-nav.navigation .level0 { position: relative; margin: 0; vertical-align: top; }
+    .cz-nav.navigation .level0 > .level-top {
+        display: inline-flex;
+        align-items: center;
+        height: 34px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: @cz-r-sm;
+        color: #D7DCE5;
+        font-family: @cz-display;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 34px;
+        letter-spacing: 0.02em;
+        text-transform: none;
+        transition: background 0.15s ease, color 0.15s ease;
+        &:visited { color: #D7DCE5; }
+        &:hover, &.ui-state-focus { background: rgba(255, 255, 255, 0.05); color: #fff; }
+    }
+    .cz-nav.navigation .level0.active > .level-top, .cz-nav.navigation .level0.has-active > .level-top { border: 0; color: #fff; box-shadow: inset 0 -2px 0 @cz-red; }
+    .cz-nav.navigation .cz-nav-finder > .level-top, .cz-nav.navigation .cz-nav-finder > .level-top:visited {
+        margin-right: 8px;
+        padding: 0 14px;
+        background: @cz-red;
+        color: #fff;
+        font-weight: 700;
+        box-shadow: @cz-bloom;
+        &:hover { background: @cz-red-hover; color: #fff; }
+    }
+    .cz-nav.navigation .cz-nav-sale > .level-top, .cz-nav.navigation .cz-nav-sale > .level-top:visited { color: @cz-red-text; }
+    .cz-nav.navigation .cz-nav-studio { margin-left: auto; }
+    .cz-nav.navigation .cz-nav-studio > .level-top, .cz-nav.navigation .cz-nav-studio > .level-top:visited { color: @cz-cyan; }
     // Brands is a dropdown: hidden until hover/focus, so it doesn't push the item up.
-    .cz-nav.navigation .level0 { vertical-align: top; }
     .cz-nav.navigation .level0 > .submenu.cz-nav-brands {
         display: none;
         position: absolute;
         top: 100%;
         left: 0;
         z-index: 30;
-        background: @cz-dark;
-        border: 1px solid @cz-line-dark;
-        border-radius: 0 0 6px 6px;
+        margin: 4px 0 0;
         padding: 6px 0;
         list-style: none;
-        margin: 0;
+        background: @cz-raised;
+        border: 1px solid fade(@cz-cyan, 30%);
+        border-radius: @cz-r-md;
+        box-shadow: @cz-float;
     }
     .cz-nav.navigation .level0:hover > .submenu.cz-nav-brands,
     .cz-nav.navigation .level0:focus-within > .submenu.cz-nav-brands { display: block; }
     .cz-nav.navigation .level0 .submenu.cz-nav-brands a {
         padding: 9px 18px;
+        color: @cz-soft;
         text-transform: none;
         letter-spacing: 0.01em;
         font-family: @cz-font;
         font-weight: 500;
     }
-    .cz-row--page .cz-row-grid .product-items { grid-template-columns: repeat(4, 1fr); }
+    .cz-nav.navigation .level0 .submenu.cz-nav-brands a:hover { background: @cz-elevated; color: @cz-text; }
+    // Cards: Luma resizes a hovered card with negative margins; ours only lights its outline.
+    .products-grid .product-item-info:hover, .page-products .products-grid .product-item-info:hover {
+        margin: 0;
+        padding: 12px 12px 16px;
+        box-shadow: @cz-lift;
+        border: 1px solid fade(@cz-cyan, 40%);
+        position: relative;
+        z-index: 1;
+    }
+    .cz-featured-grid .product-item-info:hover { padding: 16px 16px 20px; }
+    .page-products .products-grid .product-item, .page-layout-1column .products-grid .product-item { width: auto; margin: 0; }
+    .page-layout-2columns-left .products-grid .product-items, .page-layout-2columns-right .products-grid .product-items { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .page-layout-2columns-left .sidebar-main { padding-right: 24px; }
+    .cz-row--page .cz-row-grid .product-items { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .toolbar-products .toolbar-amount { padding: 0; }
+    // Tabs on desktop.
+    .product.info.detailed .product.data.items > .item.title { margin: 0 4px 0 0; }
+    .product.info.detailed .product.data.items > .item.title > .switch { height: 44px; line-height: 44px; padding: 0 22px; border-bottom: 0; border-radius: @cz-r-sm @cz-r-sm 0 0; }
+    .product.info.detailed .product.data.items > .item.content { margin-top: 44px; padding: 28px 32px; border-radius: 0 @cz-r-md @cz-r-md @cz-r-md; }
+    .page-wrapper .page-footer, .page-footer .footer.content { background: @cz-void; color: @cz-muted; }
+    .footer.content {
+        .links > li { background: transparent; }
+        .links a, .links strong { color: @cz-soft; }
+        .links a:hover { color: @cz-cyan; }
+    }
 }

@@ -10,6 +10,13 @@
             </block>
         </referenceContainer>
 
+        <!-- Header: "Select car" chip (opens the vehicle finder) and "Studio open / closed".
+             Placed with CSS order next to the logo, search and cart. -->
+        <referenceContainer name="header-wrapper">
+            <block class="Magento\Framework\View\Element\Template" name="cartunez.header.car" template="Cartunez_Storefront::header/car.phtml" after="logo"/>
+            <block class="Magento\Framework\View\Element\Template" name="cartunez.header.status" template="Cartunez_Storefront::header/status.phtml" after="-"/>
+        </referenceContainer>
+
         <!-- Curated menu instead of Luma's category menu, on desktop and in the phone drawer.
              Edit in Content > Blocks > cartunez-menu. -->
         <!-- "store.menu" is a block (Magento_Theme::html/container.phtml renders its

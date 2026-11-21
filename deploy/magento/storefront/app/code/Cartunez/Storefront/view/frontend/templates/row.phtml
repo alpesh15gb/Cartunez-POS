@@ -1,7 +1,7 @@
 <?php
 /** @var \Cartunez\Storefront\Block\ProductRow $block */
 /** @var \Magento\Framework\Escaper $escaper */
-use Magento\Catalog\Pricing\Price\FinalPrice;
+use Cartunez\Storefront\Model\Icons;
 
 $products = $block->getProducts();
 if (!$products) {
@@ -15,53 +15,18 @@ $titleId = 'cz-row-' . $escaper->escapeHtmlAttr($type);
 ?>
 <section class="cz-row cz-row--<?= $escaper->escapeHtmlAttr($type) ?><?= $block->isPage() ? ' cz-row--page' : '' ?>"<?= $block->isPage() ? '' : ' aria-labelledby="' . $titleId . '"' ?>>
     <?php if (!$block->isPage()): ?>
-        <div class="cz-section-head cz-section-head--row">
-            <span class="cz-kicker"><?= $escaper->escapeHtml($block->getKicker()) ?></span>
-            <h2 id="<?= /* @noEscape */ $titleId ?>"><?= $escaper->escapeHtml($block->getHeading()) ?></h2>
-            <a class="cz-row-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>"><?= $escaper->escapeHtml(__('View all')) ?></a>
+        <div class="cz-section-head cz-section-head--split">
+            <div>
+                <span class="cz-kicker"><?= $escaper->escapeHtml($block->getKicker()) ?></span>
+                <h2 id="<?= /* @noEscape */ $titleId ?>"><?= $escaper->escapeHtml($block->getHeading()) ?></h2>
+            </div>
+            <a class="cz-row-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>"><?= $escaper->escapeHtml(__('View all')) ?><?= /* @noEscape */ Icons::svg('arrow', 16) ?></a>
         </div>
     <?php endif; ?>
     <div class="products wrapper grid products-grid cz-row-grid">
         <ol class="products list items product-items">
             <?php foreach ($products as $product): ?>
-                <?php
-                $url = $block->getProductUrl($product);
-                $name = (string)$product->getName();
-                $label = $block->getCardLabel($product);
-                ?>
-                <li class="item product product-item">
-                    <div class="product-item-info">
-                        <a href="<?= $escaper->escapeUrl($url) ?>" class="product photo product-item-photo" tabindex="-1">
-                            <?= $block->getImage($product, 'category_page_grid')->toHtml() ?>
-                        </a>
-                        <div class="product details product-item-details">
-                            <?php if ($label !== ''): ?>
-                                <span class="cz-card-brand"><?= $escaper->escapeHtml($label) ?></span>
-                            <?php endif; ?>
-                            <strong class="product name product-item-name">
-                                <a class="product-item-link" href="<?= $escaper->escapeUrl($url) ?>"><?= $escaper->escapeHtml($name) ?></a>
-                            </strong>
-                            <?= /* @noEscape */ $block->getProductPriceHtml($product, FinalPrice::PRICE_CODE) ?>
-                            <div class="product-item-inner">
-                                <div class="product actions product-item-actions">
-                                    <div class="actions-primary">
-                                        <?php if ($block->canAddFromList($product)): ?>
-                                            <form data-role="tocart-form" action="<?= $escaper->escapeUrl($block->getAddToCartUrl($product)) ?>" method="post" data-mage-init='{"catalogAddToCart":{}}'>
-                                                <input type="hidden" name="product" value="<?= (int)$product->getId() ?>">
-                                                <?= $block->getBlockHtml('formkey') ?>
-                                                <button type="submit" class="action tocart primary" title="<?= $escaper->escapeHtmlAttr(__('Add to cart')) ?>">
-                                                    <span><?= $escaper->escapeHtml(__('Add to cart')) ?></span>
-                                                </button>
-                                            </form>
-                                        <?php else: ?>
-                                            <a class="action tocart primary" href="<?= $escaper->escapeUrl($url) ?>"><span><?= $escaper->escapeHtml(__('Choose options')) ?></span></a>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </li>
+                <?= /* @noEscape */ $block->renderCard($product) ?>
             <?php endforeach; ?>
         </ol>
     </div>

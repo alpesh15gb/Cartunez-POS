@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Cartunez\Storefront\Block;
 
+use Cartunez\Storefront\Model\CardRenderer;
 use Cartunez\Storefront\Model\ProductCategories;
 use Magento\Catalog\Block\Product\AbstractProduct;
 use Magento\Catalog\Block\Product\Context;
@@ -29,6 +30,7 @@ class AlsoLike extends AbstractProduct implements IdentityInterface
         private readonly CollectionFactory $products,
         private readonly Visibility $visibility,
         private readonly ProductCategories $productCategories,
+        private readonly CardRenderer $cardRenderer,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -50,6 +52,9 @@ class AlsoLike extends AbstractProduct implements IdentityInterface
         if (!$this->items) {
             $similar = $this->productCategories->forProduct($product)['similar'];
             $this->items = $similar ? $this->load($product, null, $similar) : [];
+        }
+        if ($this->items) {
+            $this->cardRenderer->preload($this->items);
         }
         return $this->items;
     }
@@ -78,6 +83,12 @@ class AlsoLike extends AbstractProduct implements IdentityInterface
         }
         $collection->setOrder('entity_id', 'DESC')->setPageSize(self::LIMIT)->setCurPage(1);
         return array_values($collection->getItems());
+    }
+
+    /** The same product card as the home rows (CardRenderer). */
+    public function renderCard(Product $item): string
+    {
+        return $this->cardRenderer->render($this, $item, 'related_products_list');
     }
 
     public function getIdentities(): array

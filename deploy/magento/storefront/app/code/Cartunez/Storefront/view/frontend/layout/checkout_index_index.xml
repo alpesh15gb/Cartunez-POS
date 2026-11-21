@@ -3,5 +3,8 @@
     <body>
         <!-- Checkout runs with a strict content security policy; the storefront script is not needed there. -->
         <referenceBlock name="cartunez.scripts" remove="true"/>
+        <!-- A calm checkout header: logo only (the car chip and studio status need the storefront script). -->
+        <referenceBlock name="cartunez.header.car" remove="true"/>
+        <referenceBlock name="cartunez.header.status" remove="true"/>
     </body>
 </page>

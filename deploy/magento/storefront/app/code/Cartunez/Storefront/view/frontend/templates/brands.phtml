@@ -6,9 +6,12 @@ if (!$brands) {
     return;
 }
 ?>
-<div class="cz-section-head">
-    <span class="cz-kicker"><?= $escaper->escapeHtml(__('Brands we stock')) ?></span>
-    <h2 id="cz-brands"><?= $escaper->escapeHtml(__('Shop by brand')) ?></h2>
+<div class="cz-section-head cz-section-head--split">
+    <div>
+        <span class="cz-kicker"><?= $escaper->escapeHtml(__('Brands we stock')) ?></span>
+        <h2 id="cz-brands"><?= $escaper->escapeHtml(__('Shop by brand')) ?></h2>
+    </div>
+    <p><?= $escaper->escapeHtml(__('Authorized dealer: Sony, JBL, Morel, Blaupunkt & DDPAI.')) ?></p>
 </div>
 <ul class="cz-brands">
     <?php foreach ($brands as $brand): ?>

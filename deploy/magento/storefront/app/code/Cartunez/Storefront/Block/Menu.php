@@ -21,14 +21,23 @@ use Magento\Framework\View\Element\Template\Context;
  *   https://... or /path   that link
  *   search:word      a search for that word
  *   anything else    the category with that name (any level, case-insensitive),
- *                    or a search for the word when there is no such category
+ *                    or a search for the word when there is no such category.
+ *                    Several names separated by commas are tried in order
+ *                    ("Audio, Audio & Speakers, Car Audio"); the search uses the first.
  * A line without "|" uses the label as target. Lines starting with # are notes.
  */
 class Menu extends Template implements IdentityInterface
 {
     public const BLOCK_ID = 'cartunez-menu';
-    public const DEFAULT_LINES = "Shop by car|finder\nAudio|Audio\nLighting|Lighting\nInterior|Interior\n"
-        . "Car care|Car care\nSale|Sale\nBrands|brands";
+    public const DEFAULT_LINES = "Shop by Car|finder\n"
+        . "Audio & Speakers|Audio, Audio & Speakers, Audio & Infotainment, Car Audio, Speakers\n"
+        . "Lighting & Headlamps|Lighting, Lighting & Headlamps, Exterior & Lighting, Lights, Headlamps\n"
+        . "Interior Makeovers|Interior, Interior Makeovers, Interior Accessories, Interiors\n"
+        . "Performance & Filters|Performance, Performance & Filters, Performance & Detailing, Filters\n"
+        . "Styling & Detailing|Styling, Styling & Detailing, Styling & Sun Control, Detailing, Car Care\n"
+        . "Sale|Sale\n"
+        . "Brands|brands\n"
+        . "Studio Installation Booking|/contact";
 
     /** @var array<int, array{label: string, kind: string, url: string, children: array}>|null */
     private ?array $items = null;
@@ -106,7 +115,9 @@ class Menu extends Template implements IdentityInterface
             $parsed[] = [$label, $target];
             $lower = strtolower($target);
             if (!in_array($lower, ['finder', 'brands'], true) && !preg_match('#^(https?://|/|search:)#i', $target)) {
-                $names[] = preg_replace('/^category:/i', '', $target);
+                foreach ($this->alternatives($target) as $name) {
+                    $names[] = $name;
+                }
             }
         }
         $found = $this->findCategories($names);
@@ -131,8 +142,19 @@ class Menu extends Template implements IdentityInterface
             } elseif (stripos($target, 'search:') === 0) {
                 $item['url'] = $this->searchUrl(trim(substr($target, 7)));
             } else {
-                $name = (string)preg_replace('/^category:/i', '', $target);
-                $item['url'] = $found[mb_strtolower($name)] ?? $this->searchUrl($name);
+                $alternatives = $this->alternatives($target);
+                foreach ($alternatives as $name) {
+                    if (isset($found[mb_strtolower($name)])) {
+                        $item['url'] = $found[mb_strtolower($name)];
+                        break;
+                    }
+                }
+                if ($item['url'] === '') {
+                    $item['url'] = $this->searchUrl($alternatives[0] ?? $label);
+                }
+            }
+            if ($item['kind'] === 'link' && ($lower === '/contact' || stripos($label, 'booking') !== false)) {
+                $item['kind'] = 'studio';
             }
             if ($lower === 'sale' || strtolower($label) === 'sale') {
                 $item['kind'] = $item['kind'] === 'link' ? 'sale' : $item['kind'];
@@ -140,6 +162,16 @@ class Menu extends Template implements IdentityInterface
             $this->items[] = $item;
         }
         return $this->items;
+    }
+
+    /** @return string[] category names of a target ("category:" prefix optional, comma-separated) */
+    private function alternatives(string $target): array
+    {
+        $target = (string)preg_replace('/^category:/i', '', $target);
+        return array_values(array_filter(
+            array_map('trim', explode(',', $target)),
+            static fn (string $name): bool => $name !== ''
+        ));
     }
 
     private function searchUrl(string $word): string
@@ -171,7 +203,7 @@ class Menu extends Template implements IdentityInterface
         $urls = [];
         /** @var Category $category */
         foreach ($collection as $category) {
-            $key = mb_strtolower((string)$category->getName());
+            $key = mb_strtolower(trim((string)$category->getName()));
             if (!isset($urls[$key])) {
                 $urls[$key] = (string)$category->getUrl();
                 $this->tags[] = Category::CACHE_TAG . '_' . (int)$category->getId();

@@ -14,6 +14,7 @@ if (!$items) {
             <?php $children = $item['children']; ?>
             <li class="level0 nav-<?= (int)$n + 1 ?> level-top cz-nav-<?= $escaper->escapeHtmlAttr($item['kind']) ?><?= $children ? ' parent' : '' ?>">
                 <a href="<?= $escaper->escapeUrl($item['url']) ?>" class="level-top"<?= $item['kind'] === 'finder' ? ' data-cz-shop-by-car' : '' ?>>
+                    <?php if ($item['kind'] === 'finder'): ?><?= /* @noEscape */ \Cartunez\Storefront\Model\Icons::svg('car', 16) ?><?php endif; ?>
                     <span><?= $escaper->escapeHtml($item['label']) ?></span>
                 </a>
                 <?php if ($children): ?>

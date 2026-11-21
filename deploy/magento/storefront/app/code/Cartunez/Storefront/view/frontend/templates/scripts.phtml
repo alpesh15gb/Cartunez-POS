@@ -1,11 +1,15 @@
 <?php
 /** @var \Magento\Framework\View\Element\Template $block */
 // Small storefront behaviours, no libraries: hero slider, "Save N%" badges on
-// discounted parts, a readable heading for vehicle-finder results, "Shop by car"
-// in the menu, and the WhatsApp message on product pages.
+// discounted parts, "Fit inquiry" on every card, the "Featured" filter chips,
+// studio open/closed from the hours (India time), the header car chip and cart
+// total, a readable heading for vehicle-finder results, "Shop by car" in the
+// menu, and the WhatsApp message on product pages.
 ?>
 <script>
 (function () {
+    var WA = 'https://wa.me/919949695030';
+
     // ---------- Hero slider ----------
     // Slides after the first keep their photo in data-* so it does not compete
     // with the first one; it is loaded after the page, or when a slide is shown.
@@ -53,27 +57,36 @@
         restart();
     }
 
-    // ---------- "-X%" badges ----------
+    // ---------- "Save N%" badges (cards in Magento's own lists, product gallery) ----------
     function amount(el) {
         return el ? parseFloat(String(el.textContent).replace(/[^0-9.]/g, '')) || 0 : 0;
     }
     function badges(scope) {
         (scope || document).querySelectorAll('.price-box').forEach(function (box) {
             if (box.dataset.czBadge) return;
+            box.dataset.czBadge = '1';
             var now = amount(box.querySelector('.special-price .price'));
             var was = amount(box.querySelector('.old-price .price'));
             if (!(now > 0 && was > now)) return;
-            box.dataset.czBadge = '1';
             var off = Math.floor((was - now) * 100 / was);
             if (off < 1) return;
-            // On the card photo; on a product page, on the gallery.
-            var card = box.closest('.product-item-info');
-            var holder = card ? (card.querySelector('.product-item-photo') || card) : document.querySelector('.product.media');
-            if (!holder || holder.querySelector('.cz-badge')) return;
             var badge = document.createElement('span');
             badge.className = 'cz-badge';
             badge.textContent = 'Save ' + off + '%';
-            holder.appendChild(badge);
+            var card = box.closest('.product-item-info');
+            if (card) {
+                if (card.querySelector('.cz-badge')) return;
+                var wrap = card.querySelector('.cz-card-badges');
+                if (!wrap) {
+                    wrap = document.createElement('span');
+                    wrap.className = 'cz-card-badges';
+                    card.appendChild(wrap);
+                }
+                wrap.insertBefore(badge, wrap.firstChild);
+                return;
+            }
+            var gallery = document.querySelector('.product.media');
+            if (gallery && !gallery.querySelector('.cz-badge')) gallery.appendChild(badge);
         });
     }
 
@@ -86,20 +99,34 @@
     }
     function word(v) { return String(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
 
-    // Vehicle finder results: "Parts for Maruti Suzuki Swift 2020".
+    // Header chip: "Select car / Select make / model", or the chosen car.
+    function carChip() {
+        var v = savedVehicle();
+        document.querySelectorAll('[data-cz-carchip]').forEach(function (chip) {
+            var name = chip.querySelector('[data-cz-car-name]');
+            var label = chip.querySelector('.cz-carchip-label');
+            if (name && !name.dataset.czDefault) name.dataset.czDefault = name.textContent;
+            if (label && !label.dataset.czDefault) label.dataset.czDefault = label.textContent;
+            if (name) name.textContent = v ? v.make + ' ' + v.model + ' ' + v.year : name.dataset.czDefault;
+            if (label) label.textContent = v ? 'Your car' : label.dataset.czDefault;
+            chip.classList.toggle('is-set', !!v);
+        });
+    }
+
+    // Vehicle finder results: "Upgrades for Maruti Suzuki Swift 2020".
     function vehicleHeading() {
         if (!document.body.classList.contains('catalogsearch-result-index')) return;
         var v = savedVehicle();
         var q = new URLSearchParams(location.search).get('q') || '';
         if (!v || q !== word(v.make) + word(v.model) + v.year) return;
         var title = document.querySelector('.page-title .base');
-        if (title) title.textContent = 'Parts for ' + v.make + ' ' + v.model + ' ' + v.year;
+        if (title) title.textContent = 'Upgrades for ' + v.make + ' ' + v.model + ' ' + v.year;
     }
 
-    // "Shop by car" in the menu: opens the finder on this page, else on the home page.
+    // "Shop by car" in the menu and the header chip: open the finder on this page, else on the home page.
     function openFinder(finder) {
         document.documentElement.classList.remove('nav-open', 'nav-before-open');
-        finder.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        finder.scrollIntoView({ behavior: 'smooth', block: 'start' });
         finder.dispatchEvent(new CustomEvent('cz-finder-open'));
     }
     function shopByCar() {
@@ -115,6 +142,114 @@
         if (finder && location.hash === '#cz-finder') setTimeout(function () { openFinder(finder); }, 200);
     }
 
+    // ---------- Studio open / closed (India time) ----------
+    // Mon-Sat 11 am - 10 pm, Sun 11:30 am - 6 pm.
+    function studio() {
+        var now = new Date(Date.now() + 330 * 60000); // UTC+5:30, read with the UTC getters
+        var day = now.getUTCDay();
+        var mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+        var sun = day === 0;
+        var from = sun ? 690 : 660, to = sun ? 1080 : 1320;
+        var open = mins >= from && mins < to;
+        var hours = sun ? '11:30 AM – 6 PM' : '11 AM – 10 PM';
+        var next;
+        if (open) next = 'Open till ' + (sun ? '6 PM' : '10 PM');
+        else if (mins < from) next = 'Opens ' + (sun ? '11:30 AM' : '11 AM') + ' today';
+        else next = 'Opens ' + (day === 6 ? '11:30 AM' : '11 AM') + ' tomorrow';
+        return { open: open, hours: hours, next: next };
+    }
+    function studioStatus() {
+        var s = studio();
+        document.querySelectorAll('[data-cz-hours="today"]').forEach(function (el) { el.textContent = s.hours; });
+        document.querySelectorAll('[data-cz-status]').forEach(function (el) {
+            el.classList.toggle('is-open', s.open);
+            el.classList.toggle('is-closed', !s.open);
+            var label = el.querySelector('[data-cz-status-label]');
+            var value = el.querySelector('[data-cz-status-value]');
+            var next = el.querySelector('[data-cz-status-next]');
+            if (label) label.textContent = s.open ? (label.dataset.open || 'Studio open') : (label.dataset.closed || 'Studio closed');
+            if (value) value.textContent = s.open ? s.hours : s.next;
+            if (next) next.textContent = s.next;
+        });
+    }
+
+    // ---------- Header cart: subtotal next to the bag ----------
+    function money(n) {
+        return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+    }
+    function cartTotal() {
+        var button = document.querySelector('.minicart-wrapper .action.showcart');
+        if (!button || typeof window.require !== 'function' || button.querySelector('.cz-cart-total')) return;
+        var out = document.createElement('span');
+        out.className = 'cz-cart-total';
+        out.textContent = money(0);
+        button.insertBefore(out, button.querySelector('.counter'));
+        window.require(['Magento_Customer/js/customer-data'], function (customerData) {
+            var cart = customerData.get('cart');
+            function set(data) { out.textContent = money(parseFloat(data && data.subtotalAmount) || 0); }
+            set(cart());
+            cart.subscribe(set);
+        });
+    }
+
+    // ---------- "Fit inquiry" (WhatsApp) on every product card ----------
+    var CHAT = '<svg class="cz-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 11.5a8.5 8.5 0 0 1-12.6 7.4L3 20l1.2-4.8A8.5 8.5 0 1 1 21 11.5z"/></svg>';
+    function fitLinks(scope) {
+        (scope || document).querySelectorAll('.products-grid .product-item-info, .products-list .product-item-info').forEach(function (card) {
+            if (card.dataset.czFit) return;
+            card.dataset.czFit = '1';
+            if (card.querySelector('[data-cz-fit]')) return;
+            var link = card.querySelector('.product-item-link');
+            var holder = card.querySelector('.actions-primary') || card.querySelector('.product-item-actions') || card.querySelector('.product-item-details');
+            if (!link || !holder) return;
+            var name = link.textContent.trim();
+            var a = document.createElement('a');
+            a.className = 'cz-fit';
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.setAttribute('data-cz-fit', '');
+            a.setAttribute('aria-label', 'Fit inquiry on WhatsApp: ' + name);
+            a.href = WA + '?text=' + encodeURIComponent('Hi Car Tunez, will this fit my car? ' + name + ' ' + link.href);
+            a.innerHTML = CHAT + '<span>Fit inquiry</span>';
+            holder.appendChild(a);
+        });
+    }
+    // The chosen car goes into the message too.
+    function fitWithCar() {
+        document.addEventListener('click', function (e) {
+            var a = e.target.closest && e.target.closest('[data-cz-fit]');
+            var v = savedVehicle();
+            if (!a || !v) return;
+            var parts = a.href.split('?text=');
+            if (parts.length !== 2) return;
+            var text;
+            try { text = decodeURIComponent(parts[1]); } catch (x) { return; }
+            var car = 'My car: ' + v.year + ' ' + v.make + ' ' + v.model;
+            if (text.indexOf(car) < 0) a.href = parts[0] + '?text=' + encodeURIComponent(text + ' (' + car + ')');
+        }, true);
+    }
+
+    // ---------- "Featured studio upgrades" filter chips ----------
+    function chips(root) {
+        var buttons = root.querySelectorAll('[data-cz-chip]');
+        if (!buttons.length) return;
+        var items = root.querySelectorAll('.cz-featured-grid .product-item');
+        var empty = root.querySelector('.cz-featured-empty');
+        buttons.forEach(function (chip) {
+            chip.addEventListener('click', function () {
+                var group = chip.getAttribute('data-cz-chip');
+                var shown = 0;
+                buttons.forEach(function (b) { b.setAttribute('aria-pressed', b === chip ? 'true' : 'false'); });
+                items.forEach(function (li) {
+                    var ok = !group || (' ' + (li.getAttribute('data-cz-groups') || '') + ' ').indexOf(' ' + group + ' ') >= 0;
+                    li.hidden = !ok;
+                    if (ok) shown++;
+                });
+                if (empty) empty.hidden = shown > 0;
+            });
+        });
+    }
+
     // ---------- WhatsApp button: on a product page, about that product ----------
     function whatsApp() {
         var link = document.querySelector('[data-cz-wa]');
@@ -123,17 +258,32 @@
         var canonical = document.querySelector('link[rel="canonical"]');
         var url = canonical && canonical.href ? canonical.href : location.href.split('#')[0].split('?')[0];
         var text = 'Hi, I\'m interested in ' + title.textContent.trim() + ' (' + url + ')';
-        link.href = 'https://wa.me/919949695030?text=' + encodeURIComponent(text);
+        link.href = WA + '?text=' + encodeURIComponent(text);
     }
 
     function ready() {
+        var search = document.getElementById('search');
+        if (search) search.placeholder = 'Search speakers, lights, subwoofers, dashcams...';
         document.querySelectorAll('.cz-slider').forEach(slider);
+        document.querySelectorAll('[data-cz-featured]').forEach(chips);
         badges();
+        fitLinks();
+        carChip();
+        studioStatus();
+        setInterval(studioStatus, 60000);
         vehicleHeading();
         shopByCar();
+        fitWithCar();
         whatsApp();
-        // Product lists that load later (widgets, ajax) get badges too.
-        new MutationObserver(function () { badges(); }).observe(document.body, { childList: true, subtree: true });
+        cartTotal();
+        document.addEventListener('cz-vehicle-change', carChip);
+        // Product lists that load later (widgets, ajax) get badges and Fit inquiry too.
+        var pending = false;
+        new MutationObserver(function () {
+            if (pending) return;
+            pending = true;
+            setTimeout(function () { pending = false; badges(); fitLinks(); }, 50);
+        }).observe(document.body, { childList: true, subtree: true });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready); else ready();
 })();

@@ -1,0 +1,17 @@
+<?php
+/** @var \Magento\Framework\View\Element\Template $block */
+/** @var \Magento\Framework\Escaper $escaper */
+use Cartunez\Storefront\Model\Icons;
+
+// Header "Select car" chip: opens the vehicle finder (this page's, else the
+// home page's) and shows the car chosen in this browser (scripts.phtml).
+// The same markup for everyone, so the page cache stays shared.
+?>
+<a class="cz-carchip" href="<?= $escaper->escapeUrl($block->getUrl('') . '#cz-finder') ?>" data-cz-shop-by-car data-cz-carchip>
+    <span class="cz-carchip-icon"><?= /* @noEscape */ Icons::svg('car', 20) ?></span>
+    <span class="cz-carchip-text">
+        <span class="cz-carchip-label"><?= $escaper->escapeHtml(__('Select car')) ?></span>
+        <span class="cz-carchip-value" data-cz-car-name><?= $escaper->escapeHtml(__('Select make / model')) ?></span>
+    </span>
+    <span class="cz-carchip-caret"><?= /* @noEscape */ Icons::svg('chevron', 16) ?></span>
+</a>

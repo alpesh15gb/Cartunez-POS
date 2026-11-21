@@ -1,0 +1,44 @@
+<?php
+/** @var \Cartunez\Storefront\Block\ProductRow $block */
+/** @var \Magento\Framework\Escaper $escaper */
+use Cartunez\Storefront\Model\Icons;
+
+// "Featured studio upgrades" on the home page: the most ordered parts (the
+// newest while there are no orders) with filter chips by department. The chips
+// only show and hide the cards on this page (scripts.phtml); nothing reloads.
+$block->setData('chips', true);
+$products = $block->getProducts();
+if (!$products) {
+    return;
+}
+$chips = $block->getFilterChips();
+?>
+<section class="cz-featured" id="cz-featured" aria-labelledby="cz-featured-title" data-cz-featured>
+    <div class="cz-section-head cz-section-head--split">
+        <div>
+            <span class="cz-kicker cz-kicker--live"><?= $escaper->escapeHtml(__('Hand-picked at the studio')) ?></span>
+            <h2 id="cz-featured-title"><?= $escaper->escapeHtml(__('Featured studio upgrades')) ?></h2>
+        </div>
+        <?php if ($chips): ?>
+            <div class="cz-chips" role="group" aria-label="<?= $escaper->escapeHtmlAttr((string)__('Filter featured upgrades')) ?>">
+                <button type="button" class="cz-chip" data-cz-chip="" aria-pressed="true"><?= $escaper->escapeHtml(__('All upgrades')) ?></button>
+                <?php foreach ($chips as $group => $label): ?>
+                    <button type="button" class="cz-chip" data-cz-chip="<?= $escaper->escapeHtmlAttr($group) ?>" aria-pressed="false"><?= $escaper->escapeHtml($label) ?></button>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <a class="cz-row-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>"><?= $escaper->escapeHtml(__('View all')) ?><?= /* @noEscape */ Icons::svg('arrow', 16) ?></a>
+        <?php endif; ?>
+    </div>
+    <div class="products wrapper grid products-grid cz-featured-grid">
+        <ol class="products list items product-items">
+            <?php foreach ($products as $product): ?>
+                <?= /* @noEscape */ $block->renderCard($product) ?>
+            <?php endforeach; ?>
+        </ol>
+    </div>
+    <p class="cz-featured-empty" hidden><?= $escaper->escapeHtml(__('No featured parts in this department right now.')) ?></p>
+    <?php if ($chips): ?>
+        <p class="cz-featured-all"><a class="cz-row-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>"><?= $escaper->escapeHtml(__('View all parts')) ?><?= /* @noEscape */ Icons::svg('arrow', 16) ?></a></p>
+    <?php endif; ?>
+</section>

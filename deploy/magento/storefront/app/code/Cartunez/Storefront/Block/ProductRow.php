@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace Cartunez\Storefront\Block;
 
+use Cartunez\Storefront\Model\CardRenderer;
 use Cartunez\Storefront\Model\Catalog;
+use Cartunez\Storefront\Model\ShopCategories;
 use Magento\Catalog\Block\Product\AbstractProduct;
 use Magento\Catalog\Block\Product\Context;
 use Magento\Catalog\Model\Category;
@@ -20,7 +22,11 @@ use Magento\Framework\DataObject\IdentityInterface;
  * row on phones, a grid on desktop, with "View all"; shows nothing when empty.
  *
  * Data (CMS {{block}} parameters or layout arguments): list = best | new | universal |
- * request (from ?list=, for the /parts page), limit, mode = row | page, skip_if_best_empty.
+ * request (from ?list=, for the /parts page), limit, mode = row | page, skip_if_best_empty
+ * ("1" skips the first 12 newest parts while there are no orders, or the number
+ * of parts to skip, e.g. "9" when the "Featured" grid shows the 9 newest).
+ * The "Featured studio upgrades" grid on the home page uses this block with
+ * template featured.phtml (filter chips by department).
  */
 class ProductRow extends AbstractProduct implements IdentityInterface
 {
@@ -39,6 +45,8 @@ class ProductRow extends AbstractProduct implements IdentityInterface
         private readonly CollectionFactory $productCollections,
         private readonly Visibility $visibility,
         private readonly Catalog $catalog,
+        private readonly CardRenderer $cardRenderer,
+        private readonly ShopCategories $shopCategories,
         array $data = []
     ) {
         parent::__construct($context, $data);
@@ -111,12 +119,13 @@ class ProductRow extends AbstractProduct implements IdentityInterface
             default:
                 // On the home page the best-seller row already shows the newest
                 // parts while there are no orders; this row then shows the next ones.
-                $offset = !$this->isPage() && $this->getData('skip_if_best_empty')
-                    && !$this->catalog->bestsellerProductIds(1) ? self::ROW_LIMIT : 0;
+                $skip = (int)$this->getData('skip_if_best_empty');
+                $offset = !$this->isPage() && $skip > 0 && !$this->catalog->bestsellerProductIds(1)
+                    ? ($skip > 1 ? min($skip, 60) : self::ROW_LIMIT) : 0;
                 $this->products = $this->load(null, $limit, $offset);
         }
         if ($this->products) {
-            $this->catalog->preload(array_map(static fn (Product $p): int => (int)$p->getId(), $this->products));
+            $this->cardRenderer->preload($this->products);
         }
         return $this->products;
     }
@@ -166,6 +175,48 @@ class ProductRow extends AbstractProduct implements IdentityInterface
         $collection->setOrder('created_at', 'DESC')->setOrder('entity_id', 'DESC');
         $collection->getSelect()->limit($limit, $offset);
         return array_values($collection->getItems());
+    }
+
+    /** The product card (CardRenderer): badges from real data, Add to cart and Fit inquiry. */
+    public function renderCard(Product $product): string
+    {
+        $attributes = [];
+        if ($this->getData('chips')) {
+            $attributes['data-cz-groups'] = implode(' ', $this->shopCategories->groupsOf((int)$product->getId()));
+        }
+        return $this->cardRenderer->render($this, $product, 'category_page_grid', $attributes);
+    }
+
+    /**
+     * Filter chips for the "Featured" grid: the departments of the parts shown,
+     * in the department order; empty when the parts are all in one department.
+     *
+     * @return array<string, string> department => chip label
+     */
+    public function getFilterChips(): array
+    {
+        $labels = [
+            'audio' => __('Audio & speakers'),
+            'lighting' => __('Lighting'),
+            'interior' => __('Interior'),
+            'safety' => __('Dashcams & safety'),
+            'styling' => __('Styling'),
+            'performance' => __('Performance & care'),
+            'installation' => __('Installation'),
+        ];
+        $present = [];
+        foreach ($this->getProducts() as $product) {
+            foreach ($this->shopCategories->groupsOf((int)$product->getId()) as $group) {
+                $present[$group] = true;
+            }
+        }
+        $chips = [];
+        foreach ($labels as $group => $label) {
+            if (isset($present[$group])) {
+                $chips[$group] = (string)$label;
+            }
+        }
+        return count($chips) > 1 ? $chips : [];
     }
 
     public function getCardLabel(Product $product): string
@@ -219,6 +270,7 @@ class ProductRow extends AbstractProduct implements IdentityInterface
             }
             $tags[] = Category::CACHE_TAG;
         }
+        $tags = array_merge($tags, $this->shopCategories->getIdentities());
         return array_values(array_unique($tags));
     }
 }

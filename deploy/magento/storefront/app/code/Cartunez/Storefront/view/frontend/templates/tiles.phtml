@@ -1,0 +1,35 @@
+<?php
+/** @var \Cartunez\Storefront\Block\CategoryTiles $block */
+/** @var \Magento\Framework\Escaper $escaper */
+use Cartunez\Storefront\Model\Icons;
+
+$tiles = $block->getTiles();
+?>
+<section class="cz-cats" aria-labelledby="cz-cats-title">
+    <div class="cz-section-head cz-section-head--split">
+        <div>
+            <span class="cz-kicker cz-kicker--red"><?= $escaper->escapeHtml(__('Shop by category')) ?></span>
+            <h2 id="cz-cats-title"><?= $escaper->escapeHtml(__('Upgrades for every drive')) ?></h2>
+        </div>
+        <p><?= $escaper->escapeHtml(__('From sound-stage audio to ambient cabins and brighter beams, explore what our studio fits every day.')) ?></p>
+    </div>
+    <ul class="cz-cat-grid">
+        <?php foreach ($tiles as $tile): ?>
+            <li>
+                <a class="cz-cat cz-cat--<?= $escaper->escapeHtmlAttr($tile['accent']) ?>" href="<?= $escaper->escapeUrl($tile['url']) ?>">
+                    <span class="cz-cat-top">
+                        <span class="cz-cat-icon"><?= /* @noEscape */ Icons::svg($tile['icon'], 26) ?></span>
+                        <?php if ($tile['count'] > 0): ?>
+                            <span class="cz-cat-count"><?= $escaper->escapeHtml(__($tile['count'] === 1 ? '%1 item' : '%1 items', $tile['count'])) ?></span>
+                        <?php endif; ?>
+                    </span>
+                    <span class="cz-cat-body">
+                        <strong class="cz-cat-title"><?= $escaper->escapeHtml($tile['title']) ?></strong>
+                        <span class="cz-cat-text"><?= $escaper->escapeHtml($tile['text']) ?></span>
+                        <span class="cz-cat-cta"><?= $escaper->escapeHtml($tile['cta']) ?><?= /* @noEscape */ Icons::svg('arrow', 16) ?></span>
+                    </span>
+                </a>
+            </li>
+        <?php endforeach; ?>
+    </ul>
+</section>

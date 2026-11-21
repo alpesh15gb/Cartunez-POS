@@ -10,11 +10,13 @@ if (trim($grid) === '') {
 }
 ?>
 <section class="cz-sale" aria-labelledby="cz-sale-title">
-    <div class="cz-section-head cz-section-head--sale">
-        <span class="cz-kicker cz-kicker--sale"><?= $escaper->escapeHtml(__('On sale')) ?></span>
-        <h2 id="cz-sale-title"><?= $escaper->escapeHtml(__('Deals on parts and accessories')) ?></h2>
-        <a class="cz-sale-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>">
-            <?= $escaper->escapeHtml(__('View all (%1)', $block->getProductCount())) ?>
+    <div class="cz-section-head cz-section-head--split">
+        <div>
+            <span class="cz-kicker cz-kicker--red"><?= $escaper->escapeHtml(__('On sale')) ?></span>
+            <h2 id="cz-sale-title"><?= $escaper->escapeHtml(__('Deals on upgrades')) ?></h2>
+        </div>
+        <a class="cz-row-all cz-sale-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>">
+            <?= $escaper->escapeHtml(__('View all (%1)', $block->getProductCount())) ?><?= /* @noEscape */ \Cartunez\Storefront\Model\Icons::svg('arrow', 16) ?>
         </a>
     </div>
     <div class="cz-sale-grid"><?= /* @noEscape */ $grid ?></div>

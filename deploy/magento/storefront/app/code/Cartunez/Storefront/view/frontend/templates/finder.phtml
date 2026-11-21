@@ -1,48 +1,82 @@
 <?php
 /** @var \Cartunez\Storefront\Block\VehicleFinder $block */
 /** @var \Magento\Framework\Escaper $escaper */
+use Cartunez\Storefront\Model\Icons;
+
+// "Select your vehicle" deck (home page, mode hero) or bar (category and search
+// pages, mode compact). The chosen car is kept in this browser (localStorage
+// "cz-vehicle") and shown in the confirmation bar and the header "Select car" chip.
 $vehicles = $block->getVehicles();
 $mode = $block->getMode();
-$whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need parts for my car: '));
+$hero = $mode === 'hero';
+$whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need help choosing parts that fit my car: '));
 ?>
 <section class="cz-finder cz-finder--<?= $escaper->escapeHtmlAttr($mode) ?>" id="cz-finder" aria-labelledby="cz-finder-title" data-cz-finder>
     <div class="cz-finder-inner">
-        <div class="cz-finder-title">
-            <span class="cz-finder-kicker"><?= $escaper->escapeHtml(__('Find parts that fit')) ?></span>
-            <strong id="cz-finder-title"><?= $escaper->escapeHtml(__('Select your vehicle')) ?></strong>
+        <div class="cz-finder-head">
+            <div class="cz-finder-title">
+                <span class="cz-finder-kicker"><?= /* @noEscape */ Icons::svg('tune', 14) ?><?= $escaper->escapeHtml(__('Vehicle fitment')) ?></span>
+                <?php if ($hero): ?>
+                    <h2 id="cz-finder-title"><?= $escaper->escapeHtml(__("Select your vehicle \u{2014} guaranteed fitment")) ?></h2>
+                    <p><?= $escaper->escapeHtml(__('Filter our catalog by your car. No guesswork on fascia sizes, speaker adapters or wiring couplers.')) ?></p>
+                <?php else: ?>
+                    <strong id="cz-finder-title"><?= $escaper->escapeHtml(__('Select your vehicle')) ?></strong>
+                <?php endif; ?>
+            </div>
+            <?php if ($hero): ?>
+                <a class="cz-finder-ask" href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener">
+                    <?= /* @noEscape */ Icons::svg('whatsapp', 18) ?><span><?= $escaper->escapeHtml(__('Ask our audio engineer on WhatsApp')) ?></span>
+                </a>
+            <?php endif; ?>
         </div>
         <?php if ($vehicles): ?>
-            <p class="cz-finder-saved" hidden>
-                <span class="cz-finder-saved-text"></span>
-                <a class="cz-finder-shop" href="#" hidden><?= $escaper->escapeHtml(__('Shop parts')) ?></a>
-                <span aria-hidden="true">&middot;</span>
-                <button type="button" class="cz-finder-change"><?= $escaper->escapeHtml(__('Change')) ?></button>
-            </p>
             <form class="cz-finder-form" action="<?= $escaper->escapeUrl($block->getUrl('catalogsearch/result')) ?>" method="get">
-                <label class="cz-visually-hidden" for="cz-make"><?= $escaper->escapeHtml(__('Make')) ?></label>
-                <select id="cz-make" required>
-                    <option value=""><?= $escaper->escapeHtml(__('Make')) ?></option>
-                </select>
-                <label class="cz-visually-hidden" for="cz-model"><?= $escaper->escapeHtml(__('Model')) ?></label>
-                <select id="cz-model" required disabled>
-                    <option value=""><?= $escaper->escapeHtml(__('Model')) ?></option>
-                </select>
-                <label class="cz-visually-hidden" for="cz-year"><?= $escaper->escapeHtml(__('Year')) ?></label>
-                <select id="cz-year" required disabled>
-                    <option value=""><?= $escaper->escapeHtml(__('Year')) ?></option>
-                </select>
+                <div class="cz-finder-field">
+                    <label for="cz-make"><?= $escaper->escapeHtml($hero ? __('1. Select car make') : __('Make')) ?></label>
+                    <select id="cz-make" required>
+                        <option value=""><?= $escaper->escapeHtml(__('Select make')) ?></option>
+                    </select>
+                </div>
+                <div class="cz-finder-field">
+                    <label for="cz-model"><?= $escaper->escapeHtml($hero ? __('2. Select model') : __('Model')) ?></label>
+                    <select id="cz-model" required disabled>
+                        <option value=""><?= $escaper->escapeHtml(__('Select model')) ?></option>
+                    </select>
+                </div>
+                <div class="cz-finder-field">
+                    <label for="cz-year"><?= $escaper->escapeHtml($hero ? __('3. Manufacturing year') : __('Year')) ?></label>
+                    <select id="cz-year" required disabled>
+                        <option value=""><?= $escaper->escapeHtml(__('Select year')) ?></option>
+                    </select>
+                </div>
                 <input type="hidden" name="q" value="">
-                <button type="submit" class="action primary cz-finder-go"><?= $escaper->escapeHtml(__('Find parts')) ?></button>
+                <button type="submit" class="action primary cz-finder-go">
+                    <?= /* @noEscape */ Icons::svg('search', 18) ?><span><?= $escaper->escapeHtml(__('Find upgrades')) ?></span>
+                </button>
             </form>
-            <p class="cz-finder-help">
-                <?= $escaper->escapeHtml(__('Car not listed?')) ?>
-                <a href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('Tell us your car on WhatsApp')) ?></a>
-            </p>
+            <div class="cz-finder-saved" hidden>
+                <?= /* @noEscape */ Icons::svg('check', 22) ?>
+                <p>
+                    <span class="cz-finder-saved-lead"><?= $escaper->escapeHtml(__('Showing upgrades that fit')) ?></span>
+                    <strong class="cz-finder-saved-text"></strong>
+                </p>
+                <span class="cz-finder-saved-actions">
+                    <a class="cz-finder-shop" href="#" hidden><?= $escaper->escapeHtml(__('Shop upgrades')) ?></a>
+                    <button type="button" class="cz-finder-change" hidden><?= $escaper->escapeHtml(__('Change')) ?></button>
+                    <button type="button" class="cz-finder-reset"><?= $escaper->escapeHtml(__('Reset vehicle')) ?></button>
+                </span>
+            </div>
+            <?php if (!$hero): ?>
+                <p class="cz-finder-help">
+                    <?= $escaper->escapeHtml(__('Car not listed?')) ?>
+                    <a href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('Ask us on WhatsApp')) ?></a>
+                </p>
+            <?php endif; ?>
         <?php else: ?>
             <div class="cz-finder-empty">
                 <p><?= $escaper->escapeHtml(__('Tell us your car (make, model and year) and we will find the parts that fit.')) ?></p>
                 <div class="cz-finder-empty-actions">
-                    <a class="cz-button cz-button--wa" href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener"><?= $escaper->escapeHtml(__('Tell us your car')) ?></a>
+                    <a class="cz-button cz-button--wa" href="<?= $escaper->escapeUrl($whatsApp) ?>" target="_blank" rel="noopener"><?= /* @noEscape */ Icons::svg('whatsapp', 18) ?><?= $escaper->escapeHtml(__('Tell us your car')) ?></a>
                     <a class="cz-finder-contact" href="<?= $escaper->escapeUrl($block->getUrl('contact')) ?>"><?= $escaper->escapeHtml(__('or send a message')) ?></a>
                 </div>
             </div>
@@ -53,6 +87,7 @@ $whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need parts for my
     <script>
     (function () {
         var root = document.getElementById('cz-finder');
+        var hero = root.classList.contains('cz-finder--hero');
         var data = JSON.parse(document.getElementById('cz-vehicles').textContent || '{}');
         var make = document.getElementById('cz-make');
         var model = document.getElementById('cz-model');
@@ -61,6 +96,7 @@ $whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need parts for my
         var saved = root.querySelector('.cz-finder-saved');
         var savedText = saved.querySelector('.cz-finder-saved-text');
         var shop = saved.querySelector('.cz-finder-shop');
+        var change = saved.querySelector('.cz-finder-change');
         var labels = { make: make.options[0].textContent, model: model.options[0].textContent, year: year.options[0].textContent };
         function fill(select, values, placeholder, value) {
             select.innerHTML = '';
@@ -90,16 +126,18 @@ $whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need parts for my
         function searchUrl(v) {
             return form.action + (form.action.indexOf('?') < 0 ? '?' : '&') + 'q=' + encodeURIComponent(word(v.make) + word(v.model) + v.year);
         }
+        function changed() { document.dispatchEvent(new CustomEvent('cz-vehicle-change')); }
         function show(v) {
-            var q = new URLSearchParams(location.search).get('q') || '';
-            var here = v && q === word(v.make) + word(v.model) + v.year;
             if (!v) { saved.hidden = true; form.hidden = false; return; }
-            var name = v.make + ' ' + v.model + ' ' + v.year;
-            savedText.textContent = (here ? 'Showing parts for ' : 'Your car: ') + name;
+            var q = new URLSearchParams(location.search).get('q') || '';
+            var here = q === word(v.make) + word(v.model) + v.year;
+            savedText.textContent = v.year + ' ' + v.make + ' ' + v.model;
             shop.hidden = !!here;
             shop.href = searchUrl(v);
             saved.hidden = false;
-            form.hidden = true;
+            // The deck keeps the selectors open; the compact bar folds them away until "Change".
+            change.hidden = hero;
+            form.hidden = !hero;
         }
         var vehicle = load();
         fill(make, Object.keys(data), labels.make, vehicle && vehicle.make);
@@ -113,18 +151,30 @@ $whatsApp = $block->getWhatsAppUrl((string)__('Hi Car Tunez, I need parts for my
         model.addEventListener('change', function () {
             fill(year, years(make.value, model.value), labels.year);
         });
-        function open() {
+        change.addEventListener('click', function () {
             form.hidden = false;
-            saved.hidden = true;
+            change.hidden = true;
             make.focus();
-        }
-        saved.querySelector('.cz-finder-change').addEventListener('click', open);
-        // "Shop by car" in the menu opens the finder (scripts.phtml).
-        root.addEventListener('cz-finder-open', function () { if (!load()) make.focus(); });
+        });
+        saved.querySelector('.cz-finder-reset').addEventListener('click', function () {
+            try { localStorage.removeItem('cz-vehicle'); } catch (x) {}
+            fill(make, Object.keys(data), labels.make);
+            fill(model, [], labels.model);
+            fill(year, [], labels.year);
+            show(null);
+            changed();
+            make.focus();
+        });
+        // "Shop by car" in the menu and the header chip open the finder (scripts.phtml).
+        root.addEventListener('cz-finder-open', function () {
+            if (form.hidden) { form.hidden = false; change.hidden = true; }
+            make.focus({ preventScroll: true });
+        });
         form.addEventListener('submit', function (e) {
             if (!make.value || !model.value || !year.value) { e.preventDefault(); return; }
             form.q.value = word(make.value) + word(model.value) + year.value;
             try { localStorage.setItem('cz-vehicle', JSON.stringify({ make: make.value, model: model.value, year: year.value })); } catch (x) {}
+            changed();
         });
     })();
     </script>
