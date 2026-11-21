@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Database } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord } from "../db.js";
-import { allow, scoped, integer, text, fail, id, now, inventory } from "../domain.js";
+import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves } from "../domain.js";
 import { queueMagentoSync } from "../online-queue.js";
 
 /** Vehicle registration as printed on Indian plates, stored without spaces: "MH 12 AB 1234" -> "MH12AB1234". */
@@ -45,6 +45,8 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
     const previous = body.id
       ? await scoped(tx, actor, "hold", body.id)
       : undefined;
+    // Integration: job-card reservations are changed from the job card only.
+    if (previous?.jobId) fail("These parts are reserved for a job card. Change them from the job card.", 409);
     const label = body.label === undefined ? previous?.label || "" : text(body.label, "label for the parked sale", false, 60).trim();
     const customerName =
       body.customerName === undefined
@@ -64,7 +66,7 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
       if (bin.kind !== "sellable") fail("Park stock from a sellable bin.");
       const key = line.productId + "|" + line.binId;
       quantities.set(key, (quantities.get(key) || 0) + quantity);
-      const own = (previous?.cart.lines || [])
+      const own = (previous && holdReserves(previous) ? previous.cart.lines || [] : [])
         .filter(
           (entry: any) =>
             entry.productId === line.productId && entry.binId === line.binId,
@@ -111,6 +113,7 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
       const actor = request.actor;
       allow(actor, ["owner", "manager", "cashier"]);
       const released = await scoped(tx, actor, "hold", request.params.id);
+      if (released.jobId) fail("These parts are reserved for a job card. Remove them from the job card or cancel the job.", 409);
       await queueMagentoSync(
         tx,
         actor.organizationId,

@@ -137,6 +137,29 @@ export async function returnInvoice(
         if (bin.kind !== kind) fail("Return destination must match the condition.");
       } else bin = await binFor(db, actor, kind, kind === "sellable" ? original.binId : null);
     }
+    // Integration (WS-B x WS-C): a returned kit puts its stocked components back,
+    // in proportion to the kits returned, into the chosen bin.
+    let components: any[] | undefined;
+    if (original.kind === "kit" && Array.isArray(original.components) && disposition !== "rma") {
+      const share = (qty: number) =>
+        roundRatio(qty, returned + quantity, original.qty) - roundRatio(qty, returned, original.qty);
+      const byProduct = new Map<string, any>();
+      for (const component of original.components) {
+        if (!component.binId || component.type === "service") continue;
+        const entry = byProduct.get(component.productId) || { ...component, qty: 0, fromBinId: component.binId };
+        entry.qty += Number(component.qty) || 0;
+        byProduct.set(component.productId, entry);
+      }
+      if (byProduct.size) {
+        if (input.binId) {
+          bin = await scoped(db, actor, "location", input.binId);
+          if (bin.kind !== kind) fail("Return destination must match the condition.");
+        } else bin = await binFor(db, actor, kind, kind === "sellable" ? [...byProduct.values()][0].fromBinId : null);
+        components = [...byProduct.values()]
+          .map((entry) => ({ productId: entry.productId, sku: entry.sku, name: entry.name, qty: share(entry.qty), binId: bin!.id }))
+          .filter((entry) => entry.qty > 0);
+      }
+    }
     const product = await scoped(db, actor, "product", original.productId);
     const serials = input.serials || [];
     if (original.serials?.length) {
@@ -207,6 +230,7 @@ export async function returnInvoice(
       taxMode: invoice.taxMode || "exclusive",
       total,
       cost: original.cost * quantity,
+      ...(components ? { kind: "kit", components } : {}),
     };
     lines.push(line);
     if (disposition === "rma") {
@@ -263,6 +287,8 @@ export async function returnInvoice(
   for (const line of lines) {
     if (line.type !== "service")
       await adjust(db, actor, line.productId, line.binId, line.quantity, voided ? "Invoice void" : "Sales return", receipt.id);
+    for (const component of (line as any).components || [])
+      await adjust(db, actor, component.productId, component.binId, component.qty, voided ? "Invoice void" : "Sales return", receipt.id);
   }
   const claimIds: string[] = [];
   for (const { line, supplierId } of claims) {

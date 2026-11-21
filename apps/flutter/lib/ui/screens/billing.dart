@@ -10,7 +10,7 @@ export '../counter/cart_table.dart' show CartPanel;
 export '../counter/counter_actions.dart';
 export '../counter/counter_flow.dart' show expressCash, afterSale, parkWithPrompt, editCustomerVehicle;
 export '../counter/counter_keys.dart' show CounterKeyboard, counterKeyMap, showCounterKeys;
-export '../counter/held_bills.dart' show showParked;
+export '../counter/held_bills.dart' show showParked, counterHolds;
 export '../counter/tender_sheet.dart' show startCheckout, openShiftDialog, CheckoutDialog;
 
 final billingKey = GlobalKey();

@@ -1,6 +1,5 @@
 // WS-C (workshop): shared pieces for estimates, job cards and vehicles.
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -11,7 +10,7 @@ import '../../state/app_state.dart';
 import '../barcode_scan.dart';
 import '../widgets.dart';
 import 'kits.dart';
-import 'open_link.dart';
+import '../../core/receipt_print.dart' show openWhatsApp, whatsappUri;
 
 /// Job card statuses, in board order.
 const jobStatuses = ['checked-in', 'in-progress', 'waiting-parts', 'ready', 'delivered'];
@@ -78,21 +77,14 @@ String documentSummary(AppState app, Json doc, {required String title}) {
 }
 
 /// wa.me link to the customer's phone (Indian numbers get +91), or the share chooser without a number.
-String whatsappLink(String? phone, String text) {
-  var digits = (phone ?? '').replaceAll(RegExp(r'\D'), '');
-  if (digits.length == 10) digits = '91$digits';
-  if (digits.length == 11 && digits.startsWith('0')) digits = '91${digits.substring(1)}';
-  return 'https://wa.me/$digits?text=${Uri.encodeComponent(text)}';
-}
+String whatsappLink(String? phone, String text) => whatsappUri(phone, text).toString();
 
-/// Opens WhatsApp with the summary; where links cannot be opened the link is copied.
+/// Opens WhatsApp with the summary (shared launcher); if that fails the link is copied.
 Future<void> shareOnWhatsApp(BuildContext context, Json doc, {required String title}) async {
   final app = context.appRead;
   final phone = app.customerById('${doc['customerId']}')?['phone'] as String?;
-  final link = whatsappLink(phone, documentSummary(app, doc, title: title));
-  if (await openExternalLink(link)) return;
-  await Clipboard.setData(ClipboardData(text: link));
-  app.toast('WhatsApp link copied. Paste it in a browser or chat, or use Share PDF.');
+  await openWhatsApp(whatsappUri(phone, documentSummary(app, doc, title: title)), app.toast,
+      copied: 'Could not open WhatsApp, so the link was copied. Paste it in a browser or chat, or use Share PDF.');
 }
 
 /// A one-page PDF of an estimate or job card, handed to the system share sheet.

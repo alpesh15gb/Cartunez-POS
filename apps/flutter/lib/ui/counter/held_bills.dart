@@ -10,6 +10,11 @@ import '../widgets.dart';
 // note or item; one click resumes the whole cart (lines, customer, vehicle,
 // price level).
 
+/// Held bills the counter may recall. Integration: job-card stock reservations
+/// are holds carrying `jobId`; they are billed from the job card, never here.
+List<Json> counterHolds(AppState app) =>
+    app.list('holds').where((h) => '${h['jobId'] ?? ''}'.isEmpty).toList();
+
 /// Whether [hold] matches the drawer's search text.
 bool holdMatches(AppState app, Json hold, String query) {
   final q = normalize(query);
@@ -34,6 +39,10 @@ bool holdMatches(AppState app, Json hold, String query) {
 /// Puts a held bill back on the counter. Returns false when the counter is busy.
 Future<bool> resumeHold(BuildContext context, Json hold) async {
   final app = context.appRead;
+  if ('${hold['jobId'] ?? ''}'.isNotEmpty) {
+    app.toast('These parts are reserved for a job card. Bill them from the job card.');
+    return false;
+  }
   if ((app.cart['lines'] as List).isNotEmpty && app.cart['holdId'] != hold['id']) {
     final park = await confirm(context, 'Hold the current bill?',
         'The bill on the counter is held first, so nothing is lost, then this one is resumed.',
@@ -113,7 +122,7 @@ class _HeldBillsPanelState extends State<HeldBillsPanel> {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    final all = app.list('holds').toList()
+    final all = counterHolds(app)
       ..sort((a, b) => '${b['updatedAt'] ?? b['createdAt']}'.compareTo('${a['updatedAt'] ?? a['createdAt']}'));
     final holds = all.where((h) => holdMatches(app, h, search.text)).toList();
     return Padding(

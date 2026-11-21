@@ -1,7 +1,6 @@
 // WS-B: Customer account actions: advances, credit limit, WhatsApp reminders,
 // and the notes the checkout shows for the Credit and Advance tenders.
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
@@ -9,7 +8,7 @@ import '../../state/app_state.dart';
 import '../purchasing/common.dart';
 import '../theme.dart';
 import '../widgets.dart';
-import 'open_link.dart';
+import '../../core/receipt_print.dart' show openWhatsApp, whatsappUri;
 
 const advanceModes = ['Cash', 'UPI', 'Card'];
 
@@ -114,21 +113,17 @@ Future<bool> editCreditLimit(BuildContext context, Json customer) async {
 
 /// wa.me link with the amount due (owner decision: share link, no Business API).
 String reminderLink(AppState app, {required String phone, required String name, required int amount}) {
-  var digits = phone.replaceAll(RegExp(r'\D'), '');
-  if (digits.length == 10) digits = '91$digits';
   final shop = '${app.business['tradingName'] ?? app.business['legalName'] ?? 'our shop'}';
   final text = 'Hello $name, this is a reminder from $shop. Your balance due is ${app.money(amount)}. '
       'Please pay at the counter or by UPI. Thank you.';
-  return 'https://wa.me/$digits?text=${Uri.encodeComponent(text)}';
+  return whatsappUri(phone, text).toString();
 }
 
 Future<void> sendReminder(BuildContext context, {required String phone, required String name, required int amount}) async {
   final app = context.appRead;
   if (phone.replaceAll(RegExp(r'\D'), '').length < 10) return app.toast('Add a 10-digit phone number for $name first.');
-  final link = reminderLink(app, phone: phone, name: name, amount: amount);
-  if (await openLink(link)) return;
-  await Clipboard.setData(ClipboardData(text: link));
-  app.toast('WhatsApp link copied. Paste it in your browser or a chat.');
+  // Integration: the shared WhatsApp launcher (opens on Android, web and Windows).
+  await openWhatsApp(Uri.parse(reminderLink(app, phone: phone, name: name, amount: amount)), app.toast);
 }
 
 /// Shown in checkout under the Credit or Advance tender (tender_sheet.dart).

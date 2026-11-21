@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/receipt_print.dart';
+import '../orders/invoice_code.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
@@ -199,10 +199,7 @@ String receiptSummary(AppState app, Json doc) {
 /// Opens WhatsApp (wa.me) with the receipt summary for the customer's number.
 Future<void> shareReceiptWhatsApp(AppState app, Json doc) async {
   final customer = doc['customer'] is Map ? doc['customer'] as Map : app.customerById('${doc['customerId']}');
-  final uri = whatsappUri('${customer?['phone'] ?? ''}', receiptSummary(app, doc));
-  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-    app.toast('Could not open WhatsApp. Check that WhatsApp or a browser is installed.');
-  }
+  await openWhatsApp(whatsappUri('${customer?['phone'] ?? ''}', receiptSummary(app, doc)), app.toast);
 }
 
 /// The receipt as an 80 mm roll PDF.
@@ -251,6 +248,12 @@ Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
       for (final (a, b) in r.totals) row(a, b),
       row(r.credit ? 'TOTAL REFUNDED' : 'TOTAL', r.money(doc['total'] as num? ?? 0), strong: true),
       for (final (a, b) in r.payments) row(a, b),
+      // Integration: the bill's code, scanned at the return desk (WS-B).
+      if (!r.credit && receiptInvoiceCode(doc).isNotEmpty) ...[
+        pw.SizedBox(height: 6),
+        pw.Center(child: invoiceCodePdf(doc, width: 150, height: 26)),
+        pw.Center(child: pw.Text(receiptInvoiceCode(doc), style: const pw.TextStyle(fontSize: 6.5))),
+      ],
       if ('${doc['receiptFooter'] ?? ''}'.isNotEmpty) ...[
         pw.SizedBox(height: 6),
         pw.Center(child: pw.Text('${doc['receiptFooter']}', style: const pw.TextStyle(fontSize: 7.5), textAlign: pw.TextAlign.center)),
