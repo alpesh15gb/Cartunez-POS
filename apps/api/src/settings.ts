@@ -56,8 +56,11 @@ export function invoiceProfile(
   settings: Record<string, any>,
   branch: Record<string, any>,
 ) {
+  const business = { ...(settings.business || {}) };
+  // A shop that is not GST registered prints no GSTIN on its bills.
+  if (settings.taxScheme === "none") delete business.taxRegistrationId;
   return {
-    business: settings.business || {},
+    business,
     branch: {
       id: branch.id,
       name: branch.name,
@@ -68,9 +71,16 @@ export function invoiceProfile(
     taxDisplayName: settings.taxDisplayName || "Tax",
     taxMode: settings.taxMode || "exclusive",
     taxScheme: settings.taxScheme || "general",
-    localTaxName: settings.localTaxName || "SGST",
+    localTaxName: settings.taxScheme === "none" ? "" : settings.localTaxName || "SGST",
     receiptFooter: settings.receiptFooter || "",
   };
+}
+
+/** "Not GST registered" shops bill final prices: no tax, no GSTIN, no HSN. */
+export const NO_TAX_SCHEME = "none";
+export const TAX_SCHEMES = ["general", "india-gst", NO_TAX_SCHEME];
+export function noTax(settings: { taxScheme?: string } | undefined | null) {
+  return settings?.taxScheme === NO_TAX_SCHEME;
 }
 
 export function gstState(value: unknown, label = "state code") {

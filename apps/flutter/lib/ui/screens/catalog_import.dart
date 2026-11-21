@@ -131,6 +131,7 @@ class _ImportDialogState extends State<_ImportDialog> {
             const SizedBox(height: 8),
             const Text('Include SKU, name, brand, category, unit, cost, retailPrice and taxPercent. Add opening stock in Inventory after importing.'),
             if (app.gst) const Text('HSN/SAC is required for this shop.'),
+            if (app.noTax) const Text('This shop is not GST registered: every imported part gets tax 0.'),
             if (previewRows != null) ...[
               const Divider(),
               Text(errors == 0 ? '${previewRows.length} new ${previewRows.length == 1 ? 'part' : 'parts'} ready' : '$errors row(s) need correction',

@@ -81,6 +81,8 @@ function byRate(lines: any[], sign = 1) {
 export async function gstr1(db: Database, actor: Actor, query: any) {
   const period = await exportPeriod(db, actor, query);
   const { settings, businessDay } = period;
+  if (settings.taxScheme === "none")
+    fail("This shop is not GST registered, so there is no GSTR-1 to file. Bills carry no GST.", 409);
   if (settings.taxScheme !== "india-gst")
     fail("GSTR-1 needs India GST turned on in Settings (tax scheme, GSTIN and state).", 409);
   const business = settings.business || {};

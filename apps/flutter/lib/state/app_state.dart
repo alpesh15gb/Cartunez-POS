@@ -189,6 +189,8 @@ class AppState extends ChangeNotifier {
   List<String> get tenderTypes =>
       ((settings['tenderTypes'] as List?) ?? const ['Cash', 'Card', 'UPI']).map((e) => '$e').toList();
   bool get gst => settings['taxScheme'] == 'india-gst';
+  /// "Not GST registered": bills carry final prices with no tax, GSTIN or HSN.
+  bool get noTax => settings['taxScheme'] == 'none';
   bool get usesIndiaBusinessTime => (settings['currency'] ?? 'INR') == 'INR';
 
   DateTime businessTime(DateTime instant) => instant.toUtc().add(

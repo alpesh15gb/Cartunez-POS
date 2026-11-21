@@ -23,10 +23,12 @@ class ReceiptView {
   final Json doc;
 
   bool get credit => doc['invoiceId'] != null;
+  /// Not GST registered: the bill shows final prices, no tax, GSTIN or HSN.
+  bool get noTax => doc['taxScheme'] == 'none';
   Json get business => Map<String, dynamic>.from(doc['business'] as Map? ?? app.business);
   String get kind => credit
       ? (doc['voided'] == true ? 'CREDIT NOTE · INVOICE VOID' : 'CREDIT NOTE')
-      : (doc['taxScheme'] == 'india-gst' ? 'TAX INVOICE' : 'SALES RECEIPT');
+      : (doc['taxScheme'] == 'india-gst' ? 'TAX INVOICE' : noTax ? 'INVOICE' : 'SALES RECEIPT');
   String money(num? v) => app.money(v, currency: '${doc['currency'] ?? app.settings['currency'] ?? 'INR'}');
   List<Json> get lines => (doc['lines'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   String lineName(Json l) => '${l['name'] ?? app.productName('${l['productId']}')}';
@@ -38,8 +40,10 @@ class ReceiptView {
         if (doc['subtotal'] != null) ('Subtotal', money(doc['subtotal'] as num)),
         if ((doc['discount'] ?? 0) != 0)
           ('Discount${'${doc['discountReason'] ?? ''}'.isNotEmpty ? ' · ${doc['discountReason']}' : ''}', '−${money(doc['discount'] as num)}'),
-        for (final c in (doc['taxComponents'] as List? ?? [])) ('${c['name']}', money(c['amount'] as num)),
-        ('${doc['taxDisplayName'] ?? 'Tax'}${doc['taxMode'] == 'inclusive' ? ' included' : ''}', money(doc['tax'] as num? ?? 0)),
+        if (!noTax) ...[
+          for (final c in (doc['taxComponents'] as List? ?? [])) ('${c['name']}', money(c['amount'] as num)),
+          ('${doc['taxDisplayName'] ?? 'Tax'}${doc['taxMode'] == 'inclusive' ? ' included' : ''}', money(doc['tax'] as num? ?? 0)),
+        ],
         if ((doc['coreTotal'] ?? 0) != 0) ('Core deposits', money(doc['coreTotal'] as num)),
         if ((doc['rounding'] ?? 0) != 0) ('Rounding', money(doc['rounding'] as num)),
       ];
@@ -63,7 +67,7 @@ class ReceiptView {
   List<String> get header => [
         if ('${business['tradingName'] ?? ''}'.isNotEmpty && business['tradingName'] != business['legalName']) '${business['tradingName']}',
         if ('${business['address'] ?? ''}'.isNotEmpty) '${business['address']}',
-        if ('${business['taxRegistrationId'] ?? ''}'.isNotEmpty) 'GSTIN / Tax ID: ${business['taxRegistrationId']}',
+        if (!noTax && '${business['taxRegistrationId'] ?? ''}'.isNotEmpty) 'GSTIN / Tax ID: ${business['taxRegistrationId']}',
         [business['phone'], business['email']].where((e) => e != null && '$e'.isNotEmpty).join(' · '),
         '${doc['branch']?['name'] ?? app.snapshot['branch']?['name'] ?? ''}',
       ].where((e) => e.isNotEmpty).toList();
@@ -72,6 +76,7 @@ class ReceiptView {
 Future<void> showReceipt(BuildContext context, Json doc) {
   final app = context.appRead;
   final r = ReceiptView(app, doc);
+  final customerTaxId = r.noTax ? '' : '${doc['customer'] is Map ? doc['customer']['taxRegistrationId'] ?? '' : ''}';
   return showDialog<void>(
     context: context,
     builder: (dialog) => AlertDialog(
@@ -92,7 +97,7 @@ Future<void> showReceipt(BuildContext context, Json doc) {
           const SizedBox(height: 8),
           if (r.credit) Text('Against invoice ${doc['invoiceNumber']} · Reason: ${doc['reason'] ?? '—'}'),
           if (doc['customer'] is Map)
-            Text('Customer: ${doc['customer']['name']}${'${doc['customer']['taxRegistrationId'] ?? ''}'.isNotEmpty ? ' · ${doc['customer']['taxRegistrationId']}' : ''}'),
+            Text('Customer: ${doc['customer']['name']}${customerTaxId.isNotEmpty ? ' · $customerTaxId' : ''}'),
           if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) Text('Place of supply: ${doc['placeOfSupply']}'),
           Text('${formatDate(doc['createdAt'])} · ${app.userName('${doc['cashierId'] ?? doc['userId']}')}',
               style: Theme.of(context).textTheme.bodySmall),
@@ -108,8 +113,10 @@ Future<void> showReceipt(BuildContext context, Json doc) {
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(r.lineName(l), style: const TextStyle(fontWeight: FontWeight.w600)),
                     Text(
-                      '${r.lineQty(l)} ${l['unit'] ?? ''} · tax ${((l['taxRate'] ?? 0) as int) / 100}%'
-                      '${'${l['hsnSac'] ?? ''}'.isNotEmpty ? ' · HSN ${l['hsnSac']}' : ''}',
+                      r.noTax
+                          ? '${r.lineQty(l)} ${l['unit'] ?? ''}'
+                          : '${r.lineQty(l)} ${l['unit'] ?? ''} · tax ${((l['taxRate'] ?? 0) as int) / 100}%'
+                              '${'${l['hsnSac'] ?? ''}'.isNotEmpty ? ' · HSN ${l['hsnSac']}' : ''}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ]),
@@ -238,16 +245,18 @@ Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
       if (doc['customer'] is Map) ...[
         row('Customer', '${doc['customer']['name']}'),
         if ('${doc['customer']['address'] ?? ''}'.isNotEmpty) row('Customer address', '${doc['customer']['address']}'),
-        if ('${doc['customer']['taxRegistrationId'] ?? ''}'.isNotEmpty) row('Customer tax ID', '${doc['customer']['taxRegistrationId']}'),
+        if (!r.noTax && '${doc['customer']['taxRegistrationId'] ?? ''}'.isNotEmpty) row('Customer tax ID', '${doc['customer']['taxRegistrationId']}'),
       ],
       if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) row('Place of supply', '${doc['placeOfSupply']}'),
       pw.Divider(thickness: 0.5),
       for (final l in r.lines) ...[
         pw.Text(r.lineName(l), style: const pw.TextStyle(fontSize: 8.5)),
         row('${r.lineQty(l)} ${l['unit'] ?? ''}${l['unitPrice'] != null ? ' × ${r.money(l['unitPrice'])}' : ''}', r.money(l['total'] as num? ?? 0)),
-        if ('${l['hsnSac'] ?? ''}'.isNotEmpty) row('HSN / SAC', '${l['hsnSac']}'),
-        row('Taxable', r.money(r.taxable(l))),
-        row('Tax ${((l['taxRate'] ?? 0) as int) / 100}%', r.money(l['tax'])),
+        if (!r.noTax) ...[
+          if ('${l['hsnSac'] ?? ''}'.isNotEmpty) row('HSN / SAC', '${l['hsnSac']}'),
+          row('Taxable', r.money(r.taxable(l))),
+          row('Tax ${((l['taxRate'] ?? 0) as int) / 100}%', r.money(l['tax'])),
+        ],
         if ((l['serials'] as List? ?? []).isNotEmpty) row('Serials', (l['serials'] as List).join(', ')),
       ],
       pw.Divider(thickness: 0.5),

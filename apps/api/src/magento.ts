@@ -20,7 +20,7 @@ export const priceModes = ["mrp", "percent", "fixed"] as const;
 export function onlinePrices(product: any, settings: any, listing: any) {
   const retail = Number(product.retailPrice || 0);
   const mrp =
-    settings?.taxMode === "inclusive"
+    settings?.taxMode === "inclusive" || settings?.taxScheme === "none"
       ? retail
       : Math.round(retail + (retail * Number(product.taxRate || 0)) / 10000);
   const pricing = listing?.pricing || { mode: "mrp" };

@@ -68,7 +68,7 @@ Json draftTotals(AppState app, List<Json> lines) {
   var subtotal = 0, tax = 0, core = 0;
   for (final l in lines) {
     final product = app.productById('${l['productId']}');
-    final rate = ((l['taxRate'] ?? product?['taxRate'] ?? 0) as num).toInt();
+    final rate = app.noTax ? 0 : ((l['taxRate'] ?? product?['taxRate'] ?? 0) as num).toInt();
     final amount = lineAmount(l);
     subtotal += amount;
     tax += inclusive ? amount - ratio(amount, 10000, 10000 + rate) : ratio(amount, rate, 10000);

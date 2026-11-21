@@ -53,39 +53,7 @@ export async function bootstrapOwner(db: Database) {
       name: branchName,
       address: "",
     });
-    await putRecord(tx, org, "settings", {
-      id: "settings",
-      currency,
-      business: {
-        legalName: "",
-        tradingName: company,
-        address: "",
-        taxRegistrationId: "",
-        phone: "",
-        email: "",
-        stateCode: "",
-      },
-      taxDisplayName: "Tax",
-      taxMode: "exclusive",
-      taxScheme: "general",
-      localTaxName: "SGST",
-      receiptFooter: "",
-      tenderTypes: ["Cash", "Card", "UPI"],
-      invoicePrefix: "INV",
-      creditNotePrefix: "CR",
-      nextCreditNote: 1,
-      nextInvoice: 1,
-      ...SERIES_DEFAULTS,
-      nextDeviceNumber: 100000,
-      offlineHours: 24,
-      offlineTenders: ["Cash"],
-      sessionHours: 8,
-      cashierDiscountLimit: 0,
-      roundingIncrement: 1,
-      taxRates: [0, 500, 1200, 1800, 2800],
-      // New shops start simple; owners can switch modules on in Settings.
-      features: { transfers: false, fitment: false, offline: false, warranty: true },
-    });
+    await putRecord(tx, org, "settings", defaultSettings(currency, company));
     await putRecord(tx, org, "user", {
       id: "owner",
       organizationId: org,
@@ -97,4 +65,41 @@ export async function bootstrapOwner(db: Database) {
       active: true,
     });
   });
+}
+
+/** Settings of a new shop (also what a fresh-launch reset returns to). */
+export function defaultSettings(currency: string, tradingName: string): Record<string, any> {
+  return {
+    id: "settings",
+    currency,
+    business: {
+      legalName: "",
+      tradingName,
+      address: "",
+      taxRegistrationId: "",
+      phone: "",
+      email: "",
+      stateCode: "",
+    },
+    taxDisplayName: "Tax",
+    taxMode: "exclusive",
+    taxScheme: "general",
+    localTaxName: "SGST",
+    receiptFooter: "",
+    tenderTypes: ["Cash", "Card", "UPI"],
+    invoicePrefix: "INV",
+    creditNotePrefix: "CR",
+    nextCreditNote: 1,
+    nextInvoice: 1,
+    ...SERIES_DEFAULTS,
+    nextDeviceNumber: 100000,
+    offlineHours: 24,
+    offlineTenders: ["Cash"],
+    sessionHours: 8,
+    cashierDiscountLimit: 0,
+    roundingIncrement: 1,
+    taxRates: [0, 500, 1200, 1800, 2800],
+    // New shops start simple; owners can switch modules on in Settings.
+    features: { transfers: false, fitment: false, offline: false, warranty: true },
+  };
 }
