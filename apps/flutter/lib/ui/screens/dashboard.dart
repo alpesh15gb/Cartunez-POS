@@ -3,10 +3,23 @@ import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../../core/billing.dart';
 import '../widgets.dart';
+import 'command_center.dart';
 import 'receipt.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    // WS-F: owners and managers get the live command center.
+    if (app.isManager) return const CommandCenter();
+    return const _TodaySummary();
+  }
+}
+
+class _TodaySummary extends StatelessWidget {
+  const _TodaySummary();
 
   @override
   Widget build(BuildContext context) {

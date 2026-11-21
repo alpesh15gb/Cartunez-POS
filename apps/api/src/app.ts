@@ -32,6 +32,9 @@ import { customerRoutes } from "./routes/customers.js";
 import "./hooks/exchange.js";
 import "./hooks/credit-limit.js";
 import "./hooks/advance.js";
+// WS-F: owner command center and accounting exports.
+import { dashboardRoutes } from "./routes/dashboard.js";
+import { exportRoutes } from "./exports/routes.js";
 
 export type { Post } from "./routes/types.js";
 
@@ -237,6 +240,9 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   pinRoutes(app, db, post); // WS-D
   returnRoutes(app, db); // WS-B
   customerRoutes(app, db, post); // WS-B
+  // WS-F
+  dashboardRoutes(app, db);
+  exportRoutes(app, db);
   return app;
 }
 function withoutCost(value: any): any {
