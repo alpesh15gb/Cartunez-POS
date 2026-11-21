@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { fail } from "./domain.js";
 import type { report } from "./reports.js";
+import { type CellFormat, xlsx } from "./exports/xlsx.js";
 
 type Report = Awaited<ReturnType<typeof report>>;
 const money = new Set([
@@ -31,6 +32,31 @@ function csv(rows: Record<string, unknown>[], currency: string) {
     ...rows.map(row => keys.map(key => quote(convert(key, row[key]), typeof row[key] === "string")).join(","))].join("\r\n");
 }
 
+// WS-F: the same columns as the CSV, as a real Excel sheet. Money is a number
+// in rupees (two decimals) so totals can be summed in Excel.
+export function reportTable(rows: Record<string, unknown>[], currency: string) {
+  const keys = [...new Set(rows.flatMap(Object.keys))];
+  const header = keys.map(key => money.has(key) ? key + " (" + currency + ")" : key === "taxRate" ? "taxRate (%)" : key);
+  const formats: CellFormat[] = keys.map(key => money.has(key) || key === "taxRate" ? "money" : "number");
+  const values = rows.map(row => keys.map(key => {
+    const value = row[key];
+    if (typeof value === "number" && (money.has(key) || key === "taxRate")) return value / 100;
+    if (value instanceof Date) return value.toISOString();
+    return value;
+  }));
+  return { header, rows: values, formats };
+}
+
+export function reportWorkbook(result: Report) {
+  const table = reportTable(result.rows, result.currency);
+  const totals = Object.entries(result.totals || {});
+  return xlsx([
+    { name: result.name, ...table },
+    { name: "Totals", header: ["Total", "Value"], rows: totals.map(([key, value]) => [money.has(key) ? key + " (" + result.currency + ")" : key,
+      typeof value === "number" && money.has(key) ? value / 100 : value]), formats: ["text", "number"] },
+  ]);
+}
+
 export function reportOutput(result: Report, query: Record<string, string>) {
   const paged = query.page !== undefined || query.pageSize !== undefined;
   if (!paged && !query.format && !query.revision) return result;
@@ -39,6 +65,9 @@ export function reportOutput(result: Report, query: Record<string, string>) {
   ])).digest("hex");
   if (query.revision !== undefined && revision !== query.revision)
     fail("This report changed. Run the report again to see the latest figures.", 409);
+  if (query.format === "xlsx") return reportWorkbook(result);
+  if (query.format === "xlsx-json")
+    return { fileName: result.name + ".xlsx", base64: reportWorkbook(result).toString("base64") };
   if (query.format === "csv" || query.format === "csv-json") {
     const content = csv(result.rows, result.currency);
     return query.format === "csv" ? content : {csv: content};

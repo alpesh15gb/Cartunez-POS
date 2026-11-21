@@ -23,6 +23,9 @@ import { salesRoutes } from "./routes/sales.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
+// WS-F: owner command center and accounting exports.
+import { dashboardRoutes } from "./routes/dashboard.js";
+import { exportRoutes } from "./exports/routes.js";
 
 export type { Post } from "./routes/types.js";
 
@@ -223,6 +226,9 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   transferRoutes(app, db, post);
   warrantyRoutes(app, db, post);
   reportRoutes(app, db);
+  // WS-F
+  dashboardRoutes(app, db);
+  exportRoutes(app, db);
   return app;
 }
 function withoutCost(value: any): any {

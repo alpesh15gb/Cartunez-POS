@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/files.dart';
@@ -8,6 +9,8 @@ import '../../core/files.dart';
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../widgets.dart';
+import '../widgets/data_grid.dart';
+import 'accounting_exports.dart';
 import 'receipt.dart';
 import 'tender_comparison.dart';
 
@@ -102,7 +105,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   int requestVersion = 0;
   String? errorMessage;
   int page = 0;
-  static const pageSize = 25;
+  /// Rows fetched per request. A report that fits in one request is sorted
+  /// and paged in the grid; a bigger one is paged by the server.
+  static const pageSize = 250;
 
   @override
   void initState() {
@@ -219,6 +224,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
+  /// WS-F: the whole report as an Excel workbook (built by the server).
+  Future<void> exportExcel() async {
+    final snapshot = report!;
+    final app = context.appRead;
+    try {
+      final query = {...filters(), 'format': 'xlsx-json', if (snapshot['revision'] != null) 'revision': '${snapshot['revision']}'};
+      final data = await app.api('/reports/$name?${Uri(queryParameters: query).query}');
+      final message = await saveBytesFile('${snapshot['name']}-${DateTime.now().millisecondsSinceEpoch}.xlsx', base64Decode('${data['base64']}'),
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      if (mounted) context.appRead.toast(message);
+    } catch (error) {
+      if (mounted) context.appRead.toast(errorText(error));
+    }
+  }
+
   Widget filter(String title, String value, List<(String, String)> choices, ValueChanged<String> setValue) => SizedBox(
     width: 200,
     child: DropdownButtonFormField<String>(
@@ -293,7 +313,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
           icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow),
           label: const Text('Run report'),
         ),
-        if (rows.isNotEmpty) OutlinedButton.icon(onPressed: busy ? null : export, icon: const Icon(Icons.download), label: const Text('Export CSV')),
+        if (rows.isNotEmpty) MenuAnchor(
+          builder: (context, controller, _) => OutlinedButton.icon(
+            onPressed: busy ? null : () => controller.isOpen ? controller.close() : controller.open(),
+            icon: const Icon(Icons.download), label: const Text('Export')),
+          menuChildren: [
+            MenuItemButton(onPressed: export, leadingIcon: const Icon(Icons.description_outlined), child: const Text('CSV (.csv)')),
+            MenuItemButton(onPressed: exportExcel, leadingIcon: const Icon(Icons.grid_on_outlined), child: const Text('Excel (.xlsx)')),
+          ],
+        ),
+        // WS-F: GSTR-1 and Tally, for the accountant.
+        if (app.isManager) OutlinedButton.icon(onPressed: () => showAccountingExports(context, range: range),
+            icon: const Icon(Icons.account_balance_outlined), label: const Text('GST & Tally')),
+        if (app.canStock) TextButton.icon(onPressed: () => context.go('/catalog/import'),
+            icon: const Icon(Icons.upload_file_outlined), label: const Text('Parts import')),
         if (name == 'tenders' && app.isManager && app.settings['currency'] == 'INR')
           OutlinedButton.icon(onPressed: busy ? null : () => compareTenderStatement(context, range: range, method: payment),
             icon: const Icon(Icons.compare_arrows), label: const Text('Compare provider CSV')),
@@ -312,10 +345,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
             child: Text('${report!['pendingConflicts']} offline sale conflict(s) await review and are excluded.'),
           ),
         const SizedBox(height: 16),
-        DataList(
-          rows: serverPaged ? rows : rows.skip(page * pageSize).take(pageSize).toList(),
+        DataGrid(
+          key: ValueKey('grid-$name'),
+          storageKey: 'report-$name',
+          rows: rows,
+          pageSize: serverPaged && totalRows > pageSize ? pageSize : 25,
+          totalRows: serverPaged && totalRows > pageSize ? totalRows : null,
+          page: serverPaged && totalRows > pageSize ? page : 0,
+          onPage: serverPaged && totalRows > pageSize ? (next) {
+            if (!busy) goToPage(next);
+          } : null,
           empty: 'No rows for this period.',
-          onTap: (r) {
+          onRowTap: (r) {
             final invoice = app.list('invoices').where((i) => i['id'] == r['invoiceId']).firstOrNull;
             final credit = app.list('returns').where((item) => item['number'] == (r['document'] ?? r['number'])).firstOrNull;
             if (credit != null) {
@@ -325,16 +366,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
             }
           },
           columns: [
-            for (final k in visibleKeys)
-              Col(columnLabel(k), (r) => Text(cell(k, r[k])), numeric: r0Numeric(rows, k),
-                  flex: const {'date', 'openedAt', 'closedAt', 'createdAt', 'reason'}.contains(k) ? 2 : 1),
+            for (final k in keys)
+              GridColumn(k, columnLabel(k), numeric: r0Numeric(rows, k), text: (r) => cell(k, r[k]),
+                  visible: visibleKeys.contains(k),
+                  width: const {'date', 'openedAt', 'closedAt', 'createdAt', 'reason', 'name'}.contains(k) ? 180 : null),
           ],
         ),
-        if (totalRows > pageSize) Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          IconButton(tooltip: 'Previous page', onPressed: busy || page == 0 ? null : () => goToPage(page - 1), icon: const Icon(Icons.chevron_left)),
-          Text('${page * pageSize + 1}–${(page * pageSize + pageSize).clamp(0, totalRows)} of $totalRows'),
-          IconButton(tooltip: 'Next page', onPressed: busy || (page + 1) * pageSize >= totalRows ? null : () => goToPage(page + 1), icon: const Icon(Icons.chevron_right)),
-        ]),
       ],
     ]);
   }

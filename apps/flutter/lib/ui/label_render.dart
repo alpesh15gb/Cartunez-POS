@@ -47,6 +47,17 @@ List<pw.Page> pdfLabelPages(LabelLayout layout, List<LabelPlan> plans) {
   return pages;
 }
 
+/// One planned element as a PDF widget, [offsetX]/[offsetY] mm from the page's
+/// top-left (WS-F: used by the A4 label sheets in core/label_sheet_pdf.dart).
+pw.Widget pdfLabelElement(LabelElement e, double offsetX, double offsetY) {
+  if (offsetY == 0) return _pdfElement(e, offsetX);
+  final moved = e.barcode
+      ? LabelElement.barcode(e.text, e.x, e.y + offsetY, e.width, e.height,
+          format: e.format, module: e.module, barHeight: e.barHeight, digits: e.digits)
+      : LabelElement.text(e.part, e.text, e.x, e.y + offsetY, e.width, e.height, bold: e.bold, align: e.align);
+  return _pdfElement(moved, offsetX);
+}
+
 pw.Widget _pdfElement(LabelElement e, double offset) {
   const mm = PdfPageFormat.mm;
   if (!e.barcode) {

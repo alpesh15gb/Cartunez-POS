@@ -6,6 +6,8 @@ import 'package:printing/printing.dart';
 import '../../core/billing.dart';
 import '../../core/label_layout.dart';
 import '../../core/label_printer.dart';
+import '../../core/label_sheet_pdf.dart';
+import '../../core/zpl_bridge.dart';
 import '../../core/zpl.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
@@ -61,6 +63,8 @@ const labelSizes = [
 ];
 
 const _modeZebraUsb = 'zebra-installed', _modeZebraNetwork = 'zebra-network', _modeDialog = 'dialog';
+// WS-F: web label printing. A4/any-page label sheets (PDF) and a local ZPL bridge.
+const _modeSheet = 'pdf-sheet', _modeBridge = 'zpl-bridge';
 
 /// The shop's label design (shared by all counters).
 LabelLayout shopLabelLayout(AppState app) =>
@@ -73,7 +77,7 @@ String _mode(Json printer) {
   return mode;
 }
 
-bool _zebra(AppState app) => _mode(app.labelPrinter) != _modeDialog;
+bool _zebra(AppState app) => !const {_modeDialog, _modeSheet}.contains(_mode(app.labelPrinter));
 int _dpi(AppState app) => int.tryParse('${app.labelPrinter['dpi'] ?? 203}') ?? 203;
 
 String _size(LabelLayout l) => '${_num(l.widthMm)} × ${_num(l.heightMm)} mm${l.columns > 1 ? ', ${l.columns} across' : ''}';
@@ -86,6 +90,11 @@ String labelPrinterSummary(AppState app) {
   return switch (_mode(p)) {
     _modeZebraUsb => '${p['printer']} · $size',
     _modeZebraNetwork => 'Zebra at ${p['host']} · $size',
+    _modeBridge => 'Zebra through ${p['bridgeUrl'] ?? defaultBridgeUrl} · $size',
+    _modeSheet => () {
+      final g = SheetGrid.fromJson(p['sheet'] as Map?);
+      return 'Label sheets ${g.columns} × ${g.rows} on ${_num(g.pageWidthMm)} × ${_num(g.pageHeightMm)} mm · $size';
+    }(),
     _ => kIsWeb ? 'Browser print dialog · $size' : 'Print dialog · $size',
   };
 }
@@ -204,8 +213,24 @@ Future<void> printReceiptLineLabels(BuildContext context, List<({LabelItem item,
 Future<void> _print(AppState app, List<LabelItem> items, List<int> counts, LabelLayout layout) async {
   final printer = app.labelPrinter;
   final mode = _mode(printer);
-  final zebra = mode != _modeDialog;
+  final zebra = !const {_modeDialog, _modeSheet}.contains(mode);
   final data = [for (final i in items) _data(app, i, zebra: zebra)];
+  if (mode == _modeSheet) {
+    final grid = SheetGrid.fromJson(printer['sheet'] as Map?);
+    final problem = grid.problem(layout);
+    if (problem != null) {
+      app.toast('Labels not printed: $problem');
+      return;
+    }
+    final plans = [
+      for (final (i, label) in data.indexed)
+        if (counts[i] > 0) ...List.filled(counts[i], planLabel(layout, label, dpi: _dpi(app))),
+    ];
+    final theme = await pdfTheme();
+    await Printing.layoutPdf(name: 'labels', format: sheetFormat(grid), dynamicLayout: false,
+        onLayout: (_) => labelPdf(layout, plans, sheet: grid, theme: theme));
+    return;
+  }
   if (!zebra) {
     final doc = pw.Document(theme: await pdfTheme());
     final plans = [
@@ -222,13 +247,15 @@ Future<void> _print(AppState app, List<LabelItem> items, List<int> counts, Label
   }
   final zpl = zplJob(data, layout, dpi: _dpi(app), darkness: int.tryParse('${printer['darkness'] ?? ''}'), quantities: counts);
   try {
-    if (mode == _modeZebraUsb) {
+    if (mode == _modeBridge) {
+      await sendZplToBridge('${printer['bridgeUrl'] ?? defaultBridgeUrl}', zpl);
+    } else if (mode == _modeZebraUsb) {
       await printRawToInstalled('${printer['printer']}', zpl);
     } else {
       await printRawToNetwork('${printer['host']}', int.tryParse('${printer['port'] ?? 9100}') ?? 9100, zpl);
     }
     final count = counts.fold(0, (sum, n) => sum + n);
-    app.toast('Sent $count label${count == 1 ? '' : 's'} to ${mode == _modeZebraUsb ? printer['printer'] : 'the Zebra printer'}.');
+    app.toast('Sent $count label${count == 1 ? '' : 's'} to ${mode == _modeZebraUsb ? printer['printer'] : mode == _modeBridge ? 'the Zebra (Browser Print)' : 'the Zebra printer'}.');
   } catch (e) {
     app.toast('Labels not printed: ${errorText(e)}');
   }
@@ -628,8 +655,11 @@ Future<void> editLabelPrinter(BuildContext context) async {
   final modes = [
     if (canPrintToInstalledPrinter) (_modeZebraUsb, 'Zebra printer installed on this PC (USB)'),
     if (canPrintToNetworkPrinter) (_modeZebraNetwork, 'Zebra printer on the network (IP address)'),
-    (_modeDialog, kIsWeb ? 'Browser print dialog (PDF)' : 'Print dialog, any printer (PDF)'),
+    (_modeDialog, kIsWeb ? 'Label printer through the print dialog (PDF, label size)' : 'Print dialog, any printer (PDF)'),
+    (_modeSheet, 'Label sheets on an office printer (PDF, A4 grid)'),
+    (_modeBridge, 'Zebra through Zebra Browser Print / local bridge (ZPL)'),
   ];
+  final sheet = SheetGrid.fromJson(p['sheet'] as Map?);
   final current = modes.any((m) => m.$1 == p['mode']) ? p['mode'] : (zebra != null ? _modeZebraUsb : modes.first.$1);
   await showFormDialog<void>(
     context,
@@ -637,7 +667,8 @@ Future<void> editLabelPrinter(BuildContext context) async {
     header: kIsWeb
         ? const Padding(
             padding: EdgeInsets.only(bottom: 12),
-            child: Text('Browsers can only print through the print dialog. For one-click Zebra printing, use the Windows app.'),
+            child: Text('Browsers cannot talk to a printer directly. Choose a PDF the size of your label roll, a PDF of A4 label '
+                'sheets, or Zebra Browser Print for one-click ZPL printing. $bridgeSetupHelp'),
           )
         : null,
     fields: [
@@ -649,6 +680,15 @@ Future<void> editLabelPrinter(BuildContext context) async {
             help: 'Pick the Zebra (usually named "ZDesigner …"). Install the Zebra driver if it is not listed.'),
       if (canPrintToNetworkPrinter)
         FieldSpec('host', 'Zebra IP address', value: p['host'] ?? '', help: 'For a network Zebra: printed on its configuration label.'),
+      FieldSpec('bridgeUrl', 'Bridge address (Zebra Browser Print / local bridge)', value: p['bridgeUrl'] ?? defaultBridgeUrl,
+          help: 'Default for Zebra Browser Print: $defaultBridgeUrl'),
+      FieldSpec('sheetColumns', 'Labels across the sheet', kind: FieldKind.number, value: sheet.columns, advanced: true),
+      FieldSpec('sheetRows', 'Labels down the sheet', kind: FieldKind.number, value: sheet.rows, advanced: true),
+      FieldSpec('sheetTop', 'Sheet top margin (mm)', value: '${sheet.marginTopMm}', advanced: true),
+      FieldSpec('sheetLeft', 'Sheet left margin (mm)', value: '${sheet.marginLeftMm}', advanced: true),
+      FieldSpec('sheetGapX', 'Gap between columns (mm)', value: '${sheet.gapXMm}', advanced: true),
+      FieldSpec('sheetGapY', 'Gap between rows (mm)', value: '${sheet.gapYMm}', advanced: true,
+          help: 'Measure your label sheet. The label size itself comes from the shop\'s label design.'),
       FieldSpec('dpi', 'Printer resolution', kind: FieldKind.select, value: '${p['dpi'] ?? 203}', advanced: true,
           options: const [('203', '203 dpi (most Zebra desktop printers)'), ('300', '300 dpi')]),
       FieldSpec('darkness', 'Print darkness (0-30)', kind: FieldKind.number, value: p['darkness'], advanced: true,
@@ -659,6 +699,27 @@ Future<void> editLabelPrinter(BuildContext context) async {
       final mode = '${v['mode']}';
       if (mode == _modeZebraUsb && '${v['printer'] ?? ''}'.isEmpty) throw FormProblem('Choose the installed Zebra printer.');
       if (mode == _modeZebraNetwork && '${v['host']}'.trim().isEmpty) throw FormProblem('Enter the Zebra printer\'s IP address.');
+      final bridgeUrl = '${v['bridgeUrl'] ?? ''}'.trim().isEmpty ? defaultBridgeUrl : '${v['bridgeUrl']}'.trim();
+      if (mode == _modeBridge) {
+        try {
+          bridgeUri(bridgeUrl);
+        } on BridgeError catch (e) {
+          throw FormProblem(e.message);
+        }
+      }
+      double mm(Object? value, double fallback) => double.tryParse('${value ?? ''}'.trim()) ?? fallback;
+      final grid = SheetGrid.fromJson({
+        'columns': int.tryParse('${v['sheetColumns']}') ?? sheet.columns,
+        'rows': int.tryParse('${v['sheetRows']}') ?? sheet.rows,
+        'marginTopMm': mm(v['sheetTop'], sheet.marginTopMm),
+        'marginLeftMm': mm(v['sheetLeft'], sheet.marginLeftMm),
+        'gapXMm': mm(v['sheetGapX'], sheet.gapXMm),
+        'gapYMm': mm(v['sheetGapY'], sheet.gapYMm),
+      });
+      if (mode == _modeSheet) {
+        final problem = grid.problem(shopLabelLayout(app));
+        if (problem != null) throw FormProblem(problem);
+      }
       final darkness = int.tryParse('${v['darkness'] ?? ''}');
       if (darkness != null && (darkness < 0 || darkness > 30)) throw FormProblem('Darkness is from 0 to 30.');
       await app.saveLabelPrinter({
@@ -668,6 +729,8 @@ Future<void> editLabelPrinter(BuildContext context) async {
         'port': int.tryParse('${v['port']}') ?? 9100,
         'dpi': int.tryParse('${v['dpi']}') ?? 203,
         'darkness': ?darkness,
+        'bridgeUrl': bridgeUrl,
+        'sheet': grid.toJson(),
         // Earlier versions kept the label size per device; keep it as a fallback.
         'size': ?p['size'],
       });

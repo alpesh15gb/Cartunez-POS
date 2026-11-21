@@ -18,6 +18,10 @@ export function reportRoutes(app: FastifyInstance, db: Database) {
     if (typeof output === "string")
       return reply.type("text/csv; charset=utf-8")
         .header("Content-Disposition", `attachment; filename="${result.name}.csv"`).send(output);
+    // WS-F: Excel download.
+    if (Buffer.isBuffer(output))
+      return reply.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header("Content-Disposition", `attachment; filename="${result.name}.xlsx"`).send(output);
     return output;
   });
 }
