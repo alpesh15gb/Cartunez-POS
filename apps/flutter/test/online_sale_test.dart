@@ -113,4 +113,51 @@ void main() {
     expect(app.calls.last.$2['changes'], {'onSale': false});
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('one part: the edit dialog puts it on sale and takes it off', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _shop();
+    late BuildContext ctx;
+    await tester.pumpWidget(AppScope(
+      state: app,
+      child: MaterialApp(home: Builder(builder: (c) {
+        ctx = c;
+        return const Scaffold();
+      })),
+    ));
+    final wiper = app.products.firstWhere((p) => p['id'] == 'wiper');
+
+    // Put the wiper on sale with an end date.
+    editListing(ctx, wiper);
+    await tester.pumpAndSettle();
+    expect(find.text('On sale (home page & Sale menu)'), findsOneWidget);
+    await tester.tap(find.text('No').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Yes, show in the sale').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Sale ends on (YYYY-MM-DD)'), '2099-06-30');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final changes = app.calls.last.$2['changes'] as Map;
+    expect(changes['onSale'], true);
+    expect(changes['saleUntil'], '2099-06-30');
+    expect(app.calls.last.$2['productIds'], ['wiper']);
+
+    // The filter part (already on sale) is taken off sale.
+    final filter = app.products.firstWhere((p) => p['id'] == 'filter');
+    editListing(ctx, filter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Yes, show in the sale').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('No').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final off = app.calls.last.$2['changes'] as Map;
+    expect(off['onSale'], false);
+    expect(off.containsKey('saleUntil'), false);
+    expect(tester.takeException(), isNull);
+  });
 }

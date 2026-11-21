@@ -604,11 +604,30 @@ Future<void> editListing(BuildContext context, Json product) async {
         ('hidden', 'Hide the part at 0 stock'),
       ]),
       FieldSpec('leadDays', 'On order: ships in (days)', kind: FieldKind.number, value: l['leadDays'] ?? 7),
+      // On sale: shown in the shop's Sale menu and the home page "On sale" section
+      // at the selling price above (owners and managers only).
+      if (app.isManager) ...[
+        FieldSpec('onSale', 'On sale (home page & Sale menu)', kind: FieldKind.select,
+            value: l['onSale'] == true ? 'yes' : 'no',
+            options: const [('no', 'No'), ('yes', 'Yes, show in the sale')],
+            help: 'The sale price is the selling price above.'),
+        FieldSpec('saleUntil', 'Sale ends on (YYYY-MM-DD)', kind: FieldKind.date, value: l['saleUntil'],
+            help: 'Optional. Leave empty to keep it on sale until you remove it.'),
+      ],
       FieldSpec('buffer', 'Safety buffer (units)', kind: FieldKind.number, value: l['buffer'], help: 'Empty = shop default.'),
       FieldSpec('description', 'Website description', kind: FieldKind.multiline, value: l['description'] ?? '', advanced: true),
     ],
     onSubmit: (v) async {
       final buffer = '${v['buffer'] ?? ''}'.trim();
+      final onSale = v['onSale'] == 'yes';
+      final until = '${v['saleUntil'] ?? ''}'.trim();
+      if (app.isManager && onSale && until.isNotEmpty) {
+        final parsed = DateTime.tryParse(until);
+        if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(until) || parsed == null || parsed.toIso8601String().substring(0, 10) != until) {
+          throw FormProblem('Enter the sale end date as YYYY-MM-DD.');
+        }
+        if (until.compareTo(indiaToday()) < 0) throw FormProblem('The sale end date cannot be in the past.');
+      }
       await app.mutate('/online-listings', {
         'productIds': [product['id']],
         'changes': {
@@ -618,6 +637,10 @@ Future<void> editListing(BuildContext context, Json product) async {
           'leadDays': int.tryParse('${v['leadDays']}') ?? 7,
           'buffer': buffer.isEmpty ? null : int.tryParse(buffer),
           'description': '${v['description'] ?? ''}',
+          if (app.isManager) ...{
+            'onSale': onSale,
+            if (onSale) 'saleUntil': until.isEmpty ? null : until,
+          },
         },
       }, 'Saved. Magento is being updated.');
     },
