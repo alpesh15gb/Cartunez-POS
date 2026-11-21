@@ -8,6 +8,9 @@ import '../widgets.dart';
 import 'labels.dart';
 import 'online.dart';
 
+// WS-D: StaffScreen (staff and counter PINs) moved to lib/ui/shift/.
+export '../shift/staff_screen.dart' show StaffScreen;
+
 const _featureLabels = {
   'fitment': 'Vehicle fitment',
   'transfers': 'Branch transfers',
@@ -117,32 +120,6 @@ class SettingsScreen extends StatelessWidget {
           ],
         ),
       ],
-    ]);
-  }
-}
-
-/// Staff accounts (People & Vehicles › Staff). Owners only.
-class StaffScreen extends StatelessWidget {
-  const StaffScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final app = context.app;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Toolbar([
-        FilledButton.icon(onPressed: () => editUser(context, const {}), icon: const Icon(Icons.add), label: const Text('Add staff')),
-      ]),
-      DataList(
-        rows: app.list('users'),
-        empty: 'No staff yet.',
-        onTap: (u) => editUser(context, u),
-        columns: [
-          Col('Name', (u) => Text('${u['name']}', style: const TextStyle(fontWeight: FontWeight.w700))),
-          Col('Email', (u) => Text('${u['email']}'), flex: 2),
-          Col('Role', (u) => Text(titleCase('${u['role']}'))),
-          Col('Status', (u) => StatusChip(u['active'] == true ? 'Active' : 'Disabled')),
-        ],
-      ),
     ]);
   }
 }

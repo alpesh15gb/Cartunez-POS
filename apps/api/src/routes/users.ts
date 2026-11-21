@@ -4,6 +4,7 @@ import type { Post } from "./types.js";
 import { records, getRecord, putRecord } from "../db.js";
 import { allow, text, multiline, fail, id, hashPassword, audit } from "../domain.js";
 import { emailAddress, invoiceProfile, gstProfile } from "../settings.js";
+import { publicUser } from "./auth-pin.js"; // WS-D
 
 const roles = ["owner", "manager", "cashier", "inventory"];
 
@@ -54,14 +55,15 @@ export function userRoutes(app: FastifyInstance, db: Database, post: Post) {
       branchIds: body.branchIds,
       active: body.active !== false,
       authVersion: (existing?.authVersion || 0) + 1,
+      // WS-D: keep the counter PIN; owners never sign in by PIN.
+      ...(existing?.pinHash && body.role !== "owner" ? { pinHash: existing.pinHash } : {}),
     };
     await putRecord(tx, actor.organizationId, "user", user);
     await audit(tx, actor, "user-update", user.id, "User access management", {
       role: user.role,
       branches: user.branchIds,
     });
-    const { passwordHash, ...result } = user;
-    return result;
+    return publicUser(user); // WS-D: no password or PIN hash
   });
   post("branches", async (tx, actor, body) => {
     allow(actor, ["owner"]);

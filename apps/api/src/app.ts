@@ -23,6 +23,7 @@ import { salesRoutes } from "./routes/sales.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
+import { pinRoutes } from "./routes/auth-pin.js"; // WS-D
 
 export type { Post } from "./routes/types.js";
 
@@ -116,7 +117,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
         secret,
         { expiresIn: settings.sessionHours * 3600, algorithm: "HS256" },
       );
-      const { passwordHash, ...publicUser } = user;
+      const { passwordHash, pinHash, ...publicUser } = user; // WS-D: never return the PIN hash
       return {
         token,
         user: publicUser,
@@ -130,6 +131,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     if (
       request.url.split("?")[0].endsWith("/health") ||
       request.url.split("?")[0].endsWith("/auth/login") ||
+      /\/auth\/pin-(staff|login)$/.test(request.url.split("?")[0]) || // WS-D: PIN counter sign-in
       request.method === "OPTIONS"
     )
       return;
@@ -223,6 +225,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   transferRoutes(app, db, post);
   warrantyRoutes(app, db, post);
   reportRoutes(app, db);
+  pinRoutes(app, db, post); // WS-D
   return app;
 }
 function withoutCost(value: any): any {
