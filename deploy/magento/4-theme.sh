@@ -64,6 +64,12 @@ mage setup:di:compile
 inphp rm -rf pub/static/frontend/Cartunez var/view_preprocessed/pub/static/frontend/Cartunez
 mage setup:static-content:deploy -f en_US --jobs 1 --theme Cartunez/default --theme Magento/backend
 mage indexer:reindex design_config_grid >/dev/null || true
+# PHP keeps compiled code in memory and never re-reads changed files
+# (opcache.validate_timestamps=0 in php.ini), so restart it to load the new
+# templates, blocks and generated code. Without this, changes did not appear.
+echo '== Restarting PHP to load the new code'
+dc restart php >/dev/null
+for _ in $(seq 1 30); do inphp php -r 'exit(0);' >/dev/null 2>&1 && break; sleep 1; done
 mage maintenance:disable >/dev/null
 mage cache:flush >/dev/null
 dc start cron >/dev/null
