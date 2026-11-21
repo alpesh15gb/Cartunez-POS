@@ -2138,6 +2138,26 @@ button.action.secondary {
   .footer.content .links a:hover {
     color: #E3141B;
   }
+  .cz-nav.navigation .level0 {
+    vertical-align: top;
+  }
+  .cz-nav.navigation .level0 > .submenu.cz-nav-brands {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 30;
+    background: #111318;
+    border: 1px solid #262B33;
+    border-radius: 0 0 6px 6px;
+    padding: 6px 0;
+    list-style: none;
+    margin: 0;
+  }
+  .cz-nav.navigation .level0:hover > .submenu.cz-nav-brands,
+  .cz-nav.navigation .level0:focus-within > .submenu.cz-nav-brands {
+    display: block;
+  }
   .cz-nav.navigation .level0 .submenu.cz-nav-brands a {
     padding: 9px 18px;
     text-transform: none;
