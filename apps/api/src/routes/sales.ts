@@ -4,6 +4,7 @@ import type { Post } from "./types.js";
 import { records, putRecord } from "../db.js";
 import { allow, scoped, fail, id, now, audit, idempotent } from "../domain.js";
 import { finalizeSale, returnInvoice } from "../sales.js";
+import { refundBreakdown, refundTypeOf } from "../returns.js";
 
 export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("invoices", async (tx, actor, body) =>
@@ -35,9 +36,8 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
       ).some((item) => item.invoiceId === invoice.id)
     )
       fail("Use line credit notes after a prior core refund.");
-    // A sale made on the customer's account is reversed on that account unless told otherwise.
-    if (!body.refundType && (invoice.tenders || []).some((t: any) => t.type === "Credit"))
-      body.refundType = "Credit";
+    // The refund follows the original tenders (returns.ts refundBreakdown): account
+    // portions go back on the account, Online to the website, the rest by refundType.
     const credit = await returnInvoice(
       tx,
       actor,
@@ -56,6 +56,7 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
       true,
     );
     let coreRefundTotal = 0;
+    let credited = credit.total;
     for (const line of invoice.lines.filter(
       (line: any) => line.coreCharge > 0,
     )) {
@@ -67,12 +68,14 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
         quantity: line.qty,
         total: line.qty * line.coreCharge,
         reason: body.reason,
-        refundType: body.refundType || "Cash",
+        refunds: refundBreakdown(invoice, credited, line.qty * line.coreCharge, body.refundType || "Cash"),
         createdAt: now(),
         userId: actor.id,
         shiftId: credit.shiftId,
         voidId: credit.id,
       };
+      (core as any).refundType = refundTypeOf(core.refunds, body.refundType || "Cash");
+      credited += core.total;
       await putRecord(
         tx,
         actor.organizationId,
@@ -85,6 +88,9 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
       });
       coreRefundTotal += core.total;
     }
+    // A job billed on this invoice goes back to "ready" so it can be billed again.
+    // (Imported on use so this module does not change the order checkout hooks register in.)
+    if (invoice.jobId) await (await import("./jobs.js")).reopenVoidedJob(tx, actor, invoice);
     return {
       ...credit,
       coreRefundTotal,

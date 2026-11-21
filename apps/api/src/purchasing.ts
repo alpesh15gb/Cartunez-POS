@@ -14,6 +14,7 @@ import { getRecord, putRecord, records } from "./db.js";
 import { adjust, allow, audit, fail, id, integer, multiline, now, scoped, text, roundRatio, type Actor } from "./domain.js";
 import type { Post } from "./routes/types.js";
 import { noteCost } from "./cost-changes.js"; // WS-E
+import { refundBy } from "./returns.js"; // money and stock review: per-tender refunds
 
 
 export const PAYMENT_MODES = ["Cash", "UPI", "Bank transfer", "Cheque", "Card"];
@@ -142,7 +143,9 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
       });
     }
     for (const core of await records(db, org, "coreReturn")) {
-      if (core.refundType !== "Credit") continue;
+      // Money and stock review: the account part of the per-tender refund breakdown.
+      const coreCredit = refundBy(core, "Credit");
+      if (!coreCredit) continue;
       const invoice = await getRecord(db, org, "invoice", core.invoiceId);
       add(invoice?.customerId, {
         date: String(core.createdAt).slice(0, 10),
@@ -152,13 +155,13 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
         reference: `Core deposit on invoice ${invoice?.number || ""}`.trim(),
         note: core.reason || "",
         debit: 0,
-        credit: core.total,
+        credit: coreCredit,
       });
     }
     for (const ret of await records(db, org, "return")) {
-      if (ret.refundType !== "Credit") continue;
-      // WS-B: an exchange credits the account only with what was not set against the new bill.
-      const amount = ret.refundTotal ?? ret.total;
+      // WS-B: an exchange credits the account only with what was not set against the new bill;
+      // a mixed refund only with its account part (per-tender breakdown, returns.ts).
+      const amount = refundBy(ret, "Credit");
       if (!amount) continue;
       const invoice = await getRecord(db, org, "invoice", ret.invoiceId);
       add(invoice?.customerId, {

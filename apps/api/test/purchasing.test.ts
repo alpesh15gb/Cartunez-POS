@@ -161,12 +161,15 @@ test("Purchasing: supplier bills, photos, payments, returns and balances; custom
     assert.ok(voided);
     const customerLedger = await call("parties/customers/customer-1/ledger", undefined, cashier, 200, "GET");
     assert.deepEqual(customerLedger.entries.map((e: any) => e.type), ["sale", "payment", "void"]);
-    // The void refunds the whole invoice (cash part included) to the account, so they are now in advance.
-    assert.equal(customerLedger.balance, price - 50000 - 20000 - price);
+    // The void follows the tenders: the credit part comes off the account, the cash part
+    // goes back in cash. The 200 rupees paid on account leave them in advance.
+    assert.deepEqual(voided.refunds, [{ type: "Cash", amount: 50000 }, { type: "Credit", amount: price - 50000 }]);
+    assert.equal(voided.refundType, "Mixed");
+    assert.equal(customerLedger.balance, price - 50000 - 20000 - (price - 50000));
     // The advance is settled by giving the customer cash back.
     // Paying money back out needs a manager.
-    await call("party-payments", { partyKind: "customer", partyId: "customer-1", amount: 70000, mode: "Cash", refund: true }, cashier, 403);
-    await call("party-payments", { partyKind: "customer", partyId: "customer-1", amount: 70000, mode: "Cash", refund: true }, owner);
+    await call("party-payments", { partyKind: "customer", partyId: "customer-1", amount: 20000, mode: "Cash", refund: true }, cashier, 403);
+    await call("party-payments", { partyKind: "customer", partyId: "customer-1", amount: 20000, mode: "Cash", refund: true }, owner);
     assert.equal((await boot(cashier)).partyBalances.customers["customer-1"], 0);
     // Selling with no stock showing (default): allowed, stock goes negative until the bill is entered.
     const ghost = await call("products", { name: "Wiper blade 22in", retailPrice: 45000 }, manager);

@@ -12,6 +12,15 @@
 //                       any excess is refunded by `refundType` and is `refundTotal`.
 // `refundTotal` (when present) is the part of the credit note paid back by
 // `refundType`; readers fall back to `total` for returns written before it existed.
+//
+// Refunds follow the original tenders (money and stock review): the refund is
+// split in proportion to how the bill was paid. Credit, Advance and Exchange
+// portions go back on the customer's account ("Credit"), "Online" portions go
+// back through the website's payment channel ("Online", no drawer effect), and
+// Cash/Card/UPI portions are paid by the requested `refundType` (Cash default).
+// The breakdown is `refunds: [{ type, amount }]` (sums to `refundTotal`);
+// `refundType` is that single type, "Mixed" when there are several, or
+// "Exchange" when nothing was paid back. Read it with refundParts().
 import type { FastifyInstance } from "fastify";
 import type { Database, RecordData } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
@@ -30,10 +39,92 @@ const fromCondition: Record<string, Disposition> = { sellable: "restock", damage
 export interface ReturnOptions {
   /** Set by the exchange hook: the new invoice's total the credit is set against. */
   exchangeTotal?: number;
+  /** The till the refund goes through (the exchange's sale shift); default: the actor's open shift. */
+  shift?: RecordData;
 }
 
 /** The amount of a credit note paid back by its refund method. */
 export const refundAmount = (ret: RecordData) => Number(ret.refundTotal ?? ret.total ?? 0);
+
+export type RefundPart = { type: string; amount: number };
+
+/**
+ * How a credit note or core refund was paid back, per method. Records written
+ * before the breakdown existed have one `refundType` for the whole refund.
+ */
+export function refundParts(ret: RecordData): RefundPart[] {
+  if (Array.isArray(ret.refunds)) return ret.refunds;
+  const type = ret.refundType ?? "Cash";
+  const amount = refundAmount(ret);
+  return type === "Exchange" || !amount ? [] : [{ type, amount }];
+}
+
+/** The part of a refund paid back by one method. */
+export const refundBy = (ret: RecordData, type: string) =>
+  refundParts(ret).filter((part) => part.type === type).reduce((sum, part) => sum + part.amount, 0);
+
+/** What each tender of a bill actually brought in (cash net of change). */
+function tenderWeights(invoice: RecordData): RefundPart[] {
+  const map = new Map<string, number>();
+  for (const tender of invoice.tenders || []) map.set(tender.type, (map.get(tender.type) || 0) + Number(tender.amount || 0));
+  if (invoice.change) map.set("Cash", (map.get("Cash") || 0) - Number(invoice.change));
+  return [...map].map(([type, amount]) => ({ type, amount })).filter((w) => w.amount > 0);
+}
+
+/** Splits `amount` by cumulative weights, so the parts always add up exactly. */
+function splitCumulative(parts: RefundPart[], amount: number, before = 0): RefundPart[] {
+  const total = parts.reduce((sum, part) => sum + part.amount, 0);
+  if (!total) return [];
+  let cumulative = 0;
+  const out = parts.map((part) => {
+    const low = cumulative;
+    const high = (cumulative += part.amount);
+    const at = (x: number) => roundRatio(x, high, total) - roundRatio(x, low, total);
+    return { type: part.type, amount: at(before + amount) - at(before) };
+  });
+  // Rounding can leave a share at -1; move it onto the largest share.
+  for (const part of out)
+    if (part.amount < 0) {
+      const largest = out.reduce((a, b) => (b.amount > a.amount ? b : a));
+      largest.amount += part.amount;
+      part.amount = 0;
+    }
+  return out;
+}
+
+/** Where the refund of each original tender goes. */
+function destination(invoice: RecordData, tender: string, requested: string) {
+  if (tender === "Online") return "Online";
+  if (tender === "Credit" || tender === "Advance") return "Credit";
+  if (tender === "Exchange" && invoice.customerId) return "Credit";
+  return requested;
+}
+
+/**
+ * The refund of `amount` on an invoice, per method, given that `prior` of the
+ * invoice was already credited back. Merged by method, zero parts dropped.
+ */
+export function refundBreakdown(invoice: RecordData, prior: number, amount: number, requested: string): RefundPart[] {
+  if (amount <= 0) return [];
+  const weights = tenderWeights(invoice);
+  const shares = weights.length ? splitCumulative(weights, amount, prior) : [{ type: requested, amount }];
+  const merged = new Map<string, number>();
+  for (const share of shares) {
+    const type = destination(invoice, share.type, requested);
+    merged.set(type, (merged.get(type) || 0) + share.amount);
+  }
+  return [...merged].map(([type, value]) => ({ type, amount: value })).filter((part) => part.amount > 0);
+}
+
+/** One `refundType` for readers that know only one: the single method, or "Mixed". */
+export const refundTypeOf = (parts: RefundPart[], fallback: string) =>
+  parts.length === 0 ? fallback : parts.length === 1 ? parts[0].type : "Mixed";
+
+/** Fails when a refund would go on the account of a walk-in customer. */
+export function checkAccountRefund(invoice: RecordData, parts: RefundPart[]) {
+  if (parts.some((part) => part.type === "Credit" && part.amount > 0) && !invoice.customerId)
+    fail("Only a sale to a named customer can be refunded to their account.");
+}
 
 /** The text a receipt's barcode/QR carries so the return desk can scan it (the invoice number). */
 export const invoiceCode = (invoice: RecordData) => String(invoice.number || "");
@@ -100,9 +191,13 @@ export async function returnInvoice(
   allow(actor, ["owner", "manager", "cashier"]);
   await approved(db, actor, "return", body.approvalId, body.transactionId);
   const invoice = await scoped(db, actor, "invoice", invoiceId);
-  const shift = (await records(db, actor.organizationId, "shift", actor.branchId)).find(
-    (item) => item.userId === actor.id && !item.closedAt,
-  );
+  // An exchange refunds through the sale's till (it may be a cashier's till a manager is using).
+  const shift =
+    options.shift && !options.shift.closedAt
+      ? options.shift
+      : (await records(db, actor.organizationId, "shift", actor.branchId)).find(
+          (item) => item.userId === actor.id && !item.closedAt,
+        );
   if (!shift) fail("Open your shift before recording a refund.", 409);
   const previous = (await records(db, actor.organizationId, "return", actor.branchId)).filter(
     (item) => item.invoiceId === invoiceId,
@@ -169,13 +264,26 @@ export async function returnInvoice(
         const item = await scoped(db, actor, "serial", product.id + ":" + serial);
         if (!original.serials.includes(serial) || item.status !== "sold" || item.invoiceId !== invoiceId)
           fail("Serial was not sold on this invoice or has already been returned.");
-        await putRecord(
-          db,
-          actor.organizationId,
-          "serial",
-          { ...item, status: kind === "sellable" ? "available" : kind, binId: bin!.id, invoiceId: null },
-          actor.branchId,
-        );
+        const updated: RecordData = { ...item, status: kind === "sellable" ? "available" : kind, binId: bin!.id, invoiceId: null };
+        if (kind === "sellable") {
+          // Back in stock: the sale facts move to the serial's history so the
+          // warranty lookup shows it as unsold until it is sold again.
+          updated.history = [
+            ...(Array.isArray(item.history) ? item.history : []),
+            {
+              event: voided ? "void" : "return",
+              at: now(),
+              invoiceId: item.invoiceId || invoiceId,
+              invoiceNumber: item.invoiceNumber || invoice.number,
+              customerId: item.customerId || null,
+              vehicleId: item.vehicleId || null,
+              soldAt: item.soldAt || null,
+              warrantyUntil: item.warrantyUntil || null,
+            },
+          ];
+          Object.assign(updated, { invoiceNumber: null, customerId: null, vehicleId: null, soldAt: null, warrantyUntil: null });
+        }
+        await putRecord(db, actor.organizationId, "serial", updated, actor.branchId);
       }
     }
     const proportion = (value: number) =>
@@ -245,14 +353,16 @@ export async function returnInvoice(
   const creditNumber = settings.nextCreditNote || 1;
   settings.nextCreditNote = creditNumber + 1;
   await putRecord(db, actor.organizationId, "settings", settings);
-  if (!body.refundType && (invoice.tenders || []).some((t: any) => t.type === "Credit")) body.refundType = "Credit";
-  const refundType = body.refundType || "Cash";
-  if (!REFUND_TYPES.includes(refundType)) fail("Choose a supported refund method.");
+  const requested = body.refundType || "Cash";
+  if (!REFUND_TYPES.includes(requested)) fail("Choose a supported refund method.");
   const exchange = options.exchangeTotal !== undefined;
   const applied = exchange ? Math.min(total, options.exchangeTotal!) : 0;
   const refundTotal = total - applied;
-  if (refundType === "Credit" && refundTotal > 0 && !invoice.customerId)
-    fail("Only a sale to a named customer can be refunded to their account.");
+  // Split by the original tenders; an exchange pays back only what was not set against the new bill.
+  const priorCredit = previous.reduce((sum, item) => sum + Number(item.total || 0), 0);
+  const byTender = refundBreakdown(invoice, priorCredit, total, requested);
+  const refunds = refundTotal === total ? byTender : splitCumulative(byTender, refundTotal).filter((part) => part.amount > 0);
+  checkAccountRefund(invoice, refunds);
   const dispositions = [...new Set(lines.map((line) => line.condition))];
   const receipt: RecordData = {
     ...invoiceProfile(invoice, invoice.branch || { id: invoice.branchId, name: "" }),
@@ -276,14 +386,16 @@ export async function returnInvoice(
     // One condition for the whole return, or "mixed" when lines went to different bins.
     condition: dispositions.length === 1 ? dispositions[0] : "mixed",
     // An exchange with nothing left to pay back is settled entirely against the new invoice.
-    refundType: exchange && refundTotal === 0 ? "Exchange" : refundType,
+    refundType: exchange && refundTotal === 0 ? "Exchange" : refundTypeOf(refunds, requested),
+    refunds,
+    refundTotal,
     total,
     tax: lines.reduce((sum, line) => sum + line.tax, 0),
     taxComponents: taxTotals(lines),
     lines,
     voided,
   };
-  if (exchange) Object.assign(receipt, { exchangeApplied: applied, refundTotal });
+  if (exchange) receipt.exchangeApplied = applied;
   for (const line of lines) {
     if (line.type !== "service")
       await adjust(db, actor, line.productId, line.binId, line.quantity, voided ? "Invoice void" : "Sales return", receipt.id);

@@ -5,9 +5,11 @@
 // serial sold. This hook then records who bought it and until when it is under
 // warranty: serial.invoiceId, invoiceNumber, customerId, vehicleId, soldAt and
 // warrantyUntil = sale date + product.warrantyMonths (a calendar date in the
-// shop's business time zone, inclusive). These sale facts stay on the serial
-// after a return (only invoiceId is cleared by the return), so the lookup can
-// still show its history.
+// shop's business time zone, inclusive). When a return, exchange or void puts
+// the serial back on the shelf (returns.ts), these sale facts move to
+// `serial.history` and are cleared, so the lookup shows it in stock ("not
+// sold"); a serial returned as damaged or for a supplier warranty keeps them
+// (only invoiceId is cleared).
 import type { FastifyInstance } from "fastify";
 import type { Database, RecordData } from "../db.js";
 import { getRecord, putRecord } from "../db.js";
@@ -97,6 +99,8 @@ export async function lookupSerial(db: Database, actor: Actor, code: string) {
       soldAt: data.soldAt || null,
       warrantyUntil: data.warrantyUntil || null,
       warranty: warrantyStatus(data),
+      // Earlier sales that came back (returned, exchanged or voided).
+      history: Array.isArray(data.history) ? data.history : [],
       // A return can be taken while the serial is still on its invoice in this branch.
       canReturn: data.status === "sold" && !!invoice && invoice.branchId === actor.branchId,
     });

@@ -13,15 +13,22 @@
 // its bin ("Kit sale" stock movements against the invoice). Labour included in
 // a kit is a service component: recorded, no stock movement.
 //
+// Reservations: a kit on a parked sale (routes/holds.ts) or a job card
+// (routes/jobs.ts) reserves its stocked components in bins
+// (`line.components` on the hold line, see reserveKitComponents), so counter
+// sales cannot take them; checkout of that hold takes the kit's components
+// from the reserved bins first. An expired hold reserves nothing.
+//
 // Limitations: kits cannot contain serial-tracked parts or other kits. A sales
 // return of a kit line (returns.ts) puts its stocked components back into the
 // chosen restock or damaged bin, in proportion to the kits returned.
 import { getRecord, records, type RecordData } from "../db.js";
-import { adjust, fail, integer } from "../domain.js";
+import { adjust, fail, heldUnits, holdReserves, integer } from "../domain.js";
 import { registerSaleHook } from "../sale-pipeline.js";
 import type { KitComponent, SaleContext, SaleHook } from "../sale-types.js";
 
-export const isKit = (product: RecordData | undefined) => !!product?.components?.length;
+export { isKit, reserveKitComponents } from "./kit-reserve.js";
+import { isKit } from "./kit-reserve.js";
 
 /**
  * How many kits the components in stock can make (null = no stocked components,
@@ -69,10 +76,17 @@ const kits: SaleHook = {
       (ctx.body.lines || [])
         .filter((entry: any) => entry.productId === productId && entry.binId === binId)
         .reduce((sum: number, entry: any) => sum + (Number(entry.qty) || 0), 0);
-    const parked = (productId: string, binId: string) =>
-      (ctx.hold?.cart?.lines || [])
+    // What the resumed parked sale (or job card) reserves in a bin, kit components
+    // included; an expired hold reserves nothing, so it adds nothing back.
+    const ownLines = ctx.hold && holdReserves(ctx.hold) ? ctx.hold.cart?.lines || [] : [];
+    const parked = (productId: string, binId: string) => heldUnits(ownLines, productId, binId);
+    // Bins this kit's line reserved on the hold come first, so billing uses the reservation.
+    const reservedFor = (productId: string, binId: string) =>
+      ownLines
+        .filter((entry: any) => entry.productId === line.productId)
+        .flatMap((entry: any) => entry.components || [])
         .filter((entry: any) => entry.productId === productId && entry.binId === binId)
-        .reduce((sum: number, entry: any) => sum + entry.qty, 0);
+        .reduce((sum: number, entry: any) => sum + (Number(entry.qty) || 0), 0);
     const components: KitComponent[] = [];
     let unitCost = 0;
     for (const component of kit!.components) {
@@ -91,7 +105,9 @@ const kits: SaleHook = {
       const free = (binId: string) =>
         (ctx.stock.find((row: any) => row.productId === part.id && row.binId === binId)?.available || 0) +
         parked(part.id, binId) - plain(part.id, binId) - (state.used.get(part.id + "|" + binId) || 0);
-      const order = [...state.bins].sort((a: string, b: string) => free(b) - free(a));
+      const order = [...state.bins].sort(
+        (a: string, b: string) => reservedFor(part.id, b) - reservedFor(part.id, a) || free(b) - free(a),
+      );
       if (!order.length) fail("Add a sellable bin before selling kits.");
       let remaining = qty;
       for (const binId of order) {
