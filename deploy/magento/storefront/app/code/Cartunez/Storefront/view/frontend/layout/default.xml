@@ -12,10 +12,12 @@
 
         <!-- Curated menu instead of Luma's category menu, on desktop and in the phone drawer.
              Edit in Content > Blocks > cartunez-menu. -->
+        <!-- "store.menu" is a block (Magento_Theme::html/container.phtml renders its
+             children), not a container, so it must be referenced as a block. -->
         <referenceBlock name="catalog.topnav" remove="true"/>
-        <referenceContainer name="store.menu">
-            <block class="Cartunez\Storefront\Block\Menu" name="cartunez.menu" template="Cartunez_Storefront::menu.phtml"/>
-        </referenceContainer>
+        <referenceBlock name="store.menu">
+            <block class="Cartunez\Storefront\Block\Menu" name="cartunez.menu" template="Cartunez_Storefront::menu.phtml" before="-"/>
+        </referenceBlock>
 
         <!-- No wish list or compare anywhere (cards, sidebar, header, product page). -->
         <referenceBlock name="catalog.compare.link" remove="true"/>
