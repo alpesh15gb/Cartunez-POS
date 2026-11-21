@@ -9,7 +9,8 @@ export function reorderSuggestions(products: RecordData[], stock: RecordData[], 
     if (sellable.has(row.binId)) available.set(row.productId, (available.get(row.productId) || 0) + Number(row.available));
   }
   for (const order of orders) {
-    if (order.status !== "open" && order.status !== "partial") continue;
+    // WS-E: draft orders made from these suggestions count as on order, so they are not suggested twice.
+    if (order.status !== "open" && order.status !== "partial" && order.status !== "draft") continue;
     for (const line of order.lines) {
       const outstanding = Math.max(0, line.quantity - line.received);
       onOrder.set(line.productId, (onOrder.get(line.productId) || 0) + outstanding);
@@ -23,4 +24,18 @@ export function reorderSuggestions(products: RecordData[], stock: RecordData[], 
         reorderLevel: p.reorderLevel, onOrder: inbound, suggestedQuantity: Math.max(0, 2 * p.reorderLevel - shelf - inbound),
         supplierId: p.supplierId };
     });
+}
+
+/** WS-E: suggestions grouped by each part's usual supplier (parts without one are listed apart). */
+export function groupBySupplier<T extends { supplierId?: string | null }>(rows: T[]) {
+  const groups = new Map<string, T[]>();
+  const noSupplier: T[] = [];
+  for (const row of rows) {
+    if (!row.supplierId) {
+      noSupplier.push(row);
+      continue;
+    }
+    groups.set(row.supplierId, [...(groups.get(row.supplierId) || []), row]);
+  }
+  return { groups, noSupplier };
 }

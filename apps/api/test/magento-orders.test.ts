@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { connectDatabase, migrate, getRecord, records } from "../src/db.js";
+import { connectDatabase, migrate, getRecord, putRecord, records } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
 import { itemTargets, pollMagentoOrders } from "../src/magento-orders.js";
@@ -66,6 +66,8 @@ function fakeMagento() {
   return { fetch, order, update, setToken: (t: string) => (token = t) };
 }
 
+// WS-E: these orders were read before the POS invoiced online orders ("magento"
+// mode): Magento invoices still take their stock. New orders: fulfilment.test.ts.
 test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel and order from supplier", async () => {
   const db = await connectDatabase({ memory: true });
   await migrate(db);
@@ -91,6 +93,10 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
       Number((await db.query("SELECT COALESCE(SUM(quantity),0) q FROM stock WHERE organization_id='demo' AND branch_id='pune' AND product_id=$1", [productId])).rows[0].q);
     const poll = () => pollMagentoOrders(db, { fetch: magento.fetch, organizationId: "demo" });
     const online = (n: number) => getRecord(db, "demo", "onlineOrder", `mg-${n}`);
+    // Older orders already being handled the old way when the POS started invoicing.
+    const older = (n: number) =>
+      putRecord(db, "demo", "onlineOrder", { id: `mg-${n}`, mode: "magento", lines: [], updatedAt: "2000-01-01T00:00:00Z" }, "pune");
+    for (const n of [1, 2, 3]) await older(n);
 
     await call("integrations/magento", { baseUrl: "http://magento.test", token: "test-token", branchId: "pune", enabled: true }, owner);
 
@@ -208,6 +214,7 @@ test("Magento orders reserve, sell on invoice, refund, wait for stock, cancel an
     const serialPart = await call("products", { sku: "TRACKED-ONLINE", name: "Serialized test item", brand: "Fixture", category: "Parts", unit: "Each", serialTracked: true, retailPrice: 10000 }, owner);
     await call("online-listings", { productIds: [serialPart.id], changes: { published: true } }, owner, 400);
     await call("inventory/adjust", { productId: serialPart.id, binId: "bin-a1", quantity: 1, serials: ["PICK-1"], reason: "Test stock" }, owner);
+    await older(68);
     const external = magento.order(68, [["TRACKED-ONLINE", 1]]);
     magento.update(external, i => (i.qty_invoiced = 1), "processing");
     await poll();

@@ -10,6 +10,8 @@ import '../state/app_state.dart';
 import 'barcode_scan.dart';
 import 'login.dart';
 import 'prefs.dart';
+import 'purchasing/cost_changes.dart'; // WS-E
+import 'purchasing/reorder.dart'; // WS-E
 import 'screens/billing.dart';
 import 'screens/bills.dart';
 import 'screens/dashboard.dart';
@@ -153,6 +155,13 @@ final workspaces = <Workspace>[
     TabDef('orders', 'Purchase orders', _stock, 'Order from suppliers; enter the bill when the goods arrive.',
         (_, _) => const OrdersScreen(),
         path: '/purchasing/orders'),
+    // WS-E: reorder alerts → draft POs; supplier cost rises found while receiving.
+    TabDef('reorder', 'Reorder alerts', _stock, 'Parts at or below their reorder level. Make draft purchase orders per supplier in one click.',
+        (_, _) => const ReorderScreen(),
+        path: '/purchasing/reorder'),
+    TabDef('cost-changes', 'Cost changes', _stock, 'Supplier costs that rose since the last purchase, and their effect on your margin.',
+        (_, _) => const CostChangesScreen(),
+        path: '/purchasing/cost-changes'),
     TabDef('suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
         (_, _) => const ContactsScreen(kind: 'suppliers'),
         path: '/purchasing/suppliers', detail: _openLedger('suppliers')),

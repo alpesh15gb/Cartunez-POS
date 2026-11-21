@@ -23,6 +23,7 @@ import { salesRoutes } from "./routes/sales.js";
 import { deviceRoutes } from "./routes/devices.js";
 import { warrantyRoutes } from "./routes/warranty.js";
 import { reportRoutes } from "./routes/reports.js";
+import { fulfilmentRoutes } from "./fulfilment.js"; // WS-E: online order fulfilment
 
 export type { Post } from "./routes/types.js";
 
@@ -223,6 +224,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   transferRoutes(app, db, post);
   warrantyRoutes(app, db, post);
   reportRoutes(app, db);
+  fulfilmentRoutes(app, db, post, () => options.fetch || globalThis.fetch); // WS-E
   return app;
 }
 function withoutCost(value: any): any {
