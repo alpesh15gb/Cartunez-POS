@@ -46,6 +46,18 @@ String websiteStatus(Json? listing) {
   };
 }
 
+/// Today's date in India (YYYY-MM-DD), as the server compares sale end dates.
+String indiaToday([DateTime? now]) =>
+    (now ?? DateTime.now()).toUtc().add(const Duration(hours: 5, minutes: 30)).toIso8601String().substring(0, 10);
+
+/// Sale state of one part: 'on' (shown in the shop's Sale section), 'ended', or null (not on sale).
+String? saleState(Json? listing, [DateTime? now]) {
+  if (listing == null || listing['onSale'] != true) return null;
+  final until = '${listing['saleUntil'] ?? ''}';
+  if (until.isNotEmpty && indiaToday(now).compareTo(until) > 0) return 'ended';
+  return 'on';
+}
+
 const _availabilityNames = {'stock': 'In stock', 'order': 'On order', 'hidden': 'Hidden when out'};
 
 // ---------- Screen ----------
@@ -65,6 +77,7 @@ class _OnlineStoreScreenState extends State<OnlineStoreScreen> {
     ('on', 'On website'),
     ('off', 'Not on website'),
     ('order', 'On order'),
+    ('sale', 'On sale'),
     ('error', 'Errors'),
     ('low', 'Low stock'),
   ];
@@ -73,6 +86,7 @@ class _OnlineStoreScreenState extends State<OnlineStoreScreen> {
         'on' => l?['published'] == true,
         'off' => l?['published'] != true,
         'order' => l?['availability'] == 'order',
+        'sale' => l?['onSale'] == true,
         'error' => (l?['sync'] as Map?)?['state'] == 'error',
         'low' => app.available('${p['id']}') <= ((p['reorderLevel'] as num?) ?? 0),
         _ => true,
@@ -126,6 +140,13 @@ class _OnlineStoreScreenState extends State<OnlineStoreScreen> {
                     onPrice: () => _priceDialog(context, selected.length, (pricing) => _bulk({'pricing': pricing}, 'Online prices updated.')),
                     onAvailability: () => _availabilityDialog(context, (c) => _bulk(c, 'Availability updated.')),
                     onBuffer: () => _bufferDialog(context, (c) => _bulk(c, 'Safety buffer updated.')),
+                    onSale: () => _saleDialog(
+                      context,
+                      [for (final p in parts) if (selected.contains(p['id'])) p],
+                      listings,
+                      (c) => _bulk(c, 'Putting ${selected.length} part(s) on sale.'),
+                    ),
+                    onEndSale: () => _bulk({'onSale': false}, 'Removing ${selected.length} part(s) from the sale.'),
                     onClear: () => setState(selected.clear),
                   ),
           ),
@@ -206,10 +227,12 @@ class _BulkBar extends StatelessWidget {
     required this.onPrice,
     required this.onAvailability,
     required this.onBuffer,
+    required this.onSale,
+    required this.onEndSale,
     required this.onClear,
   });
   final int count;
-  final VoidCallback onPublish, onUnpublish, onPrice, onAvailability, onBuffer, onClear;
+  final VoidCallback onPublish, onUnpublish, onPrice, onAvailability, onBuffer, onSale, onEndSale, onClear;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -225,7 +248,14 @@ class _BulkBar extends StatelessWidget {
             icon: const Icon(Icons.cloud_upload_outlined, size: 18),
             label: const Text('Publish'),
           ),
-          for (final (label, action) in [('Unpublish', onUnpublish), ('Set price', onPrice), ('Availability', onAvailability), ('Buffer', onBuffer)])
+          for (final (label, action) in [
+            ('Unpublish', onUnpublish),
+            ('Set price', onPrice),
+            ('Availability', onAvailability),
+            ('Buffer', onBuffer),
+            ('Put on sale…', onSale),
+            ('Remove from sale', onEndSale),
+          ])
             OutlinedButton(
               style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white38)),
               onPressed: action,
@@ -281,6 +311,22 @@ class _ListingTable extends StatelessWidget {
         return error == null ? chip : Tooltip(message: '$error', child: chip);
       }
 
+      Widget saleChip(Json? l) {
+        final state = saleState(l);
+        if (state == null) return const SizedBox.shrink();
+        final until = '${l?['saleUntil'] ?? ''}';
+        final label = state == 'ended' ? 'Sale ended' : until.isEmpty ? 'On sale' : 'On sale to ${until.substring(8)}/${until.substring(5, 7)}/${until.substring(0, 4)}';
+        return Container(
+          key: ValueKey('sale-chip-${l?['productId']}'),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+          decoration: BoxDecoration(
+            color: state == 'ended' ? const Color(0xFFEEF1EF) : const Color(0xFFFBEBE7),
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(label, style: TextStyle(color: state == 'ended' ? Brand.muted : Brand.danger, fontSize: 11.5, fontWeight: FontWeight.w700)),
+        );
+      }
+
       Widget price(Json p, Json? l) {
         final pr = onlinePrices(app, p, l);
         final off = pr.mrp > 0 && pr.selling < pr.mrp ? ((pr.mrp - pr.selling) * 100 / pr.mrp).round() : 0;
@@ -325,6 +371,7 @@ class _ListingTable extends StatelessWidget {
                         const SizedBox(height: 6),
                         Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
                           statusChip(listings['${p['id']}']),
+                          if (saleState(listings['${p['id']}']) != null) saleChip(listings['${p['id']}']),
                           Text(availability(listings['${p['id']}']), style: small),
                         ]),
                       ]),
@@ -382,7 +429,16 @@ class _ListingTable extends StatelessWidget {
                           '${app.photosOf('${p['id']}').isEmpty ? ' · no photo' : ''}', style: small),
                     ]),
                   ),
-                  Expanded(flex: 2, child: Align(alignment: Alignment.centerLeft, child: statusChip(listings['${p['id']}']))),
+                  Expanded(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(spacing: 6, runSpacing: 4, children: [
+                        statusChip(listings['${p['id']}']),
+                        if (saleState(listings['${p['id']}']) != null) saleChip(listings['${p['id']}']),
+                      ]),
+                    ),
+                  ),
                   Expanded(flex: 2, child: Text(availability(listings['${p['id']}']))),
                   Expanded(flex: 2, child: Text(stock(p, listings['${p['id']}']), style: small)),
                   Expanded(flex: 2, child: price(p, listings['${p['id']}'])),
@@ -457,6 +513,57 @@ Future<void> _bufferDialog(BuildContext context, Future<void> Function(Json chan
         await apply({'buffer': n});
       },
     );
+
+/// Puts the selected parts on sale: they join the shop's Sale category and home page section.
+Future<void> _saleDialog(BuildContext context, List<Json> parts, Map<String, Json> listings, Future<void> Function(Json changes) apply) {
+  final app = context.appRead;
+  final noDiscount = parts.where((p) {
+    final pr = onlinePrices(app, p, listings['${p['id']}']);
+    return pr.selling >= pr.mrp;
+  }).toList();
+  final unpublished = parts.where((p) => listings['${p['id']}']?['published'] != true).length;
+  return showFormDialog<void>(
+    context,
+    title: 'Put ${parts.length} part(s) on sale',
+    submit: 'Put on sale',
+    header: Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('The parts are shown in the Sale section of the shop\'s home page. The sale price is the selling '
+            'price set with Set price (MRP is shown struck through).'),
+        if (noDiscount.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            key: const ValueKey('sale-no-discount'),
+            '${noDiscount.length == 1 ? '${noDiscount.first['sku']} sells' : '${noDiscount.length} parts sell'} at MRP, '
+            'so no discount will show. Set a lower price first.',
+            style: const TextStyle(color: Brand.warning, fontWeight: FontWeight.w600),
+          ),
+        ],
+        if (unpublished > 0) ...[
+          const SizedBox(height: 8),
+          Text('$unpublished part(s) are not published; they appear in the sale once published.',
+              style: Theme.of(context).textTheme.bodySmall),
+        ],
+      ]),
+    ),
+    fields: const [
+      FieldSpec('saleUntil', 'Sale ends on (YYYY-MM-DD)', kind: FieldKind.date,
+          help: 'Optional. The last day of the sale; leave empty to keep the parts on sale until removed.'),
+    ],
+    onSubmit: (v) async {
+      final until = '${v['saleUntil'] ?? ''}'.trim();
+      if (until.isNotEmpty) {
+        final parsed = DateTime.tryParse(until);
+        if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(until) || parsed == null || parsed.toIso8601String().substring(0, 10) != until) {
+          throw FormProblem('Enter the end date as YYYY-MM-DD.');
+        }
+        if (until.compareTo(indiaToday()) < 0) throw FormProblem('The end date cannot be in the past.');
+      }
+      await apply({'onSale': true, 'saleUntil': until.isEmpty ? null : until});
+    },
+  );
+}
 
 /// Everything about one part on the website.
 Future<void> editListing(BuildContext context, Json product) async {

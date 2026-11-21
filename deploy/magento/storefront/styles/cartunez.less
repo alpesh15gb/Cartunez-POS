@@ -550,6 +550,45 @@ a:hover, .alink:hover { color: @cz-blue; }
 .cms-index-index .block.widget.block-products-list .products-grid .product-items .product-item { width: auto; margin: 0; padding: 0; }
 .cms-index-index .page-wrapper { overflow-x: clip; }
 
+// "On sale" section: the parts the POS put on sale (Sale category), red kicker.
+.cz-sale {
+    margin: 0 0 64px;
+    .block.widget.block-products-list { margin-bottom: 0; }
+    .product-item-info { position: relative; }
+    // Sale badge on each card (every product here is on sale).
+    .product-item-photo:before {
+        content: 'Sale';
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 2;
+        padding: 3px 9px;
+        border-radius: 99px;
+        background: @cz-red;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .product-item-photo { position: relative; display: block; }
+}
+.cz-section-head--sale { position: relative; }
+.cz-kicker--sale {
+    color: @cz-red;
+    &:before { background: @cz-red; }
+}
+.cz-sale-all {
+    margin-top: 10px;
+    color: @cz-red;
+    font-weight: 600;
+    font-size: 14px;
+    text-decoration: none;
+    &:after { content: ' \2192'; }
+    &:hover, &:focus { color: @cz-red-dark; text-decoration: underline; }
+    &:visited { color: @cz-red; }
+}
+
 // Studio services: a dark band across the full page width.
 .cz-studio {
     position: relative;
@@ -757,6 +796,7 @@ a:hover, .alink:hover { color: @cz-blue; }
     .cz-promos { margin-bottom: 44px; }
     .cz-promo { height: 200px; }
     .cz-brands { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .cz-sale { margin-bottom: 44px; }
     .cms-index-index .block-products-list .products-grid .product-items { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .cz-studio { padding: 48px 15px; }
     .cz-finder .cz-finder-form { flex-basis: 100%; }

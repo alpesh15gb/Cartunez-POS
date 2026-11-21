@@ -1,0 +1,21 @@
+<?php
+/** @var \Cartunez\Storefront\Block\SaleProducts $block */
+/** @var \Magento\Framework\Escaper $escaper */
+if (!$block->hasProducts()) {
+    return;
+}
+$grid = $block->getGridHtml();
+if (trim($grid) === '') {
+    return;
+}
+?>
+<section class="cz-sale" aria-labelledby="cz-sale-title">
+    <div class="cz-section-head cz-section-head--sale">
+        <span class="cz-kicker cz-kicker--sale"><?= $escaper->escapeHtml(__('On sale')) ?></span>
+        <h2 id="cz-sale-title"><?= $escaper->escapeHtml(__('Deals on parts and accessories')) ?></h2>
+        <a class="cz-sale-all" href="<?= $escaper->escapeUrl($block->getViewAllUrl()) ?>">
+            <?= $escaper->escapeHtml(__('View all (%1)', $block->getProductCount())) ?>
+        </a>
+    </div>
+    <div class="cz-sale-grid"><?= /* @noEscape */ $grid ?></div>
+</section>

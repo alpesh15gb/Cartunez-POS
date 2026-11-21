@@ -6,13 +6,26 @@ import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
 import { allow, fail, type Actor } from "./domain.js";
 import { magentoConfig, queueMagentoSync } from "./online-queue.js";
-import { MagentoError, magentoRequest, onlinePrices, onlineQuantity } from "./magento.js";
+import { MagentoError, magentoRequest, onSaleNow, onlinePrices, onlineQuantity } from "./magento.js";
 
 type Fetch = typeof globalThis.fetch;
 const DAY = 24 * 3600_000;
 
 const special = (mg: any) =>
   Number((mg?.custom_attributes || []).find((a: any) => a.attribute_code === "special_price")?.value ?? NaN);
+
+/**
+ * Re-queues parts Magento still shows in the Sale category although their sale
+ * has ended (end date passed, unpublished), so the next sync drops the link.
+ * Returns the product IDs queued.
+ */
+export async function queueEndedSales(db: Database, organizationId: string, now = new Date()) {
+  const ended = (await records(db, organizationId, "onlineListing"))
+    .filter((l) => l.sync?.onSale && l.sync?.state !== "pending" && !onSaleNow(l, now))
+    .map((l) => l.productId);
+  if (ended.length) await db.transaction((tx) => queueMagentoSync(tx, organizationId, ended, "sale ended"));
+  return ended;
+}
 
 /** Compares Magento with the POS for one shop (or all) and queues fixes. */
 export async function compareMagento(db: Database, options: { fetch?: Fetch; organizationId?: string } = {}) {
@@ -26,6 +39,7 @@ export async function compareMagento(db: Database, options: { fetch?: Fetch; org
     const config = magentoConfig(settings);
     const secret = await getRecord(db, org, "integrationSecret", "magento");
     if (!config.enabled || !config.baseUrl || !secret?.token) continue;
+    await queueEndedSales(db, org);
     const listings = (await records(db, org, "onlineListing")).filter((l) => l.published || l.sync?.magentoId).slice(0, 2000);
     const differences: any[] = [];
     let checked = 0;
@@ -89,6 +103,8 @@ export function startDailyMagentoCheck(db: Database, intervalMs = 15 * 60_000) {
     try {
       const orgs = (await db.query("SELECT organization_id FROM records WHERE kind='settings'")).rows.map((r: any) => r.organization_id);
       for (const org of orgs) {
+        // Sales that ended leave the shop's Sale page without waiting for the daily check.
+        if (magentoConfig(await getRecord(db, org, "settings", "settings")).enabled) await queueEndedSales(db, org);
         const last = await getRecord(db, org, "magentoCheck", "latest");
         if (!last || Date.now() - Date.parse(last.at) > DAY) await compareMagento(db, { organizationId: org });
       }

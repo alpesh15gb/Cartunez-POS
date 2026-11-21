@@ -91,6 +91,19 @@ export async function msiStillReserved(db: Database, organizationId: string, bra
   return units;
 }
 
+// ---------- Sale ----------
+
+/** Today's date in India (YYYY-MM-DD), the day a sale's end date is compared with. */
+export function indiaToday(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+/** A part is on sale now while it is published, marked on sale and its end date (if any) has not passed. */
+export function onSaleNow(listing: any, now = new Date()) {
+  if (!listing?.published || !listing.onSale) return false;
+  return !listing.saleUntil || indiaToday(now) <= String(listing.saleUntil);
+}
+
 const slug = (value: string) =>
   value
     .toLowerCase()
@@ -260,6 +273,7 @@ export async function magentoCategoryId(
   config: any,
   name: unknown,
   parent?: { id: number; prefix: string },
+  create: Record<string, unknown> = {},
 ): Promise<number | null> {
   const label = String(name ?? "").trim();
   if (!label) return null;
@@ -279,7 +293,7 @@ export async function magentoCategoryId(
   let id = Number(found?.items?.[0]?.id || 0);
   if (!id) {
     const created = await magentoRequest(fetchImpl, baseUrl, token, "POST", "/all/V1/categories", {
-      category: { parent_id: root, name: label, is_active: true, include_in_menu: true },
+      category: { parent_id: root, name: label, is_active: true, include_in_menu: true, ...create },
     });
     id = Number(created?.id || 0);
   }
@@ -301,6 +315,12 @@ export async function magentoBrandCategoryId(
   if (!String(brand ?? "").trim()) return null;
   const brands = await magentoCategoryId(fetchImpl, baseUrl, token, db, org, config, "Brands");
   return magentoCategoryId(fetchImpl, baseUrl, token, db, org, config, brand, { id: brands!, prefix: "brand" });
+}
+
+/** The "Sale" category under the store root (shown near the top of the menu). */
+export async function magentoSaleCategoryId(fetchImpl: Fetch, baseUrl: string, token: string, db: Database, org: string, config: any) {
+  const root = Number(config.rootCategoryId || 2);
+  return magentoCategoryId(fetchImpl, baseUrl, token, db, org, config, "Sale", { id: root, prefix: "sale" }, { position: 1 });
 }
 
 /** Forgets remembered categories (for example after one was deleted in Magento). */
@@ -397,6 +417,7 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
     let qty = 0;
     let photos: { media?: Record<string, number>; mainImageId?: string | null } = {};
     const prices = product && listing ? onlinePrices(product, settings, listing) : { mrp: 0, selling: 0 };
+    const sale = onSaleNow(listing);
     try {
       if (!config.enabled || !config.baseUrl || !secret?.token) throw new MagentoError("Magento is not connected.");
       if (!product || !listing) throw new MagentoError("This part no longer exists in the POS.");
@@ -420,6 +441,8 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
             ? [
                 await magentoCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config, product.category),
                 await magentoBrandCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config, product.brand),
+                // On sale now: also on the shop's Sale page (dropped once the sale ends).
+                sale ? await magentoSaleCategoryId(fetchImpl, config.baseUrl, secret.token, db, org, config) : null,
               ]
             : null,
         ),
@@ -457,6 +480,7 @@ export async function runMagentoSync(db: Database, options: { fetch?: Fetch; lim
                 magentoSku: result?.sku || product?.sku,
                 ...photos,
                 qty,
+                onSale: sale,
                 mrp: prices.mrp,
                 price: prices.selling,
                 error: null,
@@ -528,6 +552,21 @@ function listingChanges(body: any) {
   if (body.leadDays !== undefined) c.leadDays = integer(body.leadDays, "Lead time (days)", 0, 365);
   if (body.buffer !== undefined) c.buffer = body.buffer === null ? null : integer(body.buffer, "Safety buffer", 0, 9999);
   if (body.description !== undefined) c.description = text(body.description, "Website description", false, 5000);
+  if (body.onSale !== undefined) {
+    if (typeof body.onSale !== "boolean") fail("On sale must be on or off.");
+    c.onSale = body.onSale;
+    // Taking a part off sale clears its end date.
+    if (!body.onSale) c.saleUntil = null;
+  }
+  if (body.saleUntil !== undefined && body.saleUntil !== null && body.saleUntil !== "") {
+    const day = String(body.saleUntil);
+    const parsed = new Date(`${day}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== day)
+      fail("Enter the sale end date as YYYY-MM-DD.");
+    if (day < indiaToday()) fail("The sale end date cannot be in the past.");
+    if (c.onSale === false) fail("Choose an end date only when putting parts on sale.");
+    c.saleUntil = day;
+  } else if (body.saleUntil !== undefined) c.saleUntil = null;
   if (body.pricing !== undefined) {
     const p = body.pricing || {};
     if (!priceModes.includes(p.mode)) fail("Choose MRP, % off MRP or a fixed price.");
@@ -651,6 +690,8 @@ export function magentoRoutes(app: FastifyInstance, db: Database, post: Post, fe
         pricing: { mode: "mrp" },
         buffer: null,
         description: "",
+        onSale: false,
+        saleUntil: null,
         sync: { state: "never" },
       };
       const listing = { ...existing, ...changes, updatedAt: new Date().toISOString(), updatedBy: actor.id };

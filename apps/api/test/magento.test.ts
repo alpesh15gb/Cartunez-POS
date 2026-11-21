@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { connectDatabase, migrate, getRecord, putRecord } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
-import { runMagentoSync, magentoRequest, MagentoError, fitmentText } from "../src/magento.js";
+import { runMagentoSync, magentoRequest, MagentoError, fitmentText, indiaToday, onSaleNow } from "../src/magento.js";
+import { queueEndedSales } from "../src/magento-check.js";
 import { createServer } from "node:http";
 
 /** A stand-in for Magento's REST API that records every request. */
@@ -296,4 +297,95 @@ test("Magento: fitment text for the vehicle finder", () => {
   ]);
   // Bad or reversed years are skipped rather than exploding into thousands of words.
   assert.equal(fitmentText({ fitments: [{ make: "A", model: "B", yearFrom: 2030, yearTo: 2020 }] }, now), "");
+});
+
+test("Magento: parts on sale join the Sale category until the sale is removed or ends", async () => {
+  const db = await connectDatabase({ memory: true });
+  await migrate(db);
+  await seed(db);
+  const magento = fakeMagento();
+  const app = await createApp(db, { fetch: magento.fetch });
+  try {
+    const call = async (path: string, body: any, token?: string, status = 200) => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/" + path,
+        payload: body,
+        headers: token ? { authorization: "Bearer " + token } : {},
+      });
+      assert.equal(response.statusCode, status, `${path}: ${response.body}`);
+      return response.json();
+    };
+    const login = async (email: string) => (await call("auth/login", { email, password: "MotorlineDemo123!" })).token;
+    const owner = await login("owner@motorline.local");
+    const manager = await login("manager@motorline.local");
+    const cashier = await login("cashier@motorline.local");
+    const lastPut = (sku: string) => [...magento.calls].reverse().find((c) => c.method === "PUT" && c.path.endsWith(sku))!.body.product;
+    const links = (sku: string) => lastPut(sku).extension_attributes.category_links.map((l: any) => Number(l.category_id));
+    await call(
+      "integrations/magento",
+      { baseUrl: "http://magento.test/", token: "test-token", branchId: "pune", defaultBuffer: 0, enabled: true },
+      owner,
+    );
+    await call("online-listings", { productIds: ["filter"], changes: { published: true, pricing: { mode: "percent", percent: 1000 } } }, owner);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    assert.equal([...magento.categories.values()].some((c) => c.name === "Sale"), false);
+    assert.equal(links("ML-FILTER-01").length, 2);
+
+    // Cashiers cannot; past or malformed end dates are refused.
+    await call("online-listings", { productIds: ["filter"], changes: { onSale: true } }, cashier, 403);
+    await call("online-listings", { productIds: ["filter"], changes: { onSale: true, saleUntil: "2020-01-01" } }, owner, 400);
+    await call("online-listings", { productIds: ["filter"], changes: { onSale: true, saleUntil: "2099-02-30" } }, owner, 400);
+    await call("online-listings", { productIds: ["filter"], changes: { onSale: "yes" } }, owner, 400);
+
+    // Put on sale (ending today is allowed): the PUT links the Sale category under the root.
+    const today = indiaToday();
+    const [listing] = await call("online-listings", { productIds: ["filter"], changes: { onSale: true, saleUntil: today } }, manager);
+    assert.equal(listing.onSale, true);
+    assert.equal(listing.saleUntil, today);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    const sale = [...magento.categories.values()].find((c) => c.name === "Sale");
+    assert.equal(sale.parent_id, 2);
+    assert.equal(sale.include_in_menu, true);
+    assert.ok(links("ML-FILTER-01").includes(sale.id));
+    assert.equal((await getRecord(db, "demo", "onlineListing", "filter"))!.sync.onSale, true);
+    const boot = (await app.inject({ method: "GET", url: "/api/v1/bootstrap", headers: { authorization: "Bearer " + manager } })).json();
+    assert.equal(boot.onlineListings.find((l: any) => l.productId === "filter").onSale, true);
+
+    // Remove from sale: the link is gone on the next sync and the end date is cleared.
+    const [off] = await call("online-listings", { productIds: ["filter"], changes: { onSale: false } }, owner);
+    assert.equal(off.onSale, false);
+    assert.equal(off.saleUntil, null);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    assert.equal(links("ML-FILTER-01").includes(sale.id), false);
+    assert.equal(links("ML-FILTER-01").length, 2);
+
+    // Without an end date the sale runs until removed; once the end date passes it is re-queued and dropped.
+    await call("online-listings", { productIds: ["filter"], changes: { onSale: true } }, owner);
+    await runMagentoSync(db, { fetch: magento.fetch });
+    assert.ok(links("ML-FILTER-01").includes(sale.id));
+    assert.deepEqual(await queueEndedSales(db, "demo"), []);
+    const current = (await getRecord(db, "demo", "onlineListing", "filter"))!;
+    await putRecord(db, "demo", "onlineListing", { ...current, saleUntil: "2020-01-01" });
+    assert.deepEqual(await queueEndedSales(db, "demo"), ["filter"]);
+    assert.equal((await getRecord(db, "demo", "magentoJob", "filter"))!.reason, "sale ended");
+    await runMagentoSync(db, { fetch: magento.fetch });
+    assert.equal(links("ML-FILTER-01").includes(sale.id), false);
+    assert.equal((await getRecord(db, "demo", "onlineListing", "filter"))!.sync.onSale, false);
+    assert.deepEqual(await queueEndedSales(db, "demo"), []);
+    // The category was created once and remembered.
+    assert.equal([...magento.categories.values()].filter((c) => c.name === "Sale").length, 1);
+  } finally {
+    await app.close();
+    await db.close();
+  }
+});
+
+test("Magento: on sale now follows the India date", () => {
+  assert.equal(indiaToday(new Date("2026-03-31T19:00:00Z")), "2026-04-01");
+  const listing = { published: true, onSale: true, saleUntil: "2026-03-31" };
+  assert.equal(onSaleNow(listing, new Date("2026-03-31T18:00:00Z")), true);
+  assert.equal(onSaleNow(listing, new Date("2026-03-31T19:00:00Z")), false);
+  assert.equal(onSaleNow({ ...listing, saleUntil: null }, new Date("2030-01-01")), true);
+  assert.equal(onSaleNow({ ...listing, published: false }, new Date("2026-01-01")), false);
 });

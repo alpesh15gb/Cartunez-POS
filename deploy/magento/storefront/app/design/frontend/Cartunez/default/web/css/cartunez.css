@@ -840,6 +840,61 @@ button.action.secondary {
 .cms-index-index .page-wrapper {
   overflow-x: clip;
 }
+.cz-sale {
+  margin: 0 0 64px;
+}
+.cz-sale .block.widget.block-products-list {
+  margin-bottom: 0;
+}
+.cz-sale .product-item-info {
+  position: relative;
+}
+.cz-sale .product-item-photo:before {
+  content: 'Sale';
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 3px 9px;
+  border-radius: 99px;
+  background: #E3141B;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.cz-sale .product-item-photo {
+  position: relative;
+  display: block;
+}
+.cz-section-head--sale {
+  position: relative;
+}
+.cz-kicker--sale {
+  color: #E3141B;
+}
+.cz-kicker--sale:before {
+  background: #E3141B;
+}
+.cz-sale-all {
+  margin-top: 10px;
+  color: #E3141B;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+.cz-sale-all:after {
+  content: ' \2192';
+}
+.cz-sale-all:hover,
+.cz-sale-all:focus {
+  color: #C20F15;
+  text-decoration: underline;
+}
+.cz-sale-all:visited {
+  color: #E3141B;
+}
 .cz-studio {
   position: relative;
   left: 50%;
@@ -1301,6 +1356,9 @@ button.action.secondary {
   .cz-brands {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
+  }
+  .cz-sale {
+    margin-bottom: 44px;
   }
   .cms-index-index .block-products-list .products-grid .product-items {
     grid-template-columns: repeat(2, 1fr);
