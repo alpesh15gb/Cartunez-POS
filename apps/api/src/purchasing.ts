@@ -13,6 +13,7 @@ import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
 import { adjust, allow, audit, fail, id, integer, multiline, now, scoped, text, roundRatio, type Actor } from "./domain.js";
 import type { Post } from "./routes/types.js";
+import { noteCost } from "./cost-changes.js"; // WS-E
 
 
 export const PAYMENT_MODES = ["Cash", "UPI", "Bank transfer", "Cheque", "Card"];
@@ -205,7 +206,8 @@ function billTotals(lines: any[], gst: boolean, otherCharges: number, discount: 
   return { subtotal, tax, total };
 }
 
-async function payment(db: Database, actor: Actor, body: any, partyKind: "supplier" | "customer", partyId: string, extra: any = {}) {
+/** WS-E: exported for cash-on-delivery collections (fulfilment.ts). */
+export async function payment(db: Database, actor: Actor, body: any, partyKind: "supplier" | "customer", partyId: string, extra: any = {}) {
   const amount = integer(body.amount, "Amount", 1);
   const mode = String(body.mode || "Cash");
   if (!PAYMENT_MODES.includes(mode)) fail("Choose how the money was paid.");
@@ -304,6 +306,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     }
     const order = body.purchaseOrderId ? await scoped(tx, actor, "purchaseOrder", body.purchaseOrderId) : null;
     if (order && order.supplierId !== supplier.id) fail("That purchase order is for another supplier.");
+    if (order?.status === "cancelled") fail("That purchase order was cancelled."); // WS-E
 
     const billId = id("bill");
     const lines: any[] = [];
@@ -353,6 +356,11 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       // On a GST bill the GST is claimed back, so it is not part of the stock cost.
       // On a bill without GST, what was paid is the cost.
       line.landedCost = Math.max(0, line.cost + roundRatio(share, 1, line.quantity));
+      // WS-E: flag a supplier cost hike against the last purchase cost.
+      const hike = await noteCost(tx, actor, product, line.cost, {
+        kind: "bill", id: billId, label: billNumber ? `Bill ${billNumber}` : "Purchase bill", supplierId: supplier.id,
+      });
+      if (hike) line.costHike = hike;
       product.cost = line.landedCost;
       if (line.mrp != null) product.retailPrice = line.mrp;
       await putRecord(tx, actor.organizationId, "product", product);
@@ -394,6 +402,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       userId: actor.id,
       voided: false,
     };
+    (bill as any).costHikes = lines.filter((l) => l.costHike).length; // WS-E
     await putRecord(tx, actor.organizationId, "purchaseBill", bill, actor.branchId);
     await audit(tx, actor, "purchase-bill", billId, `Bill ${billNumber || "(no number)"} from ${supplier.name}`, { total: totals.total });
     if (body.paidNow && Number(body.paidNow.amount) > 0) {

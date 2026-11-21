@@ -6,6 +6,7 @@ import { runtimeConfig } from "./config.js";
 import { startMagentoWorker } from "./magento.js";
 import { startOrderPolling } from "./magento-orders.js";
 import { startDailyMagentoCheck } from "./magento-check.js";
+import { startShipmentWorker } from "./fulfilment.js"; // WS-E
 runtimeConfig();
 const db = await connectDatabase();
 await migrate(db);
@@ -20,10 +21,12 @@ console.log(`Motorline API listening on ${process.env.PORT || 4000}`);
 const stopMagento = startMagentoWorker(db);
 const stopOrders = startOrderPolling(db);
 const stopCheck = startDailyMagentoCheck(db);
+const stopShipments = startShipmentWorker(db); // WS-E: shipments with tracking to Magento
 const shutdown = async () => {
   stopMagento();
   stopOrders();
   stopCheck();
+  stopShipments(); // WS-E
   await app.close();
   await db.close();
   process.exit(0);

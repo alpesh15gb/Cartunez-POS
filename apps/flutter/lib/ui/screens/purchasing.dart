@@ -7,6 +7,8 @@ import '../shell.dart';
 import '../widgets.dart';
 import 'bills.dart';
 import 'labels.dart';
+import '../purchasing/received.dart'; // WS-E
+import '../purchasing/reorder.dart';
 
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
@@ -24,11 +26,14 @@ class OrdersScreen extends StatelessWidget {
         if (!hasParts) TextButton(onPressed: () => shell.open('parts'), child: const Text('Add a part')),
         if (app.sellableBins.isEmpty && app.list('purchaseOrders').isNotEmpty)
           TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a sellable bin to receive stock')),
+        // WS-E: reorder alerts (badge) and supplier cost rises.
+        const ReorderAlertsButton(),
+        OutlinedButton.icon(onPressed: () => shell.open('cost-changes'), icon: const Icon(Icons.trending_up), label: const Text('Cost changes')),
       ]),
       DataList(
         rows: app.list('purchaseOrders').reversed.toList(),
         empty: 'No purchase orders yet.',
-        actionWidth: 170,
+        actionWidth: 230,
         columns: [
           Col('Created', (o) => Text(formatDate(o['createdAt']))),
           Col('Supplier', (o) => Text('${app.list('suppliers').where((s) => s['id'] == o['supplierId']).firstOrNull?['name'] ?? '—'}',
@@ -38,13 +43,42 @@ class OrdersScreen extends StatelessWidget {
           Col('Status', (o) => StatusChip(titleCase('${o['status']}'))),
         ],
         actions: (o) => [
-          if (o['status'] != 'received') FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => enterBill(context, order: o), child: const Text('Enter bill')),
+          // WS-E: drafts from reorder alerts are placed (or cancelled) first.
+          if (o['status'] == 'draft')
+            FilledButton.tonal(onPressed: () => _place(context, o), child: const Text('Place order')),
+          if (o['status'] != 'received' && o['status'] != 'cancelled' && o['status'] != 'draft')
+            FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => enterBill(context, order: o), child: const Text('Enter bill')),
+          if (o['status'] == 'open' || o['status'] == 'partial')
+            IconButton(tooltip: 'Receive goods without a bill', icon: const Icon(Icons.move_to_inbox_outlined),
+                onPressed: app.sellableBins.isEmpty ? null : () => receiveOrder(context, o)),
+          if ((o['status'] == 'draft' || o['status'] == 'open') && (o['lines'] as List).every((l) => (l['received'] ?? 0) == 0))
+            IconButton(tooltip: 'Cancel order', icon: const Icon(Icons.close), onPressed: () => _cancel(context, o)),
           if ((o['lines'] as List).any((line) => (line['received'] ?? 0) > 0))
             IconButton(tooltip: 'Print receipt labels', icon: const Icon(Icons.print_outlined),
                 onPressed: () => _receiptLabels(context, o)),
         ],
       ),
     ]);
+  }
+}
+
+/// WS-E: a draft becomes an open order sent to the supplier.
+Future<void> _place(BuildContext context, Json order) async {
+  final app = context.appRead;
+  try {
+    await app.mutate('/purchase-orders/${order['id']}/place', {}, 'Order placed. Enter the bill when the goods arrive.');
+  } catch (e) {
+    app.toast(errorText(e));
+  }
+}
+
+Future<void> _cancel(BuildContext context, Json order) async {
+  final app = context.appRead;
+  if (!await confirm(context, 'Cancel this purchase order?', 'Nothing has been received on it. Its parts will show in reorder alerts again.', action: 'Cancel order')) return;
+  try {
+    await app.mutate('/purchase-orders/${order['id']}/cancel', {}, 'Purchase order cancelled.');
+  } catch (e) {
+    app.toast(errorText(e));
   }
 }
 
@@ -105,6 +139,7 @@ Future<void> _purchaseDialog(BuildContext context, AppState app, {Json? order}) 
   final receiving = order != null;
   final lines = <Json>[];
   final transactionId = uuid();
+  Object? received;
   await showFormDialog<void>(
     context,
     title: receiving ? 'Receive goods' : 'New purchase order',
@@ -118,14 +153,17 @@ Future<void> _purchaseDialog(BuildContext context, AppState app, {Json? order}) 
     header: _PurchaseLines(app: app, lines: lines, order: order),
     onSubmit: (values) async {
       if (lines.isEmpty) throw FormProblem('Add at least one part.');
-      await app.mutate(receiving ? '/purchase-orders/${order['id']}/receive' : '/purchase-orders', {
+      final saved = await app.mutate(receiving ? '/purchase-orders/${order['id']}/receive' : '/purchase-orders', {
         'transactionId': transactionId,
         if (receiving) 'landedCost': ((double.tryParse('${values['landedCost']}') ?? 0) * 100).round()
         else 'supplierId': values['supplierId'],
         'lines': List<Json>.from(lines),
       }, receiving ? 'Goods received.' : 'Purchase order created.');
+      if (receiving) received = saved;
     },
   );
+  // WS-E: cost hikes, labels for exactly what arrived, website update.
+  if (received != null && context.mounted) await showReceivedGoods(context, receivedLines(received));
 }
 
 class _PurchaseLines extends StatefulWidget {
@@ -180,6 +218,9 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
             barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
           FieldSpec('serials', 'Serial numbers', value: (original?['serials'] as List? ?? []).join(', '),
             help: 'For tracked parts, enter a serial for each unit, separated by commas.'),
+          // WS-E: the supplier's actual unit cost (cost rises are flagged).
+          FieldSpec('cost', 'Unit cost on this delivery', kind: FieldKind.money,
+            value: original?['cost'] == null ? '' : (original!['cost'] / 100).toStringAsFixed(2), help: 'Blank uses the ordered cost.'),
         ],
       ],
       onSubmit: (v) async {
@@ -195,7 +236,7 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
         }
         return {
           'productId': id, 'quantity': quantity,
-          if (receiving) ...{'binId': v['binId'], 'serials': serials}
+          if (receiving) ...{'binId': v['binId'], 'serials': serials, if ('${v['cost'] ?? ''}'.isNotEmpty) 'cost': (double.parse(v['cost']) * 100).round()}
           else 'cost': v['cost'] == '' ? product['cost'] : (double.parse(v['cost']) * 100).round(),
         };
       },
@@ -215,7 +256,11 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
         ListTile(contentPadding: EdgeInsets.zero, title: Text(app.productName(line['productId'])),
           subtitle: Text(widget.order == null
               ? '${line['quantity']} × ${app.money(line['cost'])}'
-              : '${line['quantity']} units · ${app.locationName(line['binId'])}'),
+              : [
+                  '${line['quantity']} units · ${app.locationName(line['binId'])}',
+                  if (line['cost'] != null) '${app.money(line['cost'])} each',
+                  if (line['cost'] != null) ?costWarning(app, '${line['productId']}', line['cost'] as int),
+                ].join(' · ')),
           onTap: () => edit(index),
           trailing: IconButton(tooltip: 'Remove line', icon: const Icon(Icons.remove_circle_outline),
             onPressed: () => setState(() => widget.lines.removeAt(index)))),

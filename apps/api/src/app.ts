@@ -35,6 +35,7 @@ import "./hooks/advance.js";
 // WS-F: owner command center and accounting exports.
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { exportRoutes } from "./exports/routes.js";
+import { fulfilmentRoutes } from "./fulfilment.js"; // WS-E: online order fulfilment
 
 export type { Post } from "./routes/types.js";
 
@@ -243,6 +244,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
   // WS-F
   dashboardRoutes(app, db);
   exportRoutes(app, db);
+  fulfilmentRoutes(app, db, post, () => options.fetch || globalThis.fetch); // WS-E
   return app;
 }
 function withoutCost(value: any): any {

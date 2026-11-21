@@ -40,6 +40,7 @@ test("Checkout pipeline: hooks, staff on lines, Advance tender, number series", 
     assert.deepEqual(saleHooks().map((hook) => hook.name).filter((name) => !name.startsWith("ws-")), [
       "account-tender-gate", "line-staff", "credit-tender", "tender-rules",
       "customer-check", "stock-and-serials", "release-hold", "audit",
+      "online-channel", // WS-E
     ]);
 
     // A plain sale carries none of the new optional fields.

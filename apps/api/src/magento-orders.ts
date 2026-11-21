@@ -1,8 +1,14 @@
 // Magento orders → POS. Orders are read from Magento every minute. Each item's
-// stock is reserved in the online branch, taken out of the bins when Magento
-// invoices it and released when it is cancelled. Staff inspect physical returns.
-// Everything is worked out from Magento's per-item quantities, so reading the
-// same order again never counts it twice.
+// stock is reserved in the online branch and released when it is cancelled.
+// Staff inspect physical returns. Everything is worked out from Magento's
+// per-item quantities, so reading the same order again never counts it twice.
+//
+// WS-E: the POS invoices online orders ("pos" orders): stock stays reserved
+// until the fulfilment desk picks, invoices and packs the order (fulfilment.ts);
+// a Magento invoice never takes stock for these orders. Orders that the POS had
+// already started taking stock for when Magento invoiced them ("magento"
+// orders, read before this change) keep the old rule: stock leaves the bins
+// when Magento invoices them.
 import type { FastifyInstance } from "fastify";
 import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
@@ -91,7 +97,8 @@ async function binStock(db: Database, actor: Actor, productId: string) {
 /** Brings the POS stock in line with the order's Magento quantities. */
 export async function applyOnlineOrder(db: Database, order: any, branchId: string) {
   const actor = systemActor(order.organizationId, branchId);
-  for (const line of order.lines) {
+  if (order.mode === "pos") applyPosOrder(order);
+  else for (const line of order.lines) {
     line.moves ||= [];
     line.deducted ||= 0;
     if (!line.productId) {
@@ -129,6 +136,31 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
   delete order.previousHeld;
   order.posState = orderState(order);
   return order;
+}
+
+/** WS-E: units stay reserved until the POS invoices them; Magento invoices move no stock. */
+function applyPosOrder(order: any) {
+  for (const line of order.lines) {
+    line.moves ||= [];
+    line.deducted ||= 0;
+    line.awaiting = 0;
+    line.serialPickRequired = false;
+    if (!line.productId) {
+      line.reserved = 0;
+      continue;
+    }
+    line.reserved = Math.max(
+      0,
+      Number(line.ordered || 0) - Number(line.canceled || 0) - Number(line.refunded || 0) - Number(line.posInvoiced || 0),
+    );
+  }
+}
+
+/** WS-E: orders the POS had already taken stock for keep Magento's invoice rule. */
+export function orderMode(existing: any) {
+  if (existing?.mode) return existing.mode as "pos" | "magento";
+  const legacy = (existing?.lines || []).some((l: any) => Number(l.deducted || 0) > 0 || Number(l.awaiting || 0) > 0);
+  return legacy ? "magento" : "pos";
 }
 
 export function orderState(order: any) {
@@ -174,6 +206,15 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
         phone: address.telephone || "",
       },
       shipTo: [...(address.street || []), address.city, address.postcode].filter(Boolean).join(", "),
+      // WS-E: what the fulfilment desk needs (state for GST, payment, shipping).
+      mode: orderMode(existing),
+      shipRegion: address.region || "",
+      shipRegionCode: address.region_code || "",
+      payment: {
+        method: String(mg.payment?.method || ""),
+        title: String(mg.payment?.additional_information?.[0] || mg.payment?.method || ""),
+      },
+      shippingCharge: paise(mg.shipping_incl_tax ?? mg.shipping_amount),
       total: paise(mg.grand_total),
       currency: mg.order_currency_code || mg.base_currency_code || "INR",
       createdAt: isoDate(mg.created_at),
@@ -191,6 +232,11 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
           name: item.name,
           productId: before.productId || product?.id || null,
           price: paise(item.price_incl_tax ?? item.price),
+          // WS-E: per unit after the website discount, GST included.
+          unitPaid:
+            item.row_total_incl_tax != null && Number(item.qty_ordered) > 0
+              ? Math.round(paise(Number(item.row_total_incl_tax) - Number(item.discount_amount || 0)) / Number(item.qty_ordered))
+              : paise(item.price_incl_tax ?? item.price),
           ordered: t.ordered,
           invoiced: t.invoiced,
           canceled: t.canceled,

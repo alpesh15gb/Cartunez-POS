@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../barcode_scan.dart';
 import '../photos.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -13,6 +14,7 @@ import '../screens/people.dart';
 import 'common.dart';
 import 'bill_line_dialog.dart';
 import 'file_thumbs.dart';
+import 'received.dart'; // WS-E
 
 // ---------------------------------------------------------------- bill entry
 
@@ -20,7 +22,9 @@ import 'file_thumbs.dart';
 Future<void> enterBill(BuildContext context, {Json? order, String? supplierId}) async {
   final app = context.appRead;
   if (app.sellableBins.isEmpty) return app.toast('Add a sellable bin first (Inventory › Bins).');
-  await showDialog<void>(context: context, barrierDismissible: false, builder: (_) => _BillDialog(order: order, supplierId: supplierId));
+  final saved = await showDialog<Json>(context: context, barrierDismissible: false, builder: (_) => _BillDialog(order: order, supplierId: supplierId));
+  // WS-E: cost hikes, labels for the received quantities and the website update.
+  if (saved != null && context.mounted) await showReceivedGoods(context, receivedLines(saved), title: 'Bill saved · goods received');
 }
 
 class _BillDialog extends StatefulWidget {
@@ -132,12 +136,46 @@ class _BillDialogState extends State<_BillDialog> {
     await editContact(context, 'suppliers', const {}, onSaved: (saved) => setState(() => supplierId = '${saved['id']}'));
   }
 
-  Future<void> _editLine([int? index]) async {
-    final line = await editBillLine(context, gst: gst, original: index == null ? null : lines[index],
+  Future<void> _editLine([int? index, Json? seed]) async {
+    final line = await editBillLine(context, gst: gst, original: index == null ? seed : lines[index],
         taken: {for (final (i, l) in lines.indexed) if (i != index) '${l['productId']}'});
     if (line == null || !mounted) return;
     setState(() => index == null ? lines.add(line) : lines[index] = line);
   }
+
+  /// WS-E: barcode-assisted receiving: each scan adds one unit (keeps scanning until cancelled).
+  Future<void> _scan() async {
+    final app = context.appRead;
+    while (mounted) {
+      final code = await requestBarcode(context);
+      if (code == null || !mounted) return;
+      final productId = app.uniqueProductIdForCode(code);
+      final part = productId == null ? null : app.productById(productId);
+      if (part == null || part['type'] == 'service') {
+        app.toast('No stock part has the code $code. Add the item by hand.');
+        continue;
+      }
+      final index = lines.indexWhere((l) => l['productId'] == productId);
+      if (part['serialTracked'] == true) {
+        // Serial numbers are entered on the line.
+        await _editLine(index < 0 ? null : index, index < 0 ? _newLine(part) : null);
+        continue;
+      }
+      setState(() {
+        if (index < 0) {
+          lines.add(_newLine(part));
+        } else {
+          lines[index] = {...lines[index], 'quantity': (lines[index]['quantity'] as int) + 1};
+        }
+      });
+      app.toast('${part['name']}: ${index < 0 ? 1 : lines[index]['quantity']} scanned.');
+    }
+  }
+
+  Json _newLine(Json part) => {
+        'productId': part['id'], 'quantity': 1, 'cost': ((part['lastPurchaseCost'] ?? part['cost'] ?? 0) as num).toInt(),
+        'taxRate': part['taxRate'] ?? 0, 'binId': defaultBin(context.appRead, '${part['id']}'), 'retailPrice': null, 'serials': <String>[],
+      };
 
   Future<void> _save() async {
     final app = context.appRead;
@@ -157,7 +195,7 @@ class _BillDialogState extends State<_BillDialog> {
     if (paid > t.total) return setState(() => error = 'Paid now is more than the bill total.');
     setState(() => busy = true);
     try {
-      await app.mutate('/purchase-bills', {
+      final saved = await app.mutate('/purchase-bills', {
         'transactionId': transactionId,
         'supplierId': supplierId,
         'billNumber': billNumber.text.trim(),
@@ -175,7 +213,7 @@ class _BillDialogState extends State<_BillDialog> {
         'notes': notes.text.trim(),
         if (paid > 0) 'paidNow': {'amount': paid, 'mode': paidMode},
       }, 'Bill saved. Stock and the supplier balance are updated.');
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context, saved is Map ? Map<String, dynamic>.from(saved) : <String, dynamic>{});
     } catch (e) {
       if (mounted) setState(() => error = errorText(e));
     } finally {
@@ -277,7 +315,8 @@ class _BillDialogState extends State<_BillDialog> {
                   if (gst) 'GST ${percentText((l['taxRate'] ?? 0) as int)}%',
                   'into ${app.locationName(l['binId'])}',
                   if (l['retailPrice'] != null) 'new price ${app.money(l['retailPrice'])}',
-                ].join(' · ')),
+                  ?costWarning(app, '${l['productId']}', l['cost'] as int), // WS-E
+                ].join(' · '), style: costWarning(app, '${l['productId']}', l['cost'] as int) == null ? null : const TextStyle(color: Brand.danger)),
                 onTap: () => _editLine(i),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text(app.money((l['quantity'] as int) * (l['cost'] as int)), style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -286,7 +325,10 @@ class _BillDialogState extends State<_BillDialog> {
               ),
             Align(
               alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(onPressed: busy ? null : () => _editLine(), icon: const Icon(Icons.add), label: const Text('Add item')),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                OutlinedButton.icon(onPressed: busy ? null : () => _editLine(), icon: const Icon(Icons.add), label: const Text('Add item')),
+                OutlinedButton.icon(onPressed: busy ? null : _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Scan items')),
+              ]),
             ),
             const Divider(),
             Wrap(spacing: 12, runSpacing: 12, children: [

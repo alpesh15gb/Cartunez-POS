@@ -6,6 +6,9 @@ import '../shell.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'online.dart';
+import '../online/batch_pick.dart'; // WS-E
+import '../online/fulfilment.dart';
+import '../online/pick_pack.dart';
 
 const _orderStates = {
   'reserved': 'Reserved',
@@ -45,6 +48,8 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
   bool checking = false;
 
   static const filters = [
+    ('pack', 'To pick & pack'), // WS-E
+    ('ship', 'To ship'),
     ('open', 'Needs attention'),
     ('reserved', 'Reserved'),
     ('awaiting', 'Awaiting stock'),
@@ -71,6 +76,8 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
   bool _keep(Json o) {
     final state = '${o['posState']}';
     return switch (filter) {
+      'pack' => canInvoice(o),
+      'ship' => canShip(o) || fulfilmentStage(o) == 'Shipment not sent',
       'open' => state == 'reserved' || state == 'awaiting' || state == 'unmatched' || _short(o),
       'all' => true,
       _ => state == filter,
@@ -130,6 +137,19 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
             for (final (key, label) in filters)
               ChoiceChip(label: Text(label), selected: filter == key, onSelected: (_) => setState(() => filter = key)),
           ]),
+          // WS-E: one pick list for every order waiting to be packed.
+          if (rows.any(canInvoice))
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  onPressed: () => openBatchPick(context, [for (final o in rows.where(canInvoice)) '${o['id']}']),
+                  icon: const Icon(Icons.checklist),
+                  label: Text('Batch pick list (${rows.where(canInvoice).length})'),
+                ),
+              ),
+            ),
           const SizedBox(height: 12),
           DataList(
             rows: rows,
@@ -153,6 +173,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
               }, flex: 3),
               Col('Status', (o) => Wrap(spacing: 6, runSpacing: 4, children: [
                     _orderChip('${o['posState']}'),
+                    if (o['mode'] == 'pos' || o['fulfilment'] != null) stageChip(fulfilmentStage(o)), // WS-E
                     if (_short(o) && o['posState'] != 'awaiting') _orderChip('awaiting'),
                   ]), flex: 2),
               Col('Total', (o) => Text(app.money(o['total'] as num?)), numeric: true),
@@ -255,7 +276,9 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
                 child: Text('Purchase order(s) created: ${(o['purchaseOrderIds'] as List).join(', ')}', style: small),
               ),
             const SizedBox(height: 8),
-            Text('Issue invoices and refunds in Magento. When an item comes back, inspect it and record its bin in Inventory with the online order number.', style: small),
+            Text(o['mode'] == 'pos'
+                ? 'The POS invoices this order: pick it, invoice & pack, then send the courier and tracking to Magento. Refunds are issued in Magento; when an item comes back, take the return on the POS invoice.'
+                : 'Issue invoices and refunds in Magento. When an item comes back, inspect it and record its bin in Inventory with the online order number.', style: small),
           ]),
         ),
       ),
@@ -270,6 +293,18 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
           FilledButton(
             onPressed: busy ? null : () => _run('/online-orders/${o['id']}/fulfil', 'Stock taken for the order.'),
             child: const Text('Fulfil from stock'),
+          ),
+        // WS-E: pick & pack, ship, delivered.
+        if (canInvoice(o) || canShip(o) || o['fulfilment'] != null)
+          FilledButton.icon(
+            onPressed: busy
+                ? null
+                : () {
+                    Navigator.of(context).pop();
+                    openPickPack(context, '${o['id']}');
+                  },
+            icon: const Icon(Icons.inventory_2_outlined, size: 18),
+            label: Text(canInvoice(o) ? 'Pick & pack' : 'Shipping & delivery'),
           ),
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
       ],
