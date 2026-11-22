@@ -40,7 +40,7 @@ const _reportColumns = {
   'tax': ['document', 'date', 'sku', 'hsnSac', 'taxRate', 'taxable', 'tax', 'cgst', 'sgst', 'igst', 'utgst'],
   'shifts': ['userId', 'openedAt', 'closedAt', 'openingCash', 'cashIn', 'cashOut', 'expectedCash', 'countedCash', 'variance'],
   'stock-movement': ['createdAt', 'sku', 'name', 'location', 'quantity', 'reason', 'userId'],
-  'purchase-receipts': ['date', 'sku', 'supplier', 'location', 'quantity', 'cost', 'landedCost', 'total'],
+  'purchase-receipts': ['date', 'source', 'sku', 'supplier', 'location', 'quantity', 'cost', 'landedCost', 'total'], // QA #2: source = Goods receipt / PO bill / Supplier bill
   'cash-movements': ['createdAt', 'userId', 'direction', 'amount', 'reason'],
   'tenders': ['type', 'collected', 'refunded', 'net'],
 };

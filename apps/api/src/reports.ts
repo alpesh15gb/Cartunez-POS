@@ -440,36 +440,70 @@ export async function report(
           : a.quantity - b.quantity,
       );
   } else if (name === "purchase-receipts") {
+    // QA #2: every way stock was received from a supplier, with a source column:
+    // "Goods receipt" (received on a PO without a bill), "PO bill" (supplier bill
+    // against a PO) and "Supplier bill" (direct bill). A bill posts its own stock and
+    // never creates a goods receipt, so each physical delivery is exactly one document
+    // here (no double counting); cancelled bills (stock reversed) are left out.
     const suppliers = await records(db, actor.organizationId, "supplier");
     const supplierNames = new Map(suppliers.map(s => [s.id, s.name]));
-    rows = (
+    const wanted = (supplierId: string, createdAt: string) =>
+      inDate(createdAt) && (!filters.supplierId || supplierId === filters.supplierId);
+    const lineWanted = (line: any) => {
+      const part = byProduct.get(line.productId);
+      return (!filters.category || (line.category ?? part?.category) === filters.category)
+        && (!filters.sku || (line.sku ?? part?.sku) === filters.sku);
+    };
+    const receiptRows = (
       await records(db, actor.organizationId, "purchaseReceipt", actor.branchId)
     )
-      .filter(
-        (item) =>
-          inDate(item.createdAt) &&
-          (!filters.supplierId || item.supplierId === filters.supplierId),
-      )
+      .filter((item) => wanted(item.supplierId, item.createdAt))
       .flatMap((item) =>
-        item.lines
-          .filter((line: any) => {
-            const part = byProduct.get(line.productId);
-            return (!filters.category || (line.category ?? part?.category) === filters.category)
-              && (!filters.sku || (line.sku ?? part?.sku) === filters.sku);
-          })
-          .map((line: any) => ({
-            id: item.id,
-            purchaseOrderId: item.purchaseOrderId,
-            date: item.createdAt,
-            supplierId: item.supplierId,
-            supplier: supplierNames.get(item.supplierId) ?? item.supplierId,
-            sku: byProduct.get(line.productId)?.sku ?? line.productId,
-            name: byProduct.get(line.productId)?.name,
-            location: binNames.get(line.binId) ?? line.binId,
-            ...line,
-            total: line.cost * line.quantity + line.landedCost,
-          })),
+        item.lines.filter(lineWanted).map((line: any) => ({
+          id: item.id,
+          source: "Goods receipt",
+          purchaseOrderId: item.purchaseOrderId,
+          date: item.createdAt,
+          supplierId: item.supplierId,
+          supplier: supplierNames.get(item.supplierId) ?? item.supplierId,
+          sku: byProduct.get(line.productId)?.sku ?? line.productId,
+          name: byProduct.get(line.productId)?.name,
+          location: binNames.get(line.binId) ?? line.binId,
+          ...line,
+          total: line.cost * line.quantity + line.landedCost,
+        })),
       );
+    const billRows = (
+      await records(db, actor.organizationId, "purchaseBill", actor.branchId)
+    )
+      .filter((bill) => !bill.voided && wanted(bill.supplierId, bill.createdAt))
+      .flatMap((bill) =>
+        bill.lines.filter(lineWanted).map((line: any) => {
+          // A bill line keeps the landed cost per unit; the report's landedCost is the
+          // line's freight/discount share (like a goods receipt), GST excluded (claimed back).
+          const stockValue = (line.landedCost ?? line.cost) * line.quantity;
+          return {
+            id: bill.id,
+            source: bill.purchaseOrderId ? "PO bill" : "Supplier bill",
+            purchaseOrderId: bill.purchaseOrderId || null,
+            billNumber: bill.billNumber || "",
+            date: bill.createdAt,
+            supplierId: bill.supplierId,
+            supplier: supplierNames.get(bill.supplierId) ?? bill.supplierName ?? bill.supplierId,
+            productId: line.productId,
+            sku: byProduct.get(line.productId)?.sku ?? line.sku ?? line.productId,
+            name: byProduct.get(line.productId)?.name ?? line.name,
+            category: byProduct.get(line.productId)?.category,
+            binId: line.binId,
+            location: binNames.get(line.binId) ?? line.binId,
+            quantity: line.quantity,
+            cost: line.cost,
+            landedCost: stockValue - line.cost * line.quantity,
+            total: stockValue,
+          };
+        }),
+      );
+    rows = [...receiptRows, ...billRows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   } else if (name === "warranty")
     rows = (
       await records(db, actor.organizationId, "warranty", actor.branchId)
