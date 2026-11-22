@@ -75091,7 +75091,7 @@ A.b3f.prototype={
 $0(){var s=0,r=A.p(t.H),q=this,p
 var $async$$0=A.q(function(a,b){if(a===1)return A.m(b,r)
 for(;;)switch(s){case 0:s=2
-return A.i(A.I6("catalog-template.csv","\ufeffsku,name,brand,category,unit,cost,retailPrice,taxPercent,barcodes,wholesalePrice,hsnSac,partNumber,reorderLevel,serialTracked,universal,type,onlineOnly\r\n"),$async$$0)
+return A.i(A.I6("catalog-template.csv","\ufeffsku,name,brand,category,unit,cost,retailPrice,taxPercent,barcodes,wholesalePrice,hsnSac,partNumber,reorderLevel,serialTracked,universal,type,onlineOnly,description\r\n"),$async$$0)
 case 2:p=b
 if(q.a.c!=null)q.b.gA().Q.v(0,p)
 return A.n(null,r)}})

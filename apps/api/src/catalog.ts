@@ -123,7 +123,7 @@ export class CatalogCodes {
 }
 
 const required = ["name", "retailPrice"];
-const optional = ["sku", "brand", "category", "unit", "cost", "taxPercent", "barcodes", "wholesalePrice", "hsnSac", "partNumber", "reorderLevel", "serialTracked", "universal", "type", "onlineOnly"];
+const optional = ["sku", "brand", "category", "unit", "cost", "taxPercent", "barcodes", "wholesalePrice", "hsnSac", "partNumber", "reorderLevel", "serialTracked", "universal", "type", "onlineOnly", "description"];
 const headerNames = new Map([...required, ...optional].map((name) => [name.toLowerCase(), name]));
 
 function hundredths(value: string, label: string) {

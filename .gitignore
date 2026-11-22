@@ -49,3 +49,4 @@ apps/desktop/build/*
 !apps/desktop/build/icon.ico
 !docs/test-results/
 !docs/test-results/**
+imports/

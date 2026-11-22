@@ -174,7 +174,9 @@ export function magentoProduct(
     { attribute_code: "url_key", value: urlKey(product.name, product.sku) },
     { attribute_code: "cz_fitment", value: fitmentText(product) },
   ];
-  if (listing.description) custom.push({ attribute_code: "description", value: listing.description });
+  // Website text: the listing's own description, else the part's description (e.g. from the catalog import).
+  const description = listing.description || product.description;
+  if (description) custom.push({ attribute_code: "description", value: description });
   // Clear the old "Available on order. Ships in N days." notice.
   if (listing.availability === "order") custom.push({ attribute_code: "short_description", value: "" });
   // Online only: the shop orders it from the supplier when a customer buys it, so

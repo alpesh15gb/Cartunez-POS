@@ -26,6 +26,14 @@ test("online only: product field, CSV column and Magento stock fields", () => {
   assert.equal(preview.valid, true);
   assert.deepEqual(preview.products.map((p) => p.onlineOnly), [true, false]);
   assert.equal(previewCatalog("name,retailPrice,onlineOnly\nX,1,maybe\n", new CatalogCodes([]), false).valid, false);
+  // The import's description column becomes the website text when the listing has none.
+  const described = previewCatalog('name,retailPrice,onlineOnly,description\nAmp,5000,yes,"Four-channel amp, 50 W x 4."\n', new CatalogCodes([]), false);
+  assert.equal(described.valid, true);
+  assert.equal(described.products[0].description, "Four-channel amp, 50 W x 4.");
+  const site = magentoProduct(described.products[0], { published: true }, { mrp: 500000, selling: 500000 }, 0, {});
+  assert.equal(site.product.custom_attributes.find((a: any) => a.attribute_code === "description")?.value, "Four-channel amp, 50 W x 4.");
+  const own = magentoProduct(described.products[0], { published: true, description: "Listing text" }, { mrp: 500000, selling: 500000 }, 0, {});
+  assert.equal(own.product.custom_attributes.find((a: any) => a.attribute_code === "description")?.value, "Listing text");
   // Magento: always sellable, stock not managed, never the POS quantity.
   const body = magentoProduct(online, { published: true }, { mrp: 10000, selling: 9000 }, 7, {});
   const stock = body.product.extension_attributes.stock_item as any;
