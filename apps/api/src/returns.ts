@@ -17,7 +17,8 @@
 // split in proportion to how the bill was paid. Credit, Advance and Exchange
 // portions go back on the customer's account ("Credit"), "Online" portions go
 // back through the website's payment channel ("Online", no drawer effect), and
-// Cash/Card/UPI portions are paid by the requested `refundType` (Cash default).
+// Cash/Card/UPI portions are paid by the requested `refundType`; with none
+// requested each goes back by its original tender (UPI by UPI, Card by Card).
 // The breakdown is `refunds: [{ type, amount }]` (sums to `refundTotal`);
 // `refundType` is that single type, "Mixed" when there are several, or
 // "Exchange" when nothing was paid back. Read it with refundParts().
@@ -92,12 +93,13 @@ function splitCumulative(parts: RefundPart[], amount: number, before = 0): Refun
   return out;
 }
 
-/** Where the refund of each original tender goes. */
+/** Where the refund of each original tender goes. An empty `requested` means "the original tender". */
 function destination(invoice: RecordData, tender: string, requested: string) {
   if (tender === "Online") return "Online";
   if (tender === "Credit" || tender === "Advance") return "Credit";
   if (tender === "Exchange" && invoice.customerId) return "Credit";
-  return requested;
+  if (requested) return requested;
+  return ["Cash", "Card", "UPI"].includes(tender) ? tender : "Cash";
 }
 
 /**
@@ -107,7 +109,7 @@ function destination(invoice: RecordData, tender: string, requested: string) {
 export function refundBreakdown(invoice: RecordData, prior: number, amount: number, requested: string): RefundPart[] {
   if (amount <= 0) return [];
   const weights = tenderWeights(invoice);
-  const shares = weights.length ? splitCumulative(weights, amount, prior) : [{ type: requested, amount }];
+  const shares = weights.length ? splitCumulative(weights, amount, prior) : [{ type: requested || "Cash", amount }];
   const merged = new Map<string, number>();
   for (const share of shares) {
     const type = destination(invoice, share.type, requested);
@@ -354,8 +356,9 @@ export async function returnInvoice(
   const creditNumber = settings.nextCreditNote || 1;
   settings.nextCreditNote = creditNumber + 1;
   await putRecord(db, actor.organizationId, "settings", settings);
-  const requested = body.refundType || "Cash";
-  if (!REFUND_TYPES.includes(requested)) fail("Choose a supported refund method.");
+  // No refundType: each tender is paid back by itself (QA #3); an explicit one overrides.
+  const requested = body.refundType || "";
+  if (requested && !REFUND_TYPES.includes(requested)) fail("Choose a supported refund method.");
   const exchange = options.exchangeTotal !== undefined;
   const applied = exchange ? Math.min(total, options.exchangeTotal!) : 0;
   const refundTotal = total - applied;
@@ -387,8 +390,10 @@ export async function returnInvoice(
     // One condition for the whole return, or "mixed" when lines went to different bins.
     condition: dispositions.length === 1 ? dispositions[0] : "mixed",
     // An exchange with nothing left to pay back is settled entirely against the new invoice.
-    refundType: exchange && refundTotal === 0 ? "Exchange" : refundTypeOf(refunds, requested),
+    refundType: exchange && refundTotal === 0 ? "Exchange" : refundTypeOf(refunds, requested || "Cash"),
     refunds,
+    // QA #3: the UPI/card reversal reference the cashier noted, when given.
+    ...(body.refundReference ? { refundReference: text(body.refundReference, "refund reference", false, 80).trim() } : {}),
     refundTotal,
     total,
     tax: lines.reduce((sum, line) => sum + line.tax, 0),

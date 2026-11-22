@@ -36,7 +36,12 @@ class InvoicesScreen extends StatelessWidget {
                 : null,
             onTap: (row) => showReceipt(context, row),
             columns: [
-              Col('Invoice', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
+              // QA #7: the invoice number opens the receipt (view / reprint / share).
+              Col('Invoice', (r) => InkWell(
+                    onTap: () => showReceipt(context, r),
+                    child: Text('${r['number']}',
+                        style: TextStyle(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.primary, decoration: TextDecoration.underline)),
+                  )),
               Col('Date', (r) => Text(formatDate(r['createdAt']))),
               Col('Customer', (r) => Text('${r['customer']?['name'] ?? 'Walk-in'}')),
               Col('Status', (r) => StatusChip(app.invoiceStatus(r))),
@@ -44,14 +49,33 @@ class InvoicesScreen extends StatelessWidget {
             ],
             actions: (r) {
               final status = app.invoiceStatus(r);
+              // QA #7: View receipt and Return stay one click; Void moves into the ⋮ menu.
               return [
+                OutlinedButton.icon(
+                  onPressed: () => showReceipt(context, r),
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  label: const Text('View receipt'),
+                ),
                 if (status != 'Voided' && status != 'Returned' && app.canSell)
                   OutlinedButton(onPressed: () => startReturnForInvoice(context, r), child: const Text('Return')), // WS-B
                 if (app.isManager && status == 'Finalized')
-                  OutlinedButton(
-                    style: OutlinedButton.styleFrom(foregroundColor: Brand.danger),
-                    onPressed: () => voidInvoice(context, r),
-                    child: const Text('Void'),
+                  PopupMenuButton<String>(
+                    tooltip: 'More actions for ${r['number']}',
+                    icon: const Icon(Icons.more_vert),
+                    onSelected: (v) {
+                      if (v == 'void') voidInvoice(context, r);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'void',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.block, color: Brand.danger),
+                          title: Text('Void invoice', style: TextStyle(color: Brand.danger)),
+                        ),
+                      ),
+                    ],
                   ),
               ];
             },
@@ -129,7 +153,7 @@ Future<void> returnInvoice(BuildContext context, Json invoice) async {
         'approvalId': v['approvalId'],
         'reason': v['reason'],
         'condition': v['condition'],
-        'refundType': v['refundType'],
+        if (v['refundType'] != _sameAsPaid) 'refundType': v['refundType'],
         'lines': [
           {'lineId': v['lineId'], 'quantity': qty, 'binId': v['binId'], 'serials': splitList(v['serials'])},
         ],
@@ -154,20 +178,36 @@ Future<void> voidInvoice(BuildContext context, Json invoice) async {
           options: _refundOptions(app, invoice)),
     ],
     onSubmit: (v) async {
-      final result = await app.mutate('/invoices/${invoice['id']}/void', v) as Map;
-      app.toast('Invoice voided. Refund ${app.money(result['totalRefund'] as num? ?? 0)} by ${v['refundType']}.');
+      // "Same as paid" sends no refundType: the server pays each tender back by itself.
+      final body = {...v}..removeWhere((k, value) => k == 'refundType' && value == _sameAsPaid);
+      final result = await app.mutate('/invoices/${invoice['id']}/void', body) as Map;
+      app.toast('Invoice voided. Refund ${app.money(result['totalRefund'] as num? ?? 0)} '
+          '${v['refundType'] == _sameAsPaid ? 'the way it was paid' : 'by ${v['refundType']}'}.');
     },
   );
 }
 
-/// A sale on credit is refunded to the customer's account by default.
+const _sameAsPaid = 'original';
+
+/// Cash/Card/UPI tenders that brought money in on this bill.
+Set<String> _paidBy(Json invoice) => {
+      for (final t in invoice['tenders'] as List? ?? [])
+        if (const ['Cash', 'Card', 'UPI'].contains(t['type']) && ((t['amount'] ?? 0) as num) > 0) '${t['type']}',
+    };
+
+/// A sale on credit is refunded to the customer's account by default; otherwise the
+/// original tender (QA #3) — a split bill "the same way it was paid", like the server default.
 String _refundDefault(Json invoice) {
   final tenders = (invoice['tenders'] as List? ?? []);
   if (tenders.any((t) => t['type'] == 'Credit')) return 'Credit';
-  return '${tenders.firstOrNull?['type'] ?? 'Cash'}';
+  final paid = _paidBy(invoice);
+  if (paid.length > 1) return _sameAsPaid;
+  return paid.firstOrNull ?? 'Cash';
 }
 
 List<(String, String)> _refundOptions(AppState app, Json invoice) => [
-      for (final t in app.tenderTypes) (t, t),
+      if (_paidBy(invoice).length > 1) (_sameAsPaid, 'Same as paid (${_paidBy(invoice).join(' + ')})'),
+      for (final t in {...app.tenderTypes.where((t) => const ['Cash', 'Card', 'UPI'].contains(t)), ..._paidBy(invoice)})
+        (t, t == 'Cash' ? 'Cash from the drawer' : _paidBy(invoice).contains(t) ? '$t (as paid)' : t),
       if (invoice['customerId'] != null) ('Credit', "Customer's account (reduce udhaar)"),
     ];

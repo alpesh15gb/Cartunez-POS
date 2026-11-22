@@ -38,7 +38,8 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
     )
       fail("Use line credit notes after a prior core refund.");
     // The refund follows the original tenders (returns.ts refundBreakdown): account
-    // portions go back on the account, Online to the website, the rest by refundType.
+    // portions go back on the account, Online to the website, the rest by refundType
+    // (or, with none given, by each original tender — same default as returns).
     const credit = await returnInvoice(
       tx,
       actor,
@@ -70,7 +71,7 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
         quantity: line.qty,
         total: line.qty * line.coreCharge,
         reason: body.reason,
-        refunds: refundBreakdown(invoice, credited, line.qty * line.coreCharge, body.refundType || "Cash"),
+        refunds: refundBreakdown(invoice, credited, line.qty * line.coreCharge, body.refundType || ""),
         createdAt: now(),
         userId: actor.id,
         shiftId: credit.shiftId,

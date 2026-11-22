@@ -157,7 +157,7 @@ final workspaces = <Workspace>[
     TabDef('estimates', 'Estimates', _sellers, 'Quotes for parts, labour and kits; share on WhatsApp, then open a job card.',
         (_, id) => EstimatesScreen(id: id),
         path: '/orders/estimates', search: false, takesArg: true),
-    TabDef('jobs', 'Job cards', _sellers, 'Vehicles in the workshop: check-in, work, parts, photos, then one-click GST invoice.',
+    TabDef('jobs', 'Job cards', _sellers, 'Vehicles in the workshop: check-in, work, parts, photos, then one-click invoice.',
         (_, id) => JobsScreen(id: id),
         path: '/orders/jobs', search: false, takesArg: true),
   ]),

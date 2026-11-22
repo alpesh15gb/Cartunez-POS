@@ -12,6 +12,12 @@ import '../widgets.dart';
 import 'kits.dart';
 import '../../core/receipt_print.dart' show openWhatsApp, whatsappUri;
 
+/// QA #10/#14: "GST invoice" only for a GST-registered shop, otherwise "Invoice".
+String invoiceTerm(AppState app, {bool lower = false}) {
+  final term = app.gst ? 'GST invoice' : 'Invoice';
+  return lower ? (app.gst ? 'GST invoice' : 'invoice') : term;
+}
+
 /// Job card statuses, in board order.
 const jobStatuses = ['checked-in', 'in-progress', 'waiting-parts', 'ready', 'delivered'];
 const jobStatusLabels = {

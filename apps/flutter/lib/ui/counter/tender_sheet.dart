@@ -2,9 +2,11 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../shift/shift_dialogs.dart' show showOpenShiftDialog; // WS-D
@@ -48,6 +50,9 @@ Future<void> startCheckout(BuildContext context, {bool split = false, String? te
   if (invoice != null && context.mounted) await afterSale(context, invoice, print: print);
 }
 
+/// QA #9: the UPI QR needs the shop's UPI ID (Settings › Counter payments).
+bool upiQrAvailable(AppState app) => '${app.settings['upiVpa'] ?? ''}'.trim().isNotEmpty;
+
 // WS-D: opening float with quick amounts lives in lib/ui/shift/shift_dialogs.dart.
 Future<bool> openShiftDialog(BuildContext context, {bool forCheckout = false}) =>
     showOpenShiftDialog(context, forCheckout: forCheckout);
@@ -70,6 +75,8 @@ class CheckoutDialogState extends State<CheckoutDialog> {
   String secondTender = '';
   bool split = false;
   bool confirmed = false;
+  // QA #9: true when the UPI part was confirmed from the QR screen (vs checked by hand).
+  bool viaQr = false;
   bool busy = false;
   String? error;
 
@@ -253,6 +260,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 }
                 if (secondTender == tender) secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
                 confirmed = false;
+                viaQr = false;
                 for (final c in references.values) { c.clear(); }
               }),
             ),
@@ -322,34 +330,71 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 ),
               ]),
             // WS-A: static UPI QR for the UPI part of the payment.
+            // QA #9: offered only when the shop has a UPI ID; otherwise disabled with a Settings link.
             if (tender == 'UPI' || (split && secondTender == 'UPI'))
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                  onPressed: () async {
-                    final upiAmount = tender == 'UPI' ? _minor(amount.text) : _minor(second.text);
-                    final ref = await showUpiQr(context, amount: upiAmount, note: 'Bill ${app.cart['transactionId']}'.substring(0, 13));
-                    if (ref == null || !mounted) return;
-                    setState(() {
-                      confirmed = true;
-                      references['UPI']!.text = ref;
-                    });
-                  },
-                  icon: const Icon(Icons.qr_code_2),
-                  label: Text('Show UPI QR · ${app.money(tender == 'UPI' ? _minor(amount.text) : _minor(second.text))}'),
-                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  FilledButton.tonalIcon(
+                    key: const ValueKey('show-upi-qr'),
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                    onPressed: !upiQrAvailable(app)
+                        ? null
+                        : () async {
+                            final upiAmount = tender == 'UPI' ? _minor(amount.text) : _minor(second.text);
+                            final ref = await showUpiQr(context, amount: upiAmount, note: 'Bill ${app.cart['transactionId']}'.substring(0, 13));
+                            if (ref == null || !mounted) return;
+                            setState(() {
+                              confirmed = true;
+                              viaQr = true;
+                              references['UPI']!.text = ref;
+                            });
+                          },
+                    icon: const Icon(Icons.qr_code_2),
+                    label: Text('UPI QR checkout · ${app.money(tender == 'UPI' ? _minor(amount.text) : _minor(second.text))}'),
+                  ),
+                  if (!upiQrAvailable(app))
+                    Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+                      Text('No UPI ID set, so no QR.', style: Theme.of(context).textTheme.bodySmall),
+                      if (app.isManager)
+                        TextButton(
+                          key: const ValueKey('set-upi-id'),
+                          onPressed: busy
+                              ? null
+                              : () {
+                                  // Leave checkout for Settings; the cart stays on the counter.
+                                  final router = GoRouter.maybeOf(context);
+                                  Navigator.pop(context);
+                                  router?.go('/settings');
+                                },
+                          child: const Text('Set UPI ID in Settings'),
+                        )
+                      else
+                        Text(' Ask the owner to set the UPI ID in Settings.', style: Theme.of(context).textTheme.bodySmall),
+                    ])
+                  else if (viaQr && confirmed)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('Confirmed on the UPI QR screen.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Brand.forest)),
+                    ),
+                ]),
               ),
             if (nonCash) ...[
               const SizedBox(height: 12),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: confirmed,
-                onChanged: (v) => setState(() => confirmed = v),
-                title: Text(phone ? 'Payment confirmed' : 'Payment confirmed by the card machine / UPI app'),
-                subtitle: Text(phone
-                    ? 'The card machine or UPI app shows it paid. If not, the sale waits in Sync & audit.'
-                    : 'If not yet confirmed, the sale waits in Sync & audit.'),
+                onChanged: (v) => setState(() {
+                  confirmed = v;
+                  viaQr = false;
+                }),
+                // QA #9: this is the manually verified path (no QR): the cashier checked the machine / app.
+                title: Text(phone ? 'Payment confirmed (checked manually)' : 'Payment confirmed: checked on the card machine / UPI app'),
+                subtitle: Text(confirmed
+                    ? 'The sale is saved as paid.'
+                    : phone
+                        ? 'Off: the sale is saved as a pending payment in Sync & audit until someone confirms it.'
+                        : 'Off: saved as a pending payment in Sync & audit until confirmed.'),
               ),
               for (final type in {tender, if (split) secondTender}.where(_external))
                 TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference')),
@@ -393,7 +438,12 @@ class CheckoutDialogState extends State<CheckoutDialog> {
             icon: busy
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.check),
-            label: Text(app.online ? 'Complete sale' : 'Reconnect to complete sale'),
+            // QA #8: with card / UPI not confirmed, the sale is saved as a pending payment.
+            label: Text(!app.online
+                ? 'Reconnect to complete sale'
+                : nonCash && !confirmed
+                    ? 'Save pending payment'
+                    : 'Complete sale'),
           ),
         ],
       )),

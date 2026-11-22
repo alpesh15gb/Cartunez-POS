@@ -93,6 +93,11 @@ void main() {
     await tester.tap(find.text('Supplier warranty (RMA)').last);
     await tester.pumpAndSettle();
     expect(find.text('Claim from supplier'), findsOneWidget);
+    // QA #7: nothing is committed until Refund or Exchange is chosen.
+    expect(find.text('Choose Refund or Exchange'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.ancestor(of: find.text('Choose Refund or Exchange'), matching: find.byWidgetPredicate((w) => w is FilledButton))).onPressed, isNull);
+    await tester.tap(find.text('Exchange'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Add to counter'));
     // (No settle: the cart's save-to-disk timer has no store in this test; dispose cancels it.)
     await tester.pump();
@@ -133,6 +138,42 @@ void main() {
     // The credit note opens for printing or sharing.
     expect(find.text('CR-PUNE-1'), findsOneWidget);
     expect(find.text('Share'), findsOneWidget);
+    app.dispose();
+  });
+
+  testWidgets('QA #3: refund defaults to the original tender; switching to cash shows the drawer effect', (tester) async {
+    final app = _app('owner');
+    final upiBill = {..._invoice, 'tenders': [{'type': 'UPI', 'amount': 35400}]};
+    tester.view.physicalSize = const Size(924, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (context) =>
+        Scaffold(body: TextButton(onPressed: () => startReturn(context, upiBill), child: const Text('Open')))))));
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    expect(find.text('UPI (as paid)'), findsOneWidget);
+    expect(find.textContaining('back by UPI to the customer'), findsOneWidget);
+    expect(find.textContaining('drawer is not affected'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'UPI reference (optional)'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'UPI reference (optional)'), 'UTR123');
+    // Explicit switch to cash shows what it does to the drawer.
+    await tester.tap(find.text('UPI (as paid)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cash from the drawer').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Expected cash at shift close goes down by ${app.money(11800)}'), findsOneWidget);
+    expect(find.textContaining('paid by UPI, not cash'), findsOneWidget);
+    await tester.tap(find.text('Cash from the drawer'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('UPI (as paid)').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Reason'), 'Wrong part');
+    await tester.tap(find.text('Record return'));
+    await tester.pumpAndSettle();
+    expect(app.body!['refundType'], 'UPI');
+    expect(app.body!['refundReference'], 'UTR123');
     app.dispose();
   });
 

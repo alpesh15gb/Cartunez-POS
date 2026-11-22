@@ -10,6 +10,7 @@ import '../barcode_scan.dart';
 import '../photos.dart';
 import '../purchasing/file_thumbs.dart';
 import '../screens/receipt.dart';
+import '../shift/shift_dialogs.dart' show showOpenShiftDialog;
 import '../people/account_actions.dart' show availableAdvance, advanceModes;
 import '../widgets.dart';
 import 'common.dart';
@@ -345,6 +346,11 @@ class _JobCardState extends State<JobCard> {
 
   Future<void> _bill() async {
     final app = context.appRead;
+    // QA #10: no shift yet? Open it right here and carry on billing this job.
+    if (app.openShift == null) {
+      final opened = await showOpenShiftDialog(context, forCheckout: true);
+      if (!opened || !mounted) return;
+    }
     final shift = app.openShift;
     if (shift == null) {
       app.toast('Open your shift before billing the job.');
@@ -358,7 +364,7 @@ class _JobCardState extends State<JobCard> {
     final invoice = await showFormDialog<Json>(
       context,
       title: 'Bill ${job['number']} · ${app.money(total)}',
-      submit: 'Make GST invoice',
+      submit: 'Make ${invoiceTerm(app, lower: true)}', // QA #10: "invoice" unless GST registered
       fields: [
         if (held > 0)
           FieldSpec('advance', 'Use from advance', kind: FieldKind.money, value: (offer / 100).toStringAsFixed(2),
@@ -507,7 +513,7 @@ class _JobCardState extends State<JobCard> {
         ),
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (open && app.canSell)
-          FilledButton.icon(onPressed: blocked != null ? null : _bill, icon: const Icon(Icons.receipt_long_outlined), label: const Text('Bill job (GST invoice)')),
+          FilledButton.icon(onPressed: blocked != null ? null : _bill, icon: const Icon(Icons.receipt_long_outlined), label: Text('Bill job (${invoiceTerm(app, lower: true)})')),
         if (open && app.canSell && job['customerId'] != null)
           OutlinedButton.icon(onPressed: busy ? null : _takeAdvance, icon: const Icon(Icons.savings_outlined), label: const Text('Take advance')),
         OutlinedButton.icon(onPressed: () => shareOnWhatsApp(context, job, title: 'Job card'), icon: const Icon(Icons.chat_outlined), label: const Text('WhatsApp')),
