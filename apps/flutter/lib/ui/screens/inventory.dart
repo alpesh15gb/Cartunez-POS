@@ -6,6 +6,7 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../shell.dart';
 import '../photos.dart';
+import '../purchasing/bill_entry_dialog.dart'; // QA #6: receive a new part against a supplier bill
 import '../widgets.dart';
 import '../workshop/kits.dart'; // WS-C
 import 'receipt.dart';
@@ -228,38 +229,42 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
   final fitmentOn = app.feature('fitment');
   // Photos taken or chosen in the form; uploaded after the part is saved.
   final pendingPhotos = <({Uint8List bytes, int width, int height})>[];
+  Json? createdPart; // QA #6: a part added here (not from a supplier bill) gets a next-step offer.
   await showFormDialog<void>(
     context,
     title: product['id'] == null ? 'Add part' : 'Edit ${product['name']}',
     header: PendingPartPhotos(photos: pendingPhotos),
     fields: [
+      // QA #6: the required name and price (and fitment when that module is on) come first;
+      // everything else is marked optional.
       FieldSpec('name', 'Part name', value: product['name'], required: true),
-      FieldSpec('sku', 'SKU / item code', value: product['sku'], required: product['id'] != null,
+      FieldSpec('retailPrice', 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
+      FieldSpec('universal', 'Fits',
+          kind: FieldKind.select,
+          value: '${product['universal'] ?? !fitmentOn}',
+          options: const [('true', 'All vehicles (universal)'), ('false', 'Specific vehicles only')],
+          help: fitmentOn ? 'For specific vehicles, add them under Fitment after saving.' : null,
+          advanced: !fitmentOn),
+      FieldSpec('sku', product['id'] == null ? 'SKU / item code (optional)' : 'SKU / item code', value: product['sku'], required: product['id'] != null,
           help: product['id'] == null ? 'Leave blank to create one automatically.' : null),
       if (product['id'] != null && app.isManager)
         FieldSpec('salesAction', 'New sales', kind: FieldKind.select, value: 'keep', options: [
           ('keep', product['salesStopped'] == true ? 'Sales stopped' : 'Available for sale'),
           if (product['salesStopped'] == true) ('resume', 'Resume sales') else ('stop', 'Stop new sales'),
         ]),
-      FieldSpec('brand', 'Brand', value: product['brand']),
-      FieldSpec('category', 'Category',
+      FieldSpec('brand', 'Brand (optional)', value: product['brand']),
+      FieldSpec('category', 'Category (optional)',
           value: product['category'], suggestions: {...app.products.map((p) => '${p['category']}')}.toList()),
-      FieldSpec('partNumber', 'Manufacturer part number', value: product['partNumber']),
-      FieldSpec('barcodes', 'Barcodes', value: joined('barcodes'), help: 'Scan into this field or separate codes with commas. Leave empty to generate one.', barcodeInput: true),
-      FieldSpec('retailPrice', 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
-      FieldSpec('wholesalePrice', 'Wholesale price', kind: FieldKind.money, value: money('wholesalePrice'), help: 'Blank uses the retail price.'),
-      FieldSpec('cost', 'Purchase cost', kind: FieldKind.money, value: money('cost'), help: 'Optional. Supplier bills update it.'),
+      FieldSpec('partNumber', 'Manufacturer part number (optional)', value: product['partNumber']),
+      FieldSpec('barcodes', 'Barcodes (optional)', value: joined('barcodes'), help: 'Scan into this field or separate codes with commas. Leave empty to generate one.', barcodeInput: true),
+      FieldSpec('wholesalePrice', 'Wholesale price (optional)', kind: FieldKind.money, value: money('wholesalePrice'), help: 'Blank uses the retail price.'),
+      FieldSpec('cost', 'Purchase cost (optional)', kind: FieldKind.money, value: money('cost'), help: 'Supplier bills update it.'),
       // Not GST registered: prices are final, so there is no tax rate or HSN to enter.
       if (!app.noTax) ...[
         FieldSpec('taxRate', 'Tax rate (%)', kind: FieldKind.money, value: ((product['taxRate'] ?? commonRate) as int) / 100, required: true),
-        FieldSpec('hsnSac', 'HSN / SAC', value: product['hsnSac'], advanced: !app.gst, required: app.gst),
+        FieldSpec('hsnSac', app.gst ? 'HSN / SAC' : 'HSN / SAC (optional)', value: product['hsnSac'], advanced: !app.gst, required: app.gst),
       ],
-      FieldSpec('reorderLevel', 'Reorder when stock falls to', kind: FieldKind.number, value: product['reorderLevel'] ?? 0),
-      FieldSpec('universal', 'Fits',
-          kind: FieldKind.select,
-          value: '${product['universal'] ?? !fitmentOn}',
-          options: const [('true', 'All vehicles (universal)'), ('false', 'Specific vehicles only')],
-          advanced: !fitmentOn),
+      FieldSpec('reorderLevel', 'Reorder when stock falls to (optional)', kind: FieldKind.number, value: product['reorderLevel'] ?? 0),
       FieldSpec('generateBarcode', 'If no barcode',
           kind: FieldKind.select,
           value: '${(product['barcodes'] as List? ?? []).isEmpty}',
@@ -338,12 +343,40 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
           }
         }
         onSaved?.call(Map<String, dynamic>.from(saved));
+        if (product['id'] == null && onSaved == null) createdPart = Map<String, dynamic>.from(saved);
       }
     },
   );
+  final newPart = createdPart;
+  if (newPart != null && context.mounted) await offerFirstStock(context, newPart);
 }
 
-Future<void> stockOperation(BuildContext context, String kind) async {
+/// QA #6: a new part starts with no stock, so offer the two ways to add it.
+Future<void> offerFirstStock(BuildContext context, Json part) async {
+  final barcodes = part['barcodes'] as List? ?? [];
+  final choice = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text('${part['name']} saved'),
+      content: Text([
+        'It has no stock yet. Add the units you have now.',
+        if (barcodes.isNotEmpty) 'Barcode ${barcodes.first}.',
+      ].join(' ')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Later')),
+        OutlinedButton.icon(onPressed: () => Navigator.pop(dialogContext, 'adjust'), icon: const Icon(Icons.tune), label: const Text('Adjust stock')),
+        FilledButton.icon(onPressed: () => Navigator.pop(dialogContext, 'bill'), icon: const Icon(Icons.receipt_long_outlined),
+            label: const Text('Receive against a supplier bill')),
+      ],
+    ),
+  );
+  if (!context.mounted) return;
+  if (choice == 'bill') await enterBill(context, part: part, supplierId: part['supplierId'] as String?);
+  if (choice == 'adjust') await stockOperation(context, 'adjust', productId: '${part['id']}');
+}
+
+/// [productId] pre-selects the part (QA #6: adding first stock to a new part).
+Future<void> stockOperation(BuildContext context, String kind, {String? productId}) async {
   final app = context.appRead;
   final transactionId = uuid();
   final parts = optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']}');
@@ -352,7 +385,7 @@ Future<void> stockOperation(BuildContext context, String kind) async {
     context,
     title: kind == 'adjust' ? 'Adjust stock' : 'Move stock',
     fields: [
-      FieldSpec('productId', 'Part', kind: FieldKind.select, options: parts, required: true, barcodeChoice: app.uniqueProductIdForCode),
+      FieldSpec('productId', 'Part', kind: FieldKind.select, value: productId, options: parts, required: true, barcodeChoice: app.uniqueProductIdForCode),
       if (kind == 'move') ...[
         FieldSpec('fromBinId', 'From bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),
         FieldSpec('toBinId', 'To bin', kind: FieldKind.select, options: allBins, required: true, barcodeChoice: app.binIdForCode),

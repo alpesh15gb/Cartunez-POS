@@ -18,19 +18,22 @@ import 'received.dart'; // WS-E
 
 // ---------------------------------------------------------------- bill entry
 
-/// Enter what a supplier delivered. [order] pre-fills the outstanding parts of a purchase order.
-Future<void> enterBill(BuildContext context, {Json? order, String? supplierId}) async {
+/// Enter what a supplier delivered. [order] pre-fills the outstanding parts of a purchase order;
+/// [part] pre-fills one line for that part (QA #6: first stock of a part just created).
+Future<void> enterBill(BuildContext context, {Json? order, String? supplierId, Json? part}) async {
   final app = context.appRead;
   if (app.sellableBins.isEmpty) return app.toast('Add a sellable bin first (Inventory › Bins).');
-  final saved = await showDialog<Json>(context: context, barrierDismissible: false, builder: (_) => _BillDialog(order: order, supplierId: supplierId));
+  final saved = await showDialog<Json>(context: context, barrierDismissible: false,
+      builder: (_) => _BillDialog(order: order, supplierId: supplierId, part: part));
   // WS-E: cost hikes, labels for the received quantities and the website update.
   if (saved != null && context.mounted) await showReceivedGoods(context, receivedLines(saved), title: 'Bill saved · goods received');
 }
 
 class _BillDialog extends StatefulWidget {
-  const _BillDialog({this.order, this.supplierId});
+  const _BillDialog({this.order, this.supplierId, this.part});
   final Json? order;
   final String? supplierId;
+  final Json? part;
   @override
   State<_BillDialog> createState() => _BillDialogState();
 }
@@ -66,6 +69,7 @@ class _BillDialogState extends State<_BillDialog> {
         'taxRate': part?['taxRate'] ?? 0, 'binId': defaultBin(app, '${l['productId']}'), 'retailPrice': null, 'serials': <String>[],
       });
     }
+    if (widget.order == null && widget.part != null) lines.add(_newLine(widget.part!));
   }
 
   @override
@@ -76,15 +80,8 @@ class _BillDialogState extends State<_BillDialog> {
     super.dispose();
   }
 
-  ({int subtotal, int tax, int total}) get totals {
-    var subtotal = 0, tax = 0;
-    for (final l in lines) {
-      final amount = (l['quantity'] as int) * (l['cost'] as int);
-      subtotal += amount;
-      if (gst) tax += (amount * ((l['taxRate'] ?? 0) as int) / 10000).round();
-    }
-    return (subtotal: subtotal, tax: tax, total: subtotal + tax + amountMinor(freight.text) - amountMinor(discount.text));
-  }
+  ({int subtotal, int tax, int total}) get totals =>
+      supplierBillTotals(lines, gst: gst, otherCharges: amountMinor(freight.text), discount: amountMinor(discount.text));
 
   Future<void> _addPhoto() async {
     final app = context.appRead;
@@ -354,13 +351,15 @@ class _BillDialogState extends State<_BillDialog> {
                 width: 170,
                 child: DropdownButtonFormField<String>(
                   initialValue: paidMode,
+                  isExpanded: true, // "Bank transfer" no longer overflows the 170px field
                   decoration: const InputDecoration(labelText: 'Paid by'),
                   items: [for (final m in paymentModes) DropdownMenuItem(value: m, child: Text(m))],
                   onChanged: (v) => setState(() => paidMode = v ?? paidMode),
                 ),
               ),
               TextButton(onPressed: () => setState(() => paidNow.text = plainAmount(t.total < 0 ? 0 : t.total)), child: const Text('Paid in full')),
-              Text('Left on the supplier\'s account: ${app.money((t.total - amountMinor(paidNow.text)).clamp(0, 1 << 40))}'),
+              Text('Left on the supplier\'s account: ${app.money(supplierBillDue(t.total, amountMinor(paidNow.text)))}',
+                  key: const ValueKey('bill-due')),
             ]),
             const SizedBox(height: 8),
             TextField(controller: notes, decoration: const InputDecoration(labelText: 'Notes (optional)')),
