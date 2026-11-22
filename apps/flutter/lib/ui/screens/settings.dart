@@ -6,6 +6,7 @@ import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../counter/counter_settings.dart'; // WS-A
+import '../counter/pending_payment.dart'; // QA #8
 import 'labels.dart';
 import 'online.dart';
 
@@ -432,6 +433,9 @@ class SyncScreen extends StatelessWidget {
         empty: 'Nothing waiting. Every sale has reached the server.',
         columns: [
           Col('Created', (e) => Text(formatDate(e['createdAt']))),
+          // QA #8: tender and items next to the amount and status.
+          Col('Sale', (e) => Text('${[for (final t in e['transaction']['tenders'] as List) t['type']].join(' + ')} · ${pendingItemSummary(app, e)}',
+              maxLines: 2, overflow: TextOverflow.ellipsis), flex: 2),
           Col('Total', (e) => Text(app.money(e['total'] as num?)), numeric: true),
           Col('Status', (e) => e['error'] != null
               ? Text('${e['error']}', style: const TextStyle(color: Brand.danger))
@@ -440,16 +444,7 @@ class SyncScreen extends StatelessWidget {
         actions: (e) => [
           if (e['status'] == 'awaiting-payment')
             FilledButton.tonal(
-              onPressed: () => showFormDialog<void>(
-                context,
-                title: 'Confirm card / UPI payment',
-                submit: 'Confirm',
-                fields: [
-                  for (final type in {for (final t in e['transaction']['tenders']) if (t['type'] != 'Cash' && t['confirmed'] != true) t['type']})
-                    FieldSpec('$type', '$type payment reference', required: true),
-                ],
-                onSubmit: (v) => app.confirmPayment('${e['transaction']['transactionId']}', v),
-              ),
+              onPressed: () => confirmPendingPayment(context, e), // QA #8: counter/pending_payment.dart
               child: const Text('Confirm payment'),
             ),
           if (e['error'] != null || e['status'] == 'awaiting-payment')

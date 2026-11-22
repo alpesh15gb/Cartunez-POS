@@ -125,7 +125,7 @@ void main() {
     expect(find.byType(JobCard), findsOneWidget);
     expect(find.text('Job JOB-MAIN-1'), findsOneWidget);
     expect(find.text('1 × Oil Filter'), findsOneWidget);
-    expect(find.text('Bill job (GST invoice)'), findsOneWidget);
+    expect(find.text('Bill job (invoice)'), findsOneWidget);
     expect(find.text('Move to ready'), findsOneWidget);
 
     // Back to the board: no dead end.
@@ -155,15 +155,38 @@ void main() {
     expect(find.textContaining('billing offers it first'), findsOneWidget);
     expect(find.text('Take advance'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('Bill job (GST invoice)'));
+    await tester.ensureVisible(find.text('Bill job (invoice)'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bill job (GST invoice)'));
+    await tester.tap(find.text('Bill job (invoice)'));
     await tester.pumpAndSettle();
     expect(find.text('Use from advance'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, '200.00'), findsOneWidget, reason: 'pre-filled up to the balance due');
     expect(find.text('Rest paid by'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('QA #10: GST wording only when registered; no shift opens one inline and returns to the job bill', (tester) async {
+    final gstShop = _workshop();
+    gstShop.snapshot = {...gstShop.snapshot, 'settings': {'currency': 'INR', 'taxScheme': 'india-gst'}};
+    await _open(tester, gstShop, '/orders/jobs/j1');
+    expect(find.text('Bill job (GST invoice)'), findsOneWidget);
+
+    final app = _workshop(); // not GST registered, no shift open
+    app.snapshot = {...app.snapshot, 'settings': {'currency': 'INR', 'taxScheme': 'none'}};
+    await _open(tester, app, '/orders/jobs/j1');
+    expect(find.text('Bill job (invoice)'), findsOneWidget);
+    expect(find.textContaining('GST'), findsNothing);
+    await tester.ensureVisible(find.text('Bill job (invoice)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bill job (invoice)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Open shift'), findsWidgets, reason: 'the shift opens here, not on the Shifts page');
+    expect(find.byKey(const ValueKey('opening-cash')), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byType(JobCard), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

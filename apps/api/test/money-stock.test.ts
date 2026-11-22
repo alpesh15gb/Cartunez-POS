@@ -30,6 +30,19 @@ test("refundBreakdown splits by the original tenders and adds up across partial 
   assert.deepEqual(refundBreakdown({ tenders: [{ type: "Exchange", amount: 80 }] }, 0, 80, "Cash"), [{ type: "Cash", amount: 80 }]);
 });
 
+test("QA #3: with no refund method requested, each tender goes back by itself (same default as the UI)", () => {
+  assert.deepEqual(refundBreakdown({ tenders: [{ type: "UPI", amount: 500 }] }, 0, 500, ""), [{ type: "UPI", amount: 500 }]);
+  assert.deepEqual(refundBreakdown({ tenders: [{ type: "Card", amount: 500 }] }, 0, 500, ""), [{ type: "Card", amount: 500 }]);
+  assert.deepEqual(
+    refundBreakdown({ tenders: [{ type: "Cash", amount: 300 }, { type: "UPI", amount: 200 }] }, 0, 500, ""),
+    [{ type: "Cash", amount: 300 }, { type: "UPI", amount: 200 }],
+  );
+  // An explicit switch to cash still pays everything from the drawer.
+  assert.deepEqual(refundBreakdown({ tenders: [{ type: "UPI", amount: 500 }] }, 0, 500, "Cash"), [{ type: "Cash", amount: 500 }]);
+  // Nothing on record (old bills): cash.
+  assert.deepEqual(refundBreakdown({ tenders: [] }, 0, 500, ""), [{ type: "Cash", amount: 500 }]);
+});
+
 test("Money and stock: refunds per tender, exchange till, Tally, kit reservations, job void, serials", async () => {
   const db = await connectDatabase({ memory: true });
   await migrate(db);

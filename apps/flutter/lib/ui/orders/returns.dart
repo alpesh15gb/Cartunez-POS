@@ -184,8 +184,12 @@ class ReturnDialogState extends State<ReturnDialog> {
   final serials = <String, Set<String>>{};
   final reason = TextEditingController();
   final approval = TextEditingController();
-  late String settle = 'exchange';
+  // QA #7: refund vs exchange is an explicit choice (null until the cashier picks one).
+  String? settle;
+  // QA #3: defaults to how the bill was paid; [originalTender] sends no refundType
+  // so the server pays each tender back by itself (returns.ts refundBreakdown).
   late String refundType;
+  final refundReference = TextEditingController();
   bool busy = false;
   String? error;
 
@@ -196,11 +200,40 @@ class ReturnDialogState extends State<ReturnDialog> {
   bool get hasCustomer => widget.invoice['customerId'] != null;
   bool get soldOnCredit => (widget.invoice['tenders'] as List? ?? []).any((t) => t['type'] == 'Credit');
 
+  static const originalTender = 'original';
+  static const _refundMethods = ['Cash', 'Card', 'UPI'];
+
+  /// What each paying tender of the bill brought in (cash net of change), Cash/Card/UPI only.
+  Map<String, int> get paidBy {
+    final out = <String, int>{};
+    for (final t in widget.invoice['tenders'] as List? ?? []) {
+      final type = '${t['type']}';
+      if (_refundMethods.contains(type)) out[type] = (out[type] ?? 0) + ((t['amount'] ?? 0) as num).toInt();
+    }
+    final change = ((widget.invoice['change'] ?? 0) as num).toInt();
+    if (change > 0 && out.containsKey('Cash')) out['Cash'] = out['Cash']! - change;
+    out.removeWhere((_, v) => v <= 0);
+    return out;
+  }
+
+  /// Methods offered in "Refund by": the shop's Cash/Card/UPI tenders plus whatever paid this bill.
+  List<String> get refundMethods {
+    final app = context.appRead;
+    return [for (final t in _refundMethods) if (app.tenderTypes.contains(t) || paidBy.containsKey(t)) t];
+  }
+
   @override
   void initState() {
     super.initState();
-    final app = context.appRead;
-    refundType = app.tenderTypes.contains('Cash') ? 'Cash' : app.tenderTypes.first;
+    final paid = paidBy;
+    final methods = refundMethods;
+    refundType = paid.length > 1
+        ? originalTender
+        : paid.length == 1
+            ? paid.keys.first
+            : methods.contains('Cash') || methods.isEmpty
+                ? 'Cash'
+                : methods.first;
     if (soldOnCredit) settle = 'credit';
     final all = lines;
     for (final l in all) {
@@ -215,6 +248,7 @@ class ReturnDialogState extends State<ReturnDialog> {
   void dispose() {
     reason.dispose();
     approval.dispose();
+    refundReference.dispose();
     super.dispose();
   }
 
@@ -242,6 +276,7 @@ class ReturnDialogState extends State<ReturnDialog> {
     final chosen = _chosen();
     setState(() => error = null);
     if (chosen.isEmpty) return setState(() => error = 'Choose at least one item coming back.');
+    if (settle == null) return setState(() => error = 'Choose Refund or Exchange first.');
     for (final c in chosen) {
       if (c['disposition'] == 'rma' && c['supplierId'] == null) {
         return setState(() => error = 'Choose the supplier to claim the warranty on ${c['name']} from.');
@@ -270,7 +305,8 @@ class ReturnDialogState extends State<ReturnDialog> {
         'transactionId': transactionId,
         if (!app.isManager) 'approvalId': approval.text.trim(),
         'reason': reason.text.trim(),
-        'refundType': settle == 'credit' ? 'Credit' : refundType,
+        if (settle == 'credit') 'refundType': 'Credit' else if (refundType != originalTender) 'refundType': refundType,
+        if (settle == 'refund' && refundReference.text.trim().isNotEmpty) 'refundReference': refundReference.text.trim(),
         'lines': [
           for (final c in chosen)
             {
@@ -281,13 +317,33 @@ class ReturnDialogState extends State<ReturnDialog> {
               if (c['supplierId'] != null) 'supplierId': c['supplierId'],
             },
         ],
-      }, settle == 'credit' ? 'Return recorded. Store credit added to the customer\'s account.' : 'Return recorded. Give the refund from the drawer.');
+      }, settle == 'credit' ? 'Return recorded. Store credit added to the customer\'s account.' : 'Return recorded. ${_refundDone()}');
       if (mounted) Navigator.pop(context, note is Map ? note : null);
     } catch (e) {
       if (mounted) setState(() => error = errorText(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  String _refundDone() => switch (refundType) {
+        'UPI' => 'Send the refund back by UPI.',
+        'Card' => 'Reverse the payment on the card machine.',
+        'Cash' => 'Give the refund from the drawer.',
+        _ => 'Pay each part back the way it was paid.',
+      };
+
+  /// What the cashier does for the chosen refund method, and what it does to the drawer.
+  String refundInstruction(AppState app) {
+    final amount = app.money(credit);
+    final paid = paidBy;
+    return switch (refundType) {
+      'UPI' => 'Send $amount back by UPI to the customer and note the UPI reference below. The cash drawer is not affected.',
+      'Card' => 'Reverse $amount on the card machine and note the approval code below. The cash drawer is not affected.',
+      'Cash' => 'Give $amount from the cash drawer. Expected cash at shift close goes down by $amount.'
+          '${paid.isNotEmpty && !paid.containsKey('Cash') ? ' This bill was paid by ${paid.keys.join(' and ')}, not cash.' : ''}',
+      _ => 'Each part goes back the way it was paid (${paid.keys.join(', ')}): cash from the drawer, UPI by UPI, card on the card machine.',
+    };
   }
 
   Widget _line(BuildContext context, AppState app, Json l) {
@@ -384,30 +440,53 @@ class ReturnDialogState extends State<ReturnDialog> {
               const ButtonSegment(value: 'refund', label: Text('Refund'), icon: Icon(Icons.payments_outlined)),
               if (hasCustomer) const ButtonSegment(value: 'credit', label: Text('Store credit'), icon: Icon(Icons.menu_book_outlined)),
             ],
-            selected: {settle},
-            onSelectionChanged: (v) => setState(() => settle = v.first),
+            selected: {?settle},
+            emptySelectionAllowed: true,
+            onSelectionChanged: (v) => setState(() {
+              settle = v.isEmpty ? settle : v.first;
+              error = null;
+            }),
           ),
           const SizedBox(height: 8),
           Text(
             switch (settle) {
+              null => 'Choose how to settle: Refund pays the money back, Exchange puts the items on the counter bill.',
               'exchange' => 'The items go on the counter bill as a credit. Add the replacement; the customer pays or gets back the difference.',
               'credit' => 'The credit goes on ${customer?['name'] ?? 'the customer'}\'s account and can pay later bills.',
-              _ => 'Give the money back from your shift.',
+              _ => refundInstruction(app),
             },
-            style: Theme.of(context).textTheme.bodySmall,
+            key: const ValueKey('settle-instruction'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: settle == 'refund' && refundType == 'Cash' && paidBy.isNotEmpty && !paidBy.containsKey('Cash') ? Brand.warning : null),
           ),
           if (settle == 'refund') ...[
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
+              key: ValueKey('refund-by-$refundType'),
               initialValue: refundType,
               decoration: const InputDecoration(labelText: 'Refund by'),
-              items: [for (final t in app.tenderTypes) DropdownMenuItem(value: t, child: Text(t))],
+              items: [
+                if (paidBy.length > 1) const DropdownMenuItem(value: originalTender, child: Text('Same as paid (split)')),
+                for (final t in refundMethods)
+                  DropdownMenuItem(
+                      value: t,
+                      child: Text(paidBy.length == 1 && paidBy.containsKey(t)
+                          ? '$t (as paid)'
+                          : t == 'Cash'
+                              ? 'Cash from the drawer'
+                              : t)),
+              ],
               onChanged: (v) => setState(() => refundType = v ?? refundType),
             ),
+            if (refundType == 'UPI' || refundType == 'Card')
+              TextField(
+                controller: refundReference,
+                decoration: InputDecoration(labelText: refundType == 'UPI' ? 'UPI reference (optional)' : 'Card approval code (optional)'),
+              ),
           ],
           const SizedBox(height: 8),
           TextField(controller: reason, decoration: InputDecoration(labelText: settle == 'exchange' ? 'Reason (optional)' : 'Reason')),
-          if (!app.isManager && settle != 'exchange')
+          if (!app.isManager && settle != 'exchange' && settle != null)
             TextField(
               controller: approval,
               decoration: InputDecoration(labelText: 'Manager approval ID', helperText: 'Reference $transactionId'),
@@ -419,9 +498,13 @@ class ReturnDialogState extends State<ReturnDialog> {
       actions: [
         TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton.icon(
-          onPressed: busy || (!app.online && settle != 'exchange') ? null : _submit,
+          onPressed: busy || settle == null || (!app.online && settle != 'exchange') ? null : _submit,
           icon: Icon(settle == 'exchange' ? Icons.point_of_sale_outlined : Icons.check),
-          label: Text(settle == 'exchange' ? 'Add to counter' : 'Record return'),
+          label: Text(switch (settle) {
+            null => 'Choose Refund or Exchange',
+            'exchange' => 'Add to counter',
+            _ => 'Record return',
+          }),
         ),
       ],
     );

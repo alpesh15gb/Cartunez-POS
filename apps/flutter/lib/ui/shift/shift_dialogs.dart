@@ -201,6 +201,8 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
   final coins = TextEditingController();
   final total = TextEditingController();
   final note = TextEditingController(text: 'Shift close');
+  // QA #11: switching to "Enter total" puts the cursor in the total field.
+  final totalFocus = FocusNode();
   bool byNotes = true;
   bool busy = false;
   String? error;
@@ -210,6 +212,7 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
     for (final c in [...notes.values, coins, total, note]) {
       c.dispose();
     }
+    totalFocus.dispose();
     super.dispose();
   }
 
@@ -219,9 +222,18 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
   /// The counted cash in paise, or null when the direct total is not a valid amount.
   int? get counted => byNotes ? denominationTotal(counts, coins: coinsPaise) : parsePaymentAmount(total.text.trim());
 
+  /// Something has been counted (a 0 counts): closing needs a count.
+  bool get started => byNotes
+      ? notes.values.any((c) => c.text.trim().isNotEmpty) || coins.text.trim().isNotEmpty
+      : total.text.trim().isNotEmpty;
+
   Future<void> _submit() async {
     final app = context.appRead;
     final cash = counted;
+    if (!started) {
+      setState(() => error = 'Count the drawer first. Enter 0 if it is empty.');
+      return;
+    }
     if (cash == null) {
       setState(() => error = 'Enter the cash counted in the drawer.');
       return;
@@ -262,9 +274,7 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
     final variance = cash == null ? null : cash - expected;
     // UI polish: the difference appears once counting starts, not as a scary
     // "short by the whole drawer" before anything is entered.
-    final started = byNotes
-        ? notes.values.any((c) => c.text.trim().isNotEmpty) || coins.text.trim().isNotEmpty
-        : total.text.trim().isNotEmpty;
+    final started = this.started;
     void changed(String _) => setState(() {});
     final numberField = [FilteringTextInputFormatter.digitsOnly];
     Widget noteRow(int value) => Padding(
@@ -291,22 +301,33 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
             ),
           ]),
         );
+    // QA #11: the count scrolls; Expected, Counted and Difference stay together in a
+    // summary pinned above the Close shift button.
     return AlertDialog(
       title: const Text('Close shift'),
       content: SizedBox(
         width: 440,
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            SegmentedButton<bool>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment(value: true, label: Text('Count notes')),
-                ButtonSegment(value: false, label: Text('Enter total')),
-              ],
-              selected: {byNotes},
-              onSelectionChanged: (v) => setState(() => byNotes = v.first),
-            ),
-            const SizedBox(height: 14),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: true, label: Text('Count notes')),
+              ButtonSegment(value: false, label: Text('Enter total')),
+            ],
+            selected: {byNotes},
+            onSelectionChanged: (v) {
+              setState(() {
+                byNotes = v.first;
+                error = null;
+              });
+              if (!byNotes) WidgetsBinding.instance.addPostFrameCallback((_) => totalFocus.requestFocus());
+            },
+          ),
+          const SizedBox(height: 14),
+          Flexible(
+            child: SingleChildScrollView(
+              key: const ValueKey('count-scroll'),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             if (byNotes) ...[
               for (final n in cashNotes) noteRow(n),
               Row(children: [
@@ -329,40 +350,52 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
               TextField(
                 key: const ValueKey('counted-total'),
                 controller: total,
+                focusNode: totalFocus,
                 autofocus: true,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                decoration: const InputDecoration(labelText: 'Cash counted in drawer', prefixText: '₹ '),
+                decoration: const InputDecoration(labelText: 'Cash counted in drawer (required)', prefixText: '₹ ', helperText: 'Enter 0 if the drawer is empty.'),
                 onChanged: changed,
               ),
-            const Divider(height: 28),
-            _Line('Expected in drawer', app.money(expected)),
-            if (!started)
-              Padding(
-                key: const ValueKey('count-hint'),
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Text('Count the drawer to see the difference.', style: Theme.of(context).textTheme.bodySmall),
-              )
-            else ...[
-              _Line('Counted', cash == null ? '—' : app.money(cash), key: const ValueKey('counted-cash')),
+            const SizedBox(height: 10),
+            TextField(controller: note, decoration: const InputDecoration(labelText: 'Note')),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            key: const ValueKey('close-summary'),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _Line('Expected in drawer', app.money(expected)),
+              _Line('Counted', !started || cash == null ? '—' : app.money(cash), key: const ValueKey('counted-cash')),
               _Line(
                 'Difference',
-                variance == null ? '—' : '${variance > 0 ? '+' : ''}${app.money(variance)}${variance == 0 ? '' : variance > 0 ? ' over' : ' short'}',
-                color: variance == null || variance == 0 ? Brand.forest : Brand.danger,
+                !started || variance == null ? '—' : '${variance > 0 ? '+' : ''}${app.money(variance)}${variance == 0 ? '' : variance > 0 ? ' over' : ' short'}',
+                color: !started || variance == null || variance == 0 ? (started ? Brand.forest : null) : Brand.danger,
                 strong: true,
                 key: const ValueKey('variance'),
               ),
-            ],
-            const SizedBox(height: 10),
-            TextField(controller: note, decoration: const InputDecoration(labelText: 'Note')),
-            if (error != null)
-              Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600))),
-          ]),
-        ),
+              if (!started)
+                Padding(
+                  key: const ValueKey('count-hint'),
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text('Count required before closing: enter the notes or the total (0 if the drawer is empty).',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Brand.warning, fontWeight: FontWeight.w600)),
+                ),
+            ]),
+          ),
+          if (error != null)
+            Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600))),
+        ]),
       ),
       actions: [
         TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: busy ? null : _submit, child: const Text('Close shift')),
+        FilledButton(onPressed: busy || !started ? null : _submit, child: const Text('Close shift')),
       ],
     );
   }

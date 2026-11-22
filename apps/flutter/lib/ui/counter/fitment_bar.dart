@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../main.dart';
 import '../shell.dart';
+import '../shift/shift_dialogs.dart' show showOpenShiftDialog;
 import 'counter_actions.dart';
 import 'vehicle_chip.dart';
 
@@ -23,12 +24,21 @@ class FitmentBar extends StatelessWidget {
         if (app.feature('fitment')) VehicleChip(onTap: () => chooseVehicle(context)),
       ]),
       const SizedBox(height: 4),
-      Text(app.openShift == null ? 'Open a shift to start selling.' : 'Scan or pick parts, then take payment.',
-          style: Theme.of(context).textTheme.bodySmall),
-      if (app.openShift == null)
-        Align(alignment: Alignment.centerLeft, child: TextButton.icon(
-          onPressed: () => shell.open('shifts'), icon: const Icon(Icons.point_of_sale), label: const Text('Go to shifts'),
-        )),
+      // QA #6: the shift opens right here (no trip to Shifts); focus goes back to item search.
+      ListenableBuilder(
+        listenable: app,
+        builder: (context, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(app.openShift == null ? 'Open a shift to start selling.' : 'Scan or pick parts, then take payment.',
+              style: Theme.of(context).textTheme.bodySmall),
+          if (app.openShift == null && app.canSell)
+            Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+              key: const ValueKey('counter-open-shift'),
+              onPressed: app.online ? () => openShiftFromCounter(context, shell) : null,
+              icon: const Icon(Icons.lock_open),
+              label: const Text('Open shift'),
+            )),
+        ]),
+      ),
       const SizedBox(height: 16),
       SizedBox(
         height: 38,
@@ -47,4 +57,11 @@ class FitmentBar extends StatelessWidget {
       const SizedBox(height: 14),
     ]);
   }
+}
+
+/// Opens the shift inline from the Counter, then puts the cursor back in item search.
+Future<bool> openShiftFromCounter(BuildContext context, ShellController shell) async {
+  final opened = await showOpenShiftDialog(context);
+  if (opened) shell.searchFocus.requestFocus();
+  return opened;
 }
