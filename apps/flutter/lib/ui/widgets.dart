@@ -77,6 +77,8 @@ Future<T?> showFormDialog<T>(
   String submit = 'Save',
   Widget? header,
   bool expanded = false,
+  // QA #16: true keeps the submit button disabled until every required field has a value.
+  bool requireComplete = false,
 }) {
   return showDialog<T>(
     context: context,
@@ -87,6 +89,7 @@ Future<T?> showFormDialog<T>(
       submit: submit,
       header: header,
       expanded: expanded,
+      requireComplete: requireComplete,
     ),
   );
 }
@@ -99,6 +102,7 @@ class _FormDialog<T> extends StatefulWidget {
     required this.submit,
     this.header,
     this.expanded = false,
+    this.requireComplete = false,
   });
   final String title;
   final List<FieldSpec> fields;
@@ -106,6 +110,7 @@ class _FormDialog<T> extends StatefulWidget {
   final String submit;
   final Widget? header;
   final bool expanded;
+  final bool requireComplete;
   @override
   State<_FormDialog<T>> createState() => _FormDialogState<T>();
 }
@@ -133,9 +138,17 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
           final v = field.value;
           final text = v == null ? '' : v is double && v == v.roundToDouble() ? '${v.toInt()}' : '$v';
           _text[field.name] = TextEditingController(text: text);
+          if (widget.requireComplete && field.required) _text[field.name]!.addListener(() => setState(() {}));
       }
     }
   }
+
+  /// QA #16: every required field has a value (used with requireComplete).
+  bool get _complete => widget.fields.where((f) => f.required).every((f) => switch (f.kind) {
+        FieldKind.select => '${_values[f.name] ?? ''}'.isNotEmpty,
+        FieldKind.checks => (_values[f.name] as Set<String>).isNotEmpty,
+        _ => _text[f.name]!.text.trim().isNotEmpty,
+      });
 
   @override
   void dispose() {
@@ -348,7 +361,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
       actions: [
         TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: _busy ? null : _save,
+          onPressed: _busy || (widget.requireComplete && !_complete) ? null : _save,
           child: _busy
               ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : Text(widget.submit),

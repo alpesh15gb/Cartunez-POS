@@ -44,7 +44,10 @@ class OnlineOrdersScreen extends StatefulWidget {
 }
 
 class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
-  String filter = 'open';
+  /// The queue the user picked; null until they pick one (QA #14: the screen
+  /// then opens on "Needs attention" only when something needs attention,
+  /// otherwise on All).
+  String? picked;
   bool checking = false;
 
   static const filters = [
@@ -73,7 +76,18 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
     }
   }
 
-  bool _keep(Json o) {
+  /// QA #14: what an empty queue says, naming the queue.
+  static const emptyQueue = {
+    'pack': 'Nothing to pick & pack.',
+    'ship': 'Nothing to ship.',
+    'open': 'Nothing needs attention.',
+    'reserved': 'No reserved orders.',
+    'awaiting': 'No orders awaiting stock.',
+    'sold': 'No sold orders.',
+    'cancelled': 'No cancelled orders.',
+  };
+
+  bool _keep(Json o, String filter) {
     final state = '${o['posState']}';
     return switch (filter) {
       'pack' => canInvoice(o),
@@ -91,11 +105,12 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
     final check = app.snapshot['onlineOrdersCheck'] as Map?;
     final orders = app.list('onlineOrders')..sort((a, b) => '${b['createdAt']}'.compareTo('${a['createdAt']}'));
     final small = Theme.of(context).textTheme.bodySmall;
+    final filter = picked ?? (orders.any((o) => _keep(o, 'open')) ? 'open' : 'all');
     return ValueListenableBuilder(
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        final rows = orders.where(_keep).where((o) {
+        final rows = orders.where((o) => _keep(o, filter)).where((o) {
           if (q.isEmpty) return true;
           final c = (o['customer'] as Map?) ?? {};
           return [o['number'], c['name'], c['email'], c['phone'], ...(o['lines'] as List? ?? []).map((l) => (l as Map)['sku'])]
@@ -135,7 +150,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
           const SizedBox(height: 12),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final (key, label) in filters)
-              ChoiceChip(label: Text(label), selected: filter == key, onSelected: (_) => setState(() => filter = key)),
+              ChoiceChip(label: Text(label), selected: filter == key, onSelected: (_) => setState(() => picked = key)),
           ]),
           // WS-E: one pick list for every order waiting to be packed.
           if (rows.any(canInvoice))
@@ -153,7 +168,14 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
           const SizedBox(height: 12),
           DataList(
             rows: rows,
-            empty: orders.isEmpty ? 'No online orders yet. New Magento orders appear here within a minute.' : 'No order matches.',
+            empty: orders.isEmpty
+                ? 'No online orders yet. New Magento orders appear here within a minute.'
+                : q.isEmpty && filter != 'all'
+                    ? '${emptyQueue[filter] ?? 'No orders in this queue.'} ${orders.length} online ${orders.length == 1 ? 'order' : 'orders'} in total.'
+                    : 'No order matches.',
+            emptyAction: orders.isNotEmpty && filter != 'all'
+                ? OutlinedButton(onPressed: () => setState(() => picked = 'all'), child: const Text('Show all orders'))
+                : null,
             onTap: (o) => showOnlineOrder(context, o),
             columns: [
               Col('Order', (o) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

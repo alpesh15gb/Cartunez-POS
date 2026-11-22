@@ -42,8 +42,10 @@ class _CollectionsPageState extends State<CollectionsPage> {
         final shown = rows.where((r) => q.isEmpty || normalize('${r['name']} ${r['phone']}').contains(q)).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Toolbar([
+            // QA #15: nothing owed is good news, not a warning.
             Text('Customers owe ${app.money(result['total'] as num? ?? 0)} in total',
-                style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.danger)),
+                key: const ValueKey('collections-total'),
+                style: TextStyle(fontWeight: FontWeight.w700, color: (result['total'] as num? ?? 0) > 0 ? Brand.danger : Brand.forest)),
             IconButton(tooltip: 'Refresh', onPressed: _reload, icon: const Icon(Icons.refresh)),
           ]),
           DataList(

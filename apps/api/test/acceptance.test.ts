@@ -430,6 +430,11 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
     }
     const daily = await call("GET", "reports/daily-sales", undefined, tok);
     assert.equal(daily.rows.reduce((sum: number, row: any) => sum + row.net, 0), salesReport.totals.net);
+    // QA #12: Billed before discount = Net billed + Discounts, per day and in total.
+    assert.equal(daily.totals.beforeDiscount, daily.totals.gross + daily.totals.discount);
+    assert.equal(salesReport.totals.beforeDiscount, salesReport.totals.gross + salesReport.totals.discount);
+    assert.ok(daily.rows.every((row: any) => row.beforeDiscount === row.gross + row.discount));
+    assert.deepEqual(Object.keys(daily.totals).slice(0, 4), ["sales", "beforeDiscount", "discount", "gross"]);
     const tender = await call("GET", "reports/tenders", undefined, tok);
     assert.equal(tender.rows.reduce((sum: number, row: any) => sum + row.net, 0), tender.totals.net);
     assert.equal(tender.totals.net, salesReport.totals.net);
@@ -452,7 +457,8 @@ test("retail acceptance, permissions, idempotency, conflict reconciliation and i
     assert.deepEqual(paged.totals, next.totals);
     const csvResponse = await app.inject({ method: "GET", url: "/api/v1/reports/daily-sales?format=csv&revision=" + paged.revision, headers: header });
     assert.equal(csvResponse.statusCode, 200);
-    assert.match(csvResponse.body, /"gross \(INR\)"/);
+    // QA #12: daily sales exports use the on-screen KPI names.
+    assert.match(csvResponse.body, /"Billed before discount \(INR\)","Discounts \(INR\)","Net billed \(INR\)","Refunds \(INR\)"/);
     assert.equal(csvResponse.body.split("\r\n").length, paged.totalRows + 1);
     assert.ok(csvResponse.body.includes('"' + (paged.rows[0].gross / 100).toFixed(2) + '"'));
     assert.equal((await call("GET", "reports/daily-sales?format=csv-json&revision=" + paged.revision, undefined, tok)).csv, csvResponse.body);

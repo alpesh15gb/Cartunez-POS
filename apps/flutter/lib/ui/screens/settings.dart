@@ -69,7 +69,7 @@ class SettingsScreen extends StatelessWidget {
       if (app.isManager && app.feature('onlineStore'))
         _Card(title: 'Online store', children: [
           Text(app.magentoConnected ? 'Magento: ${app.magento['baseUrl']}' : 'Magento not connected',
-              style: const TextStyle(fontWeight: FontWeight.w700)),
+              maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
           Text(app.magentoConnected ? 'Stock, prices and published parts are kept up to date automatically.' : 'Connect your Magento store to publish parts.',
               style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 8),
@@ -103,15 +103,28 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
       const SizedBox(height: 12),
+      // QA #4: the cards reflow into as many columns as fit at
+      // [settingsCardMinWidth] each (at most three), one column when narrow,
+      // so headings, the store URL and buttons stay readable in a split window.
       LayoutBuilder(builder: (context, c) {
-        final two = c.maxWidth > 760 && cards.length > 1;
-        return two
-            ? IntrinsicHeight(
+        final columns = settingsColumns(c.maxWidth, cards.length);
+        if (columns == 1) {
+          return Column(children: [for (final card in cards) Padding(padding: const EdgeInsets.only(bottom: 14), child: card)]);
+        }
+        return Column(children: [
+          for (var start = 0; start < cards.length; start += columns)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: IntrinsicHeight(
                 child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  for (final (i, card) in cards.indexed) ...[if (i > 0) const SizedBox(width: 14), Expanded(child: card)],
+                  for (var i = start; i < start + columns; i++) ...[
+                    if (i > start) const SizedBox(width: 14),
+                    Expanded(child: i < cards.length ? cards[i] : const SizedBox.shrink()),
+                  ],
                 ]),
-              )
-            : Column(children: [for (final card in cards) Padding(padding: const EdgeInsets.only(bottom: 14), child: card)]);
+              ),
+            ),
+        ]);
       }),
       if (app.isOwner) ...[
         SectionTitle('Branches', trailing: OutlinedButton.icon(onPressed: () => editBranch(context, const {}), icon: const Icon(Icons.add), label: const Text('Add branch'))),
@@ -127,6 +140,16 @@ class SettingsScreen extends StatelessWidget {
       ],
     ]);
   }
+}
+
+/// QA #4: narrowest a Settings card may get before the grid drops a column.
+const settingsCardMinWidth = 300.0;
+
+/// Columns for [count] Settings cards in [width]: as many as fit at
+/// [settingsCardMinWidth] with 14 px gaps, between one and three.
+int settingsColumns(double width, int count) {
+  final fit = ((width + 14) / (settingsCardMinWidth + 14)).floor();
+  return fit.clamp(1, count.clamp(1, 3)).toInt();
 }
 
 extension on String {

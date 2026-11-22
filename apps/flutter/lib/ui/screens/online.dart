@@ -46,6 +46,17 @@ String websiteStatus(Json? listing) {
   };
 }
 
+/// QA #13: one part's online stock line. A published part shows what the
+/// website offers ("On website: 1 available"); an unpublished one shows what
+/// it would offer ("Available to publish: 1 (after buffer)"), so the line
+/// never reads like stock that is already live. [inShop] is null when this
+/// register is not the branch that sells online; [online] null when unknown.
+String onlineStockLabel({required int? inShop, required int? online, required bool live}) {
+  final n = online == null ? '—' : '$online';
+  final web = live ? 'On website: $n available' : 'Available to publish: $n (after buffer)';
+  return inShop == null ? web : '$inShop in shop · $web';
+}
+
 /// Today's date in India (YYYY-MM-DD), as the server compares sale end dates.
 String indiaToday([DateTime? now]) =>
     (now ?? DateTime.now()).toUtc().add(const Duration(hours: 5, minutes: 30)).toIso8601String().substring(0, 10);
@@ -195,7 +206,8 @@ class _ConnectionBanner extends StatelessWidget {
           const Icon(Icons.storefront_outlined, color: Brand.forest),
           Text('${m['baseUrl']}', style: const TextStyle(fontWeight: FontWeight.w700)),
           Text('Stock from ${branch?['name'] ?? m['branchId']} · buffer ${m['defaultBuffer'] ?? 0}', style: Theme.of(context).textTheme.bodySmall),
-          Text('$published on website', style: Theme.of(context).textTheme.bodySmall),
+          // QA #13: a count of published parts, not of stock units.
+          Text('$published ${published == 1 ? 'part' : 'parts'} published', style: Theme.of(context).textTheme.bodySmall),
           if (waiting > 0) Text('$waiting sending…', style: Theme.of(context).textTheme.bodySmall),
           if (errors > 0) Text('$errors with errors', style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600)),
           if (errors > 0)
@@ -343,8 +355,8 @@ class _ListingTable extends StatelessWidget {
       String stock(Json p, Json? l) {
         final pos = app.available('${p['id']}');
         final buffer = (l?['buffer'] as num?)?.toInt() ?? (app.magento['defaultBuffer'] as num?)?.toInt() ?? 0;
-        final online = onlineBranch ? (pos - buffer).clamp(0, 1 << 30) : (l?['sync'] as Map?)?['qty'];
-        return onlineBranch ? '$pos in shop · ${online ?? '—'} online' : '${online ?? '—'} online';
+        final online = onlineBranch ? (pos - buffer).clamp(0, 1 << 30) : (l?['sync'] as Map?)?['qty'] as num?;
+        return onlineStockLabel(inShop: onlineBranch ? pos : null, online: online?.toInt(), live: l?['published'] == true);
       }
 
       String availability(Json? l) {

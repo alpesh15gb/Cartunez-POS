@@ -193,10 +193,11 @@ export async function report(
   );
   let rows: any[];
   if (name === "daily-sales") {
-    const days = new Map<string, { day: string; sales: number; gross: number; returns: number; coreReturns: number; net: number }>();
+    // QA #12: before/after discount per day (Billed before discount = Net billed + Discounts).
+    const days = new Map<string, { day: string; sales: number; beforeDiscount: number; discount: number; gross: number; returns: number; coreReturns: number; net: number }>();
     const activity = (createdAt: string) => {
       const day = businessDay(createdAt);
-      const row = days.get(day) ?? { day, sales: 0, gross: 0, returns: 0, coreReturns: 0, net: 0 };
+      const row = days.get(day) ?? { day, sales: 0, beforeDiscount: 0, discount: 0, gross: 0, returns: 0, coreReturns: 0, net: 0 };
       days.set(day, row);
       return row;
     };
@@ -204,6 +205,8 @@ export async function report(
       const row = activity(sale.createdAt);
       row.sales++;
       row.gross += sale.lines.reduce((sum: number, line: any) => sum + line.total, 0);
+      row.discount += sale.lines.reduce((sum: number, line: any) => sum + line.discount, 0);
+      row.beforeDiscount = row.gross + row.discount;
     }
     for (const item of returns)
       activity(item.createdAt).returns += item.lines.reduce((sum: number, line: any) => sum + line.total, 0);
@@ -517,7 +520,13 @@ export async function report(
   else fail("Unknown report.", 404);
   const sum = (key: string) =>
     rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
-  if (name === "daily-sales") totals = { sales: sales.length, gross, returns: refundTotal, coreReturns: coreRefundTotal, net: totals.net };
+  // QA #12: sales KPIs name their discount basis (labels in report-output.ts).
+  if (name === "daily-sales")
+    totals = { sales: sales.length, beforeDiscount: gross + discountTotal, discount: discountTotal, gross,
+      returns: refundTotal, coreReturns: coreRefundTotal, net: totals.net };
+  else if (name === "sales") totals = { sales: totals.sales, beforeDiscount: gross + discountTotal, discount: discountTotal, gross,
+      returns: totals.returns, coreReturns: totals.coreReturns, net: totals.net, tax: totals.tax, cost: totals.cost,
+      margin: totals.margin, coreDeposits: totals.coreDeposits };
   else if (name === "returns") totals = { creditNotes: rows.length, returns: sum("total"), tax: sum("tax") };
   else if (name === "discounts") totals = { sales: rows.length, discount: sum("discount"), total: sum("total") };
   else if (name === "tax") {
