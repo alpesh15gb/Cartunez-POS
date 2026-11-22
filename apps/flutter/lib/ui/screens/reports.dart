@@ -27,6 +27,7 @@ const _moneyKeys = {
   'cashSales', 'cashRefunds', 'cashIn', 'cashOut', 'netMovement',
   'expectedCash', 'countedCash', 'variance', 'collected', 'refunded', 'charged', 'outstanding', 'revenue', 'amount', 'taxable',
   'unitPrice', 'subtotal', 'coreCharge', 'coreDeposits', 'rounding', 'price', 'retailPrice', 'wholesalePrice', 'cgst', 'sgst', 'igst', 'utgst',
+  'beforeDiscount', // QA #12
 };
 const _hidden = {'id', 'invoiceId', 'productId', 'returnId', 'purchaseOrderId', 'supplierId', 'lineId', 'binId'};
 const _snapshotReports = {'valuation', 'stock-by-bin', 'low-stock', 'aging'};
@@ -44,19 +45,37 @@ const _reportColumns = {
   'cash-movements': ['createdAt', 'userId', 'direction', 'amount', 'reason'],
   'tenders': ['type', 'collected', 'refunded', 'net'],
 };
+// QA #12: sales KPIs say whether they are before or after discount. The
+// same names head the CSV / Excel columns ([salesKpiLabels]; the API keeps
+// a copy in report-output.ts for exports it builds).
+const salesKpiLabels = {
+  'beforeDiscount': 'Billed before discount', 'discount': 'Discounts', 'gross': 'Net billed',
+  'returns': 'Refunds', 'coreReturns': 'Core refunds', 'net': 'Net after refunds',
+};
+
+/// Reports whose exports use [salesKpiLabels] for their column headings.
+const salesKpiReports = {'daily-sales', 'sales'};
+
+/// One-line definitions shown under the KPI tiles of [salesKpiReports].
+const salesKpiDefinitions = 'Billed before discount = Net billed + Discounts · '
+    'Net billed = invoice totals after discount · Net after refunds = Net billed − Refunds − Core refunds';
+
 const _reportLabels = {
-  'gross': 'Gross billed', 'net': 'Net after refunds', 'returns': 'Refunds',
+  ...salesKpiLabels,
   'cashierId': 'Cashier', 'userId': 'Staff member', 'hsnSac': 'HSN / SAC',
   'cgst': 'CGST', 'sgst': 'SGST', 'igst': 'IGST', 'utgst': 'UTGST',
 };
 
 String reportLabel(String key) => _reportLabels[key] ?? humanize(key);
 
-String reportCsv(List<Map> rows, {required String currency}) {
+/// [labels] (QA #12) renames columns, for example `gross` to "Net billed";
+/// money columns keep their "(INR)" suffix.
+String reportCsv(List<Map> rows, {required String currency, Map<String, String> labels = const {}}) {
   final keys = {for (final row in rows) ...row.keys.map((key) => '$key')};
   String header(String key) {
-    if (_moneyKeys.contains(key)) return '$key ($currency)';
-    return key == 'taxRate' ? 'taxRate (%)' : key;
+    final name = labels[key] ?? key;
+    if (_moneyKeys.contains(key)) return '$name ($currency)';
+    return key == 'taxRate' ? 'taxRate (%)' : name;
   }
   String decimal(int value) {
     final magnitude = value.abs();
@@ -116,7 +135,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (_reports.contains(widget.initial)) name = widget.initial!;
     final now = context.appRead.businessTime(DateTime.now());
     final end = DateTime(now.year, now.month, now.day);
-    range = DateTimeRange(start: DateTime(now.year, now.month, now.day - 29), end: end);
+    // QA #12: open on today and run the report straight away, so the screen
+    // never starts as filters over a blank area.
+    range = DateTimeRange(start: end, end: end);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && report == null && !busy) run();
+    });
   }
 
   @override
@@ -218,7 +242,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
         final data = await app.api('/reports/$name?${Uri(queryParameters: query).query}');
         csv = data['csv'] as String;
       } else {
-        csv = reportCsv(rows, currency: '${snapshot['currency'] ?? app.settings['currency'] ?? 'INR'}');
+        csv = reportCsv(rows, currency: '${snapshot['currency'] ?? app.settings['currency'] ?? 'INR'}',
+            labels: salesKpiReports.contains(name) ? salesKpiLabels : const {});
       }
       final message = await saveTextFile('${snapshot['name']}-${DateTime.now().millisecondsSinceEpoch}.csv', '\uFEFF$csv');
       if (mounted) context.appRead.toast(message);
@@ -284,8 +309,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
           if (!_hidden.contains(e.key) && e.value is! Map && e.value is! List) e.key,
     }.toList();
     final visibleKeys = _reportColumns[name]?.where(keys.contains).toList() ?? keys.take(8).toList();
+    final branch = app.branchName('${report?['branchId'] ?? app.session?.branchId}');
+    final period = _snapshotReports.contains(name)
+        ? 'Stock as of now'
+        : range == null
+            ? 'All dates'
+            : range!.start == range!.end
+                ? formatDay(range!.start)
+                : '${formatDay(range!.start)} – ${formatDay(range!.end)}';
+    final scheme = Theme.of(context).colorScheme;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Wrap(spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      // QA #12: the heading names the report on screen.
+      Text('${humanize(name)} report', key: const ValueKey('report-heading'), style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 10),
+      // QA #12: report, period, branch and Run / Export stay together in one
+      // group for every report type; per-report filters follow below.
+      Wrap(key: const ValueKey('report-primary'), spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
         SizedBox(
           width: fieldWidth(240),
           child: DropdownButtonFormField<String>(
@@ -300,44 +339,55 @@ class _ReportsScreenState extends State<ReportsScreen> {
             },
           ),
         ),
-        if (!_snapshotReports.contains(name)) OutlinedButton.icon(
-          icon: const Icon(Icons.date_range),
-          label: Text(range == null ? 'All dates' : '${formatDay(range!.start)} – ${formatDay(range!.end)}'),
-          onPressed: busy ? null : () async {
-            final now = app.businessTime(DateTime.now());
-            final picked = await showDateRangePicker(context: context, firstDate: DateTime(now.year - 5), lastDate: now, initialDateRange: range);
-            if (mounted && picked != null) changeFilter(() => range = picked);
-          },
-        ),
-        if (range != null && !_snapshotReports.contains(name)) IconButton(tooltip: 'All dates', onPressed: busy ? null : () => changeFilter(() => range = null), icon: const Icon(Icons.close)),
+        if (!_snapshotReports.contains(name))
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            OutlinedButton.icon(
+              icon: const Icon(Icons.date_range),
+              label: Text(period),
+              onPressed: busy ? null : () async {
+                final now = app.businessTime(DateTime.now());
+                final picked = await showDateRangePicker(context: context, firstDate: DateTime(now.year - 5), lastDate: now, initialDateRange: range);
+                if (mounted && picked != null) changeFilter(() => range = picked);
+              },
+            ),
+            if (range != null) IconButton(tooltip: 'All dates', onPressed: busy ? null : () => changeFilter(() => range = null), icon: const Icon(Icons.close)),
+          ]),
+        Chip(avatar: const Icon(Icons.store_outlined, size: 18), label: Text(branch), visualDensity: VisualDensity.compact),
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          FilledButton.icon(
+            onPressed: busy ? null : () => run(),
+            icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow),
+            label: const Text('Run report'),
+          ),
+          const SizedBox(width: 10),
+          MenuAnchor(
+            alignmentOffset: const Offset(0, 4),
+            style: MenuStyle(
+              elevation: const WidgetStatePropertyAll(0),
+              backgroundColor: WidgetStatePropertyAll(scheme.surface),
+              surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+              shape: WidgetStatePropertyAll(RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+                side: BorderSide(color: scheme.outlineVariant, width: Theme.of(context).dividerTheme.thickness ?? 1),
+              )),
+            ),
+            builder: (context, controller, _) => OutlinedButton.icon(
+              // Export needs rows; it stays in place (disabled) so the group never reflows.
+              onPressed: busy || rows.isEmpty ? null : () => controller.isOpen ? controller.close() : controller.open(),
+              icon: const Icon(Icons.download), label: const Text('Export')),
+            menuChildren: [
+              MenuItemButton(onPressed: export, leadingIcon: const Icon(Icons.description_outlined), child: const Text('CSV (.csv)')),
+              MenuItemButton(onPressed: exportExcel, leadingIcon: const Icon(Icons.grid_on_outlined), child: const Text('Excel (.xlsx)')),
+            ],
+          ),
+        ]),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (hasPartFilters && categories.isNotEmpty) filter('Category', category, [for (final value in categories) (value, value)], (value) => category = value),
         if (hasPartFilters && app.list('suppliers').isNotEmpty) filter('Supplier', supplier, optionsOf(app.list('suppliers')), (value) => supplier = value),
         if (_cashierReports.contains(name) && users.isNotEmpty) filter('Cashier', cashier, [for (final user in users) (user, app.userName(user))], (value) => cashier = value),
         if (_tenderFilters.contains(name)) filter('Payment', payment, const [('Cash', 'Cash'), ('Card', 'Card'), ('UPI', 'UPI')], (value) => payment = value),
-        FilledButton.icon(
-          onPressed: busy ? null : () => run(),
-          icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow),
-          label: const Text('Run report'),
-        ),
-        if (rows.isNotEmpty) MenuAnchor(
-          alignmentOffset: const Offset(0, 4),
-          style: MenuStyle(
-            elevation: const WidgetStatePropertyAll(0),
-            backgroundColor: WidgetStatePropertyAll(Theme.of(context).colorScheme.surface),
-            surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-            shape: WidgetStatePropertyAll(RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant, width: Theme.of(context).dividerTheme.thickness ?? 1),
-            )),
-          ),
-          builder: (context, controller, _) => OutlinedButton.icon(
-            onPressed: busy ? null : () => controller.isOpen ? controller.close() : controller.open(),
-            icon: const Icon(Icons.download), label: const Text('Export')),
-          menuChildren: [
-            MenuItemButton(onPressed: export, leadingIcon: const Icon(Icons.description_outlined), child: const Text('CSV (.csv)')),
-            MenuItemButton(onPressed: exportExcel, leadingIcon: const Icon(Icons.grid_on_outlined), child: const Text('Excel (.xlsx)')),
-          ],
-        ),
         // WS-F: GSTR-1 and Tally, for the accountant.
         if (app.isManager) OutlinedButton.icon(onPressed: () => showAccountingExports(context, range: range),
             icon: const Icon(Icons.account_balance_outlined), label: const Text('GST & Tally')),
@@ -347,11 +397,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
           OutlinedButton.icon(onPressed: busy ? null : () => compareTenderStatement(context, range: range, method: payment),
             icon: const Icon(Icons.compare_arrows), label: const Text('Compare provider CSV')),
       ]),
-      if (errorMessage != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+      if (errorMessage != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(errorMessage!, style: TextStyle(color: scheme.error))),
+      // QA #12: a clear prompt instead of a blank area before the first run.
+      if (report == null && !busy && errorMessage == null)
+        Padding(
+          key: const ValueKey('report-empty-prompt'),
+          padding: const EdgeInsets.symmetric(vertical: 32),
+          child: Column(children: [
+            Icon(Icons.bar_chart, size: 40, color: scheme.outline),
+            const SizedBox(height: 8),
+            Text('Press Run report to see ${humanize(name).toLowerCase()} for $period.', textAlign: TextAlign.center),
+          ]),
+        ),
       if (report != null) ...[
-        SectionTitle('${humanize('${report!['name']}')} report'),
-        Text('${app.branchName('${report!['branchId'] ?? app.session?.branchId}')} · ${report!['timeZone'] == 'Asia/Kolkata' ? 'IST' : 'UTC'} · Confirmed transactions'),
+        const SizedBox(height: 12),
+        Text('$branch · ${report!['timeZone'] == 'Asia/Kolkata' ? 'IST' : 'UTC'} · Confirmed transactions'),
         if (name == 'tenders') const Text('Recorded payments less cash change and refunds. Card and UPI payouts are reconciled with your provider separately.'),
+        if (salesKpiReports.contains(name))
+          Text(salesKpiDefinitions, key: const ValueKey('kpi-definitions'), style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 10),
         LayoutBuilder(builder: (context, c) {
           final phone = c.maxWidth < 600;

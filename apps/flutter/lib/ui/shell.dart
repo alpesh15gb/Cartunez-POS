@@ -752,36 +752,6 @@ class WorkspacePage extends StatefulWidget {
 class _WorkspacePageState extends State<WorkspacePage> {
   String? _opening;
 
-  /// UI polish: the sub-tab strip scrolls so the selected tab is on screen.
-  final _strip = ScrollController();
-  final _stripBox = GlobalKey();
-  final _selectedTab = GlobalKey();
-  String? _revealed;
-
-  @override
-  void dispose() {
-    _strip.dispose();
-    super.dispose();
-  }
-
-  /// Scrolls the tab strip (only it, not the page) so the selected tab shows.
-  void _revealSelectedTab() {
-    if (_revealed == widget.tab.path) return;
-    _revealed = widget.tab.path;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_strip.hasClients) return;
-      final tab = _selectedTab.currentContext?.findRenderObject() as RenderBox?;
-      final view = _stripBox.currentContext?.findRenderObject() as RenderBox?;
-      if (tab == null || view == null || !tab.attached || !view.attached) return;
-      final left = tab.localToGlobal(Offset.zero, ancestor: view).dx;
-      final right = left + tab.size.width;
-      const margin = 24.0;
-      if (left >= margin && right <= view.size.width - margin) return;
-      final target = _strip.offset + left - (view.size.width - tab.size.width) / 2;
-      _strip.jumpTo(target.clamp(0.0, _strip.position.maxScrollExtent));
-    });
-  }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -856,7 +826,6 @@ class _WorkspacePageState extends State<WorkspacePage> {
         ),
       ]);
     }
-    if (tabs.length > 1) _revealSelectedTab();
     return ListView(
       padding: EdgeInsets.fromLTRB(pad, layout == DeviceLayout.desktop ? 18 : 24, pad, 40),
       children: [
@@ -865,27 +834,159 @@ class _WorkspacePageState extends State<WorkspacePage> {
         Text(tab.help, style: textTheme.bodySmall),
         const SizedBox(height: 14),
         if (tabs.length > 1) ...[
-          SingleChildScrollView(
-            key: _stripBox,
-            controller: _strip,
-            scrollDirection: Axis.horizontal,
-            child: SegmentedButton<String>(
-              showSelectedIcon: false,
-              segments: [
-                for (final t in tabs)
-                  ButtonSegment(
-                    value: t.path,
-                    label: t == tab ? KeyedSubtree(key: _selectedTab, child: Text(t.label)) : Text(t.label),
-                  ),
-              ],
-              selected: {tab.path},
-              onSelectionChanged: (value) => context.go(value.first),
-            ),
-          ),
+          WorkspaceTabStrip(tabs: tabs, selected: tab, onSelect: (t) => context.go(t.path)),
           SizedBox(height: layout == DeviceLayout.desktop ? 14 : 18),
         ],
         body,
       ],
+    );
+  }
+}
+
+/// QA #5: a workspace's sub-tab strip. When the tabs do not fit, it shows
+/// scroll arrows at both ends and a "More" menu listing every tab, so no
+/// destination is hidden past the edge. The selected tab is always scrolled
+/// fully into view (on first build and after every switch). Segments, arrows
+/// and the menu are all focusable buttons: mouse, touch and keyboard work.
+class WorkspaceTabStrip extends StatefulWidget {
+  const WorkspaceTabStrip({super.key, required this.tabs, required this.selected, required this.onSelect});
+  final List<TabDef> tabs;
+  final TabDef selected;
+  final ValueChanged<TabDef> onSelect;
+
+  @override
+  State<WorkspaceTabStrip> createState() => _WorkspaceTabStripState();
+}
+
+class _WorkspaceTabStripState extends State<WorkspaceTabStrip> {
+  final _strip = ScrollController();
+  final _view = GlobalKey();
+  final _selectedKey = GlobalKey();
+  bool _canLeft = false;
+  bool _canRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _strip.addListener(_updateArrows);
+    _afterLayout();
+  }
+
+  @override
+  void didUpdateWidget(WorkspaceTabStrip old) {
+    super.didUpdateWidget(old);
+    if (old.selected != widget.selected || old.tabs.length != widget.tabs.length) _afterLayout();
+  }
+
+  @override
+  void dispose() {
+    _strip.dispose();
+    super.dispose();
+  }
+
+  void _afterLayout() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _updateArrows();
+        // Arrows may have appeared and narrowed the strip: reveal next frame.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _reveal();
+        });
+      });
+
+  void _updateArrows() {
+    if (!mounted || !_strip.hasClients) return;
+    final p = _strip.position;
+    final left = p.pixels > 0.5;
+    final right = p.pixels < p.maxScrollExtent - 0.5;
+    if (left != _canLeft || right != _canRight) {
+      setState(() {
+        _canLeft = left;
+        _canRight = right;
+      });
+    }
+  }
+
+  /// Scrolls the strip (only it, not the page) so the selected tab is fully
+  /// visible, segment padding included.
+  void _reveal() {
+    if (!_strip.hasClients) return;
+    final tab = _selectedKey.currentContext?.findRenderObject() as RenderBox?;
+    final view = _view.currentContext?.findRenderObject() as RenderBox?;
+    if (tab == null || view == null || !tab.attached || !view.attached) return;
+    // The key wraps the label; widen by the segment's own padding.
+    const pad = 28.0;
+    final left = tab.localToGlobal(Offset.zero, ancestor: view).dx - pad;
+    final right = left + tab.size.width + pad * 2;
+    if (left >= 0 && right <= view.size.width) return;
+    final target = left < 0 ? _strip.offset + left : _strip.offset + right - view.size.width;
+    _strip.jumpTo(target.clamp(0.0, _strip.position.maxScrollExtent));
+  }
+
+  void _page(int direction) {
+    if (!_strip.hasClients) return;
+    final width = _strip.position.viewportDimension;
+    final target = (_strip.offset + direction * width * 0.7).clamp(0.0, _strip.position.maxScrollExtent);
+    _strip.animateTo(target, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final overflow = _canLeft || _canRight;
+    final strip = SingleChildScrollView(
+      key: _view,
+      controller: _strip,
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<String>(
+        showSelectedIcon: false,
+        segments: [
+          for (final t in widget.tabs)
+            ButtonSegment(
+              value: t.path,
+              label: t == widget.selected ? KeyedSubtree(key: _selectedKey, child: Text(t.label)) : Text(t.label),
+            ),
+        ],
+        selected: {widget.selected.path},
+        onSelectionChanged: (value) => widget.onSelect(widget.tabs.firstWhere((t) => t.path == value.first)),
+      ),
+    );
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
+        return false;
+      },
+      child: Row(children: [
+        if (overflow)
+          IconButton(
+            key: const ValueKey('tab-strip-left'),
+            tooltip: 'Scroll tabs left',
+            visualDensity: VisualDensity.compact,
+            onPressed: _canLeft ? () => _page(-1) : null,
+            icon: const Icon(Icons.chevron_left),
+          ),
+        Expanded(child: Align(alignment: Alignment.centerLeft, child: strip)),
+        if (overflow) ...[
+          IconButton(
+            key: const ValueKey('tab-strip-right'),
+            tooltip: 'Scroll tabs right',
+            visualDensity: VisualDensity.compact,
+            onPressed: _canRight ? () => _page(1) : null,
+            icon: const Icon(Icons.chevron_right),
+          ),
+          PopupMenuButton<TabDef>(
+            key: const ValueKey('tab-strip-more'),
+            tooltip: 'All tabs',
+            onSelected: widget.onSelect,
+            itemBuilder: (_) => [
+              for (final t in widget.tabs)
+                CheckedPopupMenuItem<TabDef>(value: t, checked: t == widget.selected, child: Text(t.label)),
+            ],
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [Text('More'), Icon(Icons.arrow_drop_down)]),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 }

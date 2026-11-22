@@ -533,13 +533,42 @@ class TransfersScreen extends StatelessWidget {
 
 Future<void> dispatchTransfer(BuildContext context) async {
   final app = context.appRead;
+  final destinations = app.list('branches').where((b) => b['id'] != app.session?.branchId).toList();
+  // QA #16: with no second branch there is nowhere to send stock; say so
+  // instead of opening a form with an empty branch list.
+  if (destinations.isEmpty) {
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Add a second branch first'),
+        content: Text(app.isOwner
+            ? 'Transfers move stock between your branches, and this shop has only one. Add the other branch in Settings › Branches, then send stock to it.'
+            : 'Transfers move stock between branches, and this shop has only one. Ask the owner to add the other branch in Settings.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Close')),
+          if (app.isOwner)
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(dialog);
+                ShellScope.of(context).open('settings');
+              },
+              child: const Text('Open Settings'),
+            ),
+        ],
+      ),
+    );
+    return;
+  }
+  if (!context.mounted) return;
   await showFormDialog<void>(
     context,
     title: 'Send stock to another branch',
     submit: 'Send',
+    requireComplete: true, // QA #16: Send stays disabled until the form is complete.
     fields: [
       FieldSpec('destinationBranchId', 'To branch',
-          kind: FieldKind.select, required: true, options: optionsOf(app.list('branches').where((b) => b['id'] != app.session?.branchId).toList())),
+          kind: FieldKind.select, required: true, value: destinations.length == 1 ? destinations.single['id'] : null,
+          options: optionsOf(destinations)),
       FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, barcodeChoice: app.uniqueProductIdForCode, options: optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']}')),
       FieldSpec('binId', 'From bin', kind: FieldKind.select, required: true, barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
       const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
@@ -612,6 +641,21 @@ class WarrantyScreen extends StatelessWidget {
         ),
         if (app.isManager) OutlinedButton(onPressed: () => coreReturn(context), child: const Text('Core deposit refund')),
       ]),
+      // QA #15: New claim needs a warranty return; link straight to it.
+      if (claimable.isEmpty)
+        Padding(
+          key: const ValueKey('warranty-prerequisite'),
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            Text('New claim needs a return recorded with the warranty condition.', style: Theme.of(context).textTheme.bodySmall),
+            if (app.canSell)
+              TextButton.icon(
+                onPressed: () => ShellScope.of(context).open('sales-returns'),
+                icon: const Icon(Icons.assignment_return_outlined, size: 18),
+                label: const Text('Go to Returns & exchange'),
+              ),
+          ]),
+        ),
       DataList(
         rows: app.list('warrantyClaims'),
         empty: claimable.isEmpty ? 'No claims. Record a return with the warranty condition first.' : 'No claims yet.',

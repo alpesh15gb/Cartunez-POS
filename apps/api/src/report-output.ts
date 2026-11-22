@@ -8,12 +8,22 @@ const money = new Set([
   "gross", "returns", "coreReturns", "net", "discount", "tax", "cost", "margin", "value", "landedCost", "total", "openingCash",
   "cashSales", "cashRefunds", "cashIn", "cashOut", "netMovement", "expectedCash", "countedCash", "variance", "collected",
   "refunded", "charged", "outstanding", "revenue", "amount", "taxable", "unitPrice", "subtotal", "coreCharge", "coreDeposits",
-  "rounding", "price", "retailPrice", "wholesalePrice", "cgst", "sgst", "igst", "utgst",
+  "rounding", "price", "retailPrice", "wholesalePrice", "cgst", "sgst", "igst", "utgst", "beforeDiscount",
 ]);
 
-function csv(rows: Record<string, unknown>[], currency: string) {
+// QA #12: the sales KPIs carry the same names in exports as on screen
+// (Flutter salesKpiLabels in ui/screens/reports.dart). Other reports keep
+// their raw key headings.
+const salesKpiLabels: Record<string, string> = {
+  beforeDiscount: "Billed before discount", discount: "Discounts", gross: "Net billed",
+  returns: "Refunds", coreReturns: "Core refunds", net: "Net after refunds",
+};
+const labelsFor = (name: string): Record<string, string> =>
+  name === "daily-sales" || name === "sales" ? salesKpiLabels : {};
+
+function csv(rows: Record<string, unknown>[], currency: string, labels: Record<string, string> = {}) {
   const keys = [...new Set(rows.flatMap(Object.keys))];
-  const header = (key: string) => money.has(key) ? key + " (" + currency + ")" : key === "taxRate" ? "taxRate (%)" : key;
+  const header = (key: string) => money.has(key) ? (labels[key] ?? key) + " (" + currency + ")" : key === "taxRate" ? "taxRate (%)" : labels[key] ?? key;
   function convert(key: string, value: unknown): unknown {
     if (typeof value === "number" && (money.has(key) || key === "taxRate"))
       return (value / 100).toFixed(2);
@@ -34,9 +44,9 @@ function csv(rows: Record<string, unknown>[], currency: string) {
 
 // WS-F: the same columns as the CSV, as a real Excel sheet. Money is a number
 // in rupees (two decimals) so totals can be summed in Excel.
-export function reportTable(rows: Record<string, unknown>[], currency: string) {
+export function reportTable(rows: Record<string, unknown>[], currency: string, labels: Record<string, string> = {}) {
   const keys = [...new Set(rows.flatMap(Object.keys))];
-  const header = keys.map(key => money.has(key) ? key + " (" + currency + ")" : key === "taxRate" ? "taxRate (%)" : key);
+  const header = keys.map(key => money.has(key) ? (labels[key] ?? key) + " (" + currency + ")" : key === "taxRate" ? "taxRate (%)" : labels[key] ?? key);
   const formats: CellFormat[] = keys.map(key => money.has(key) || key === "taxRate" ? "money" : "number");
   const values = rows.map(row => keys.map(key => {
     const value = row[key];
@@ -48,11 +58,12 @@ export function reportTable(rows: Record<string, unknown>[], currency: string) {
 }
 
 export function reportWorkbook(result: Report) {
-  const table = reportTable(result.rows, result.currency);
+  const labels = labelsFor(result.name);
+  const table = reportTable(result.rows, result.currency, labels);
   const totals = Object.entries(result.totals || {});
   return xlsx([
     { name: result.name, ...table },
-    { name: "Totals", header: ["Total", "Value"], rows: totals.map(([key, value]) => [money.has(key) ? key + " (" + result.currency + ")" : key,
+    { name: "Totals", header: ["Total", "Value"], rows: totals.map(([key, value]) => [money.has(key) ? (labels[key] ?? key) + " (" + result.currency + ")" : labels[key] ?? key,
       typeof value === "number" && money.has(key) ? value / 100 : value]), formats: ["text", "number"] },
   ]);
 }
@@ -69,7 +80,7 @@ export function reportOutput(result: Report, query: Record<string, string>) {
   if (query.format === "xlsx-json")
     return { fileName: result.name + ".xlsx", base64: reportWorkbook(result).toString("base64") };
   if (query.format === "csv" || query.format === "csv-json") {
-    const content = csv(result.rows, result.currency);
+    const content = csv(result.rows, result.currency, labelsFor(result.name));
     return query.format === "csv" ? content : {csv: content};
   }
   if (!paged) return result;
