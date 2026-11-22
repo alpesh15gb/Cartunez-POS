@@ -47,6 +47,10 @@ Future<void> addPart(BuildContext context, Json product) async {
     app.toast('Sales are stopped for this part.');
     return;
   }
+  if (isOnlineOnly(product)) {
+    app.toast(onlineOnlyMessage(product));
+    return;
+  }
   final service = product['type'] == 'service';
   final beyond = beyondStock(app, product);
   final stocked = app.sellableBins.where((b) => app.available('${product['id']}', '${b['id']}') > 0).toList();
@@ -143,8 +147,11 @@ void handleScan(BuildContext context, ShellController shell, String raw) {
   }
   if (matches.isEmpty) {
     shell.search.text = code;
-    final stopped = app.findByCode(code).where((p) => p['salesStopped'] == true).firstOrNull;
-    app.toast(stopped != null ? 'Sales are stopped for ${stopped['sku']}.'
+    final all = app.findByCode(code);
+    final stopped = all.where((p) => p['salesStopped'] == true).firstOrNull;
+    final websiteOnly = all.where(isOnlineOnly).firstOrNull;
+    app.toast(websiteOnly != null && stopped == null ? onlineOnlyMessage(websiteOnly)
+        : stopped != null ? 'Sales are stopped for ${stopped['sku']}.'
         : bin != null ? '${app.binName(bin)} is a bin label. Scan the part barcode.' : 'No part matches "$code".');
     return;
   }

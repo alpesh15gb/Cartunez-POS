@@ -75,6 +75,11 @@ export function buildProduct(value: RecordData, productId = id("part"), defaultT
     product.type = "service";
     product.serialTracked = false;
   }
+  // Online only: listed only on the website and ordered from the supplier when
+  // a customer buys it; never shop stock (see holdsStock in domain.ts). A
+  // service or kit cannot be sold online, and the website takes no serials.
+  product.onlineOnly = value.onlineOnly === true && product.type !== "service";
+  if (product.onlineOnly) product.serialTracked = false;
   // Months of warranty from the sale date (serial-tracked parts get a warranty-until date).
   product.warrantyMonths = integer(
     value.warrantyMonths === "" || value.warrantyMonths == null ? 0 : value.warrantyMonths,
@@ -118,7 +123,7 @@ export class CatalogCodes {
 }
 
 const required = ["name", "retailPrice"];
-const optional = ["sku", "brand", "category", "unit", "cost", "taxPercent", "barcodes", "wholesalePrice", "hsnSac", "partNumber", "reorderLevel", "serialTracked", "universal", "type"];
+const optional = ["sku", "brand", "category", "unit", "cost", "taxPercent", "barcodes", "wholesalePrice", "hsnSac", "partNumber", "reorderLevel", "serialTracked", "universal", "type", "onlineOnly"];
 const headerNames = new Map([...required, ...optional].map((name) => [name.toLowerCase(), name]));
 
 function hundredths(value: string, label: string) {
@@ -175,8 +180,10 @@ export function previewCatalog(csv: unknown, codes: CatalogCodes, gst: boolean, 
         wholesalePrice: hundredths(input.wholesalePrice || input.retailPrice, "wholesale price"),
         taxRate: noTax ? 0 : input.taxPercent ? hundredths(input.taxPercent, "tax rate") : undefined, reorderLevel: input.reorderLevel || 0,
         serialTracked: flag(input.serialTracked, "serial tracking"), universal: flag(input.universal, "universal fit"),
+        onlineOnly: flag(input.onlineOnly, "online only"),
       }, undefined, noTax ? 0 : 1800);
       if (product.type === "service" && product.serialTracked) fail("A service cannot track serial numbers.");
+      if (input.type === "service" && flag(input.onlineOnly, "online only")) fail("A service cannot be online only.");
       codes.check(product);
       codes.add(product);
       products.push(product);

@@ -41,6 +41,8 @@ export async function onlineQuantity(
   productId: string,
   buffer: number,
 ) {
+  // Online only: ordered from the supplier when sold; never limited by POS stock.
+  if ((await getRecord(db, organizationId, "product", productId))?.onlineOnly) return 0;
   const onHand = Number(
     (
       await db.query(
@@ -175,6 +177,26 @@ export function magentoProduct(
   if (listing.description) custom.push({ attribute_code: "description", value: listing.description });
   // Clear the old "Available on order. Ships in N days." notice.
   if (listing.availability === "order") custom.push({ attribute_code: "short_description", value: "" });
+  // Online only: the shop orders it from the supplier when a customer buys it, so
+  // Magento must always sell it and never show a stock or backorder message:
+  // stock is not managed at all (no quantity, always in stock). The POS quantity
+  // is never sent for these parts.
+  const stockItem = product.onlineOnly
+    ? {
+        is_in_stock: true,
+        manage_stock: false,
+        use_config_manage_stock: false,
+        use_config_backorders: false,
+        backorders: 1,
+      }
+    : {
+        qty,
+        is_in_stock: true,
+        manage_stock: true,
+        use_config_backorders: false,
+        // 1 = allow backorders without notifying the customer.
+        backorders: 1,
+      };
   return {
     product: {
       sku: product.sku,
@@ -190,14 +212,7 @@ export function magentoProduct(
         // The POS category decides the shop category (one per part).
         // ...and its brand puts it on that brand's page (Brands > brand name).
         category_links: links.map((c) => ({ position: 0, category_id: String(c) })),
-        stock_item: {
-          qty,
-          is_in_stock: true,
-          manage_stock: true,
-          use_config_backorders: false,
-          // 1 = allow backorders without notifying the customer.
-          backorders: 1,
-        },
+        stock_item: stockItem,
       },
       custom_attributes: custom,
     },

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart' show isOnlineOnly;
 import '../barcode_scan.dart';
 import '../photos.dart';
 import '../theme.dart';
@@ -310,7 +311,7 @@ class _BillDialogState extends State<_BillDialog> {
                 subtitle: Text([
                   '${l['quantity']} × ${app.money(l['cost'])}',
                   if (gst) 'GST ${percentText((l['taxRate'] ?? 0) as int)}%',
-                  'into ${app.locationName(l['binId'])}',
+                  isOnlineOnly(app.productById('${l['productId']}')) ? 'online only, straight to the customer' : 'into ${app.locationName(l['binId'])}',
                   if (l['retailPrice'] != null) 'new price ${app.money(l['retailPrice'])}',
                   ?costWarning(app, '${l['productId']}', l['cost'] as int), // WS-E
                 ].join(' · '), style: costWarning(app, '${l['productId']}', l['cost'] as int) == null ? null : const TextStyle(color: Brand.danger)),

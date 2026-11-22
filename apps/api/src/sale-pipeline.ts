@@ -93,7 +93,8 @@ const stockAndSerials: SaleHook = {
   async afterPersist(ctx) {
     const { db, actor, invoice } = ctx;
     for (const line of ctx.lines) {
-      if (line.type !== "service")
+      // Services and online-only lines (ordered from the supplier) move no stock.
+      if (line.type !== "service" && !line.onlineOnly)
         await adjust(
           db,
           actor,

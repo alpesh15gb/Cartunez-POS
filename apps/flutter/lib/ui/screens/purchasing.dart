@@ -213,8 +213,10 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
           FieldSpec('cost', 'Unit cost', kind: FieldKind.money,
             value: original == null ? '' : (original['cost'] / 100).toStringAsFixed(2), help: 'Blank uses the current catalog cost.'),
         if (receiving) ...[
-          FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: true,
+          // Online-only parts go straight to the website customer, so they need no bin.
+          FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: !parts.any(isOnlineOnly),
             value: original?['binId'] ?? app.sellableBins.firstOrNull?['id'],
+            help: parts.any(isOnlineOnly) ? 'Not used for online-only parts: they go straight to the customer.' : null,
             barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
           FieldSpec('serials', 'Serial numbers', value: (original?['serials'] as List? ?? []).join(', '),
             help: 'For tracked parts, enter a serial for each unit, separated by commas.'),
@@ -229,6 +231,8 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
         final quantity = int.tryParse('${v['quantity']}') ?? 0;
         if (quantity < 1) throw FormProblem('Enter at least one unit.');
         if (receiving && quantity > remaining[id]!) throw FormProblem('Only ${remaining[id]} units are outstanding.');
+        final onlineOnly = isOnlineOnly(product);
+        if (receiving && !onlineOnly && '${v['binId'] ?? ''}'.isEmpty) throw FormProblem('Choose the bin to put the part away into.');
         final serials = splitList(v['serials']);
         if (receiving && product['serialTracked'] == true &&
             (serials.length != quantity || serials.toSet().length != quantity)) {
@@ -236,7 +240,7 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
         }
         return {
           'productId': id, 'quantity': quantity,
-          if (receiving) ...{'binId': v['binId'], 'serials': serials, if ('${v['cost'] ?? ''}'.isNotEmpty) 'cost': (double.parse(v['cost']) * 100).round()}
+          if (receiving) ...{'binId': onlineOnly ? null : v['binId'], 'serials': serials, if ('${v['cost'] ?? ''}'.isNotEmpty) 'cost': (double.parse(v['cost']) * 100).round()}
           else 'cost': v['cost'] == '' ? product['cost'] : (double.parse(v['cost']) * 100).round(),
         };
       },
@@ -257,7 +261,7 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
           subtitle: Text(widget.order == null
               ? '${line['quantity']} × ${app.money(line['cost'])}'
               : [
-                  '${line['quantity']} units · ${app.locationName(line['binId'])}',
+                  '${line['quantity']} units · ${isOnlineOnly(app.productById('${line['productId']}')) ? 'Online only · to the customer' : app.locationName(line['binId'])}',
                   if (line['cost'] != null) '${app.money(line['cost'])} each',
                   if (line['cost'] != null) ?costWarning(app, '${line['productId']}', line['cost'] as int),
                 ].join(' · ')),

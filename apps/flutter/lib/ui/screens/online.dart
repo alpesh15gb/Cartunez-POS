@@ -121,7 +121,8 @@ class _OnlineStoreScreenState extends State<OnlineStoreScreen> {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        final parts = app.saleProducts.where((p) => p['type'] != 'service').toList();
+        // Online-only parts are sold here too (the counter list leaves them out).
+        final parts = app.products.where((p) => p['salesStopped'] != true && p['type'] != 'service').toList();
         final rows = parts
             .where((p) => q.isEmpty || [p['name'], p['sku'], p['brand'], p['partNumber'], ...(p['barcodes'] as List? ?? [])].any((v) => normalize(v).contains(q)))
             .where((p) => _matches(app, p, listings['${p['id']}']))
@@ -353,6 +354,8 @@ class _ListingTable extends StatelessWidget {
       }
 
       String stock(Json p, Json? l) {
+        // Online only: ordered from the supplier when sold; the website always sells it.
+        if (isOnlineOnly(p)) return 'Online only · always available';
         final pos = app.available('${p['id']}');
         final buffer = (l?['buffer'] as num?)?.toInt() ?? (app.magento['defaultBuffer'] as num?)?.toInt() ?? 0;
         final online = onlineBranch ? (pos - buffer).clamp(0, 1 << 30) : (l?['sync'] as Map?)?['qty'] as num?;
@@ -379,6 +382,7 @@ class _ListingTable extends StatelessWidget {
                     Expanded(
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                        if (isOnlineOnly(p)) const StatusChip('Online only'),
                         Text('${p['sku']} · ${stock(p, listings['${p['id']}'])}', style: small),
                         const SizedBox(height: 6),
                         Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -436,7 +440,10 @@ class _ListingTable extends StatelessWidget {
                   Expanded(
                     flex: 4,
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      Row(children: [
+                        Flexible(child: Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700))),
+                        if (isOnlineOnly(p)) ...[const SizedBox(width: 6), const StatusChip('Online only')],
+                      ]),
                       Text('${p['sku']}${'${p['brand'] ?? ''}'.isNotEmpty ? ' · ${p['brand']}' : ''}'
                           '${app.photosOf('${p['id']}').isEmpty ? ' · no photo' : ''}', style: small),
                     ]),

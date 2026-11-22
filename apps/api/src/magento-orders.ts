@@ -59,7 +59,7 @@ export async function onlineReservations(db: Database, organizationId: string, b
   const held = new Map<string, number>();
   for (const order of await records(db, organizationId, "onlineOrder", branchId)) {
     for (const line of order.lines || []) {
-      if (!line.productId) continue;
+      if (!line.productId || line.onlineOnly) continue;
       const units = Number(line.reserved || 0) + Number(line.awaiting || 0);
       if (units > 0) held.set(line.productId, (held.get(line.productId) || 0) + units);
     }
@@ -97,11 +97,18 @@ async function binStock(db: Database, actor: Actor, productId: string) {
 /** Brings the POS stock in line with the order's Magento quantities. */
 export async function applyOnlineOrder(db: Database, order: any, branchId: string) {
   const actor = systemActor(order.organizationId, branchId);
+  // Online-only parts are ordered from the supplier for the customer: they never
+  // reserve shop stock and never wait for it.
+  for (const line of order.lines) {
+    const product = line.productId ? await getRecord(db, order.organizationId, "product", line.productId) : null;
+    if (product?.onlineOnly) line.onlineOnly = true;
+    else delete line.onlineOnly;
+  }
   if (order.mode === "pos") applyPosOrder(order);
   else for (const line of order.lines) {
     line.moves ||= [];
     line.deducted ||= 0;
-    if (!line.productId) {
+    if (!line.productId || line.onlineOnly) {
       line.reserved = 0;
       line.awaiting = 0;
       continue;
@@ -128,6 +135,10 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
   const held = await onlineReservations(db, order.organizationId, branchId);
   for (const line of order.lines) {
     if (!line.productId) continue;
+    if (line.onlineOnly) {
+      line.shortage = 0;
+      continue;
+    }
     const otherOrders = (held.get(line.productId) || 0) - (order.previousHeld?.[line.productId] || 0);
     const available = (await binStock(db, actor, line.productId)).reduce((s, b) => s + b.available, 0);
     const mine = line.reserved + line.awaiting;
@@ -145,7 +156,7 @@ function applyPosOrder(order: any) {
     line.deducted ||= 0;
     line.awaiting = 0;
     line.serialPickRequired = false;
-    if (!line.productId) {
+    if (!line.productId || line.onlineOnly) {
       line.reserved = 0;
       continue;
     }
@@ -167,6 +178,9 @@ export function orderState(order: any) {
   const lines = (order.lines || []).filter((l: any) => l.productId);
   if (lines.some((l: any) => l.awaiting > 0)) return "awaiting";
   if (lines.some((l: any) => l.reserved > 0)) return "reserved";
+  // Online-only units still to send (ordered from the supplier): the order is open.
+  const open = (l: any) => Number(l.ordered || 0) - Number(l.canceled || 0) - Number(l.refunded || 0) - Number(l.posInvoiced || 0);
+  if (order.mode === "pos" && lines.some((l: any) => l.onlineOnly && open(l) > 0)) return "reserved";
   const ordered = lines.reduce((s: number, l: any) => s + l.ordered, 0);
   const canceled = lines.reduce((s: number, l: any) => s + l.canceled, 0);
   const refunded = lines.reduce((s: number, l: any) => s + l.refunded, 0);
@@ -396,35 +410,68 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
     return putRecord(tx, actor.organizationId, "onlineOrder", order!, order!.branchId);
   });
 
-  // Purchase orders for the parts an online order is short of, one per supplier.
-  post("online-orders/:id/purchase-order", async (tx, actor, _body, params) => {
+  // Purchase orders for an online order, one per supplier: the parts it is short
+  // of, and its online-only parts (ordered from the supplier for this customer).
+  // Online-only lines go on draft orders to each part's usual supplier; a part
+  // without one is listed in needsSupplier so the user can choose
+  // (body.suppliers: { productId: supplierId }) and ask again.
+  post("online-orders/:id/purchase-order", async (tx, actor, body, params) => {
     allow(actor, ["owner", "manager"]);
     const order = await getRecord(tx, actor.organizationId, "onlineOrder", String(params.id));
     if (!order) fail("Online order not found.", 404);
     if (order!.branchId !== actor.branchId) fail("Switch to the online branch to order parts for this order.", 409);
+    const chosen: Record<string, unknown> = body?.suppliers && typeof body.suppliers === "object" ? body.suppliers : {};
+    // Stock parts: units still to arrive. Online-only parts: every unit already ordered
+    // (received units went straight to the customer, so they are never ordered again).
     const outstanding = new Map<string, number>();
+    const ordered = new Map<string, number>();
     for (const poId of order!.purchaseOrderIds || []) {
       const po = await getRecord(tx, actor.organizationId, "purchaseOrder", poId);
-      for (const line of po?.lines || []) {
+      if (!po || po.status === "cancelled") continue;
+      for (const line of po.lines || []) {
         outstanding.set(line.productId, (outstanding.get(line.productId) || 0) + line.quantity - line.received);
+        ordered.set(line.productId, (ordered.get(line.productId) || 0) + line.quantity);
       }
     }
     const bySupplier = new Map<string, any[]>();
+    const needsSupplier: any[] = [];
     for (const line of order!.lines || []) {
-      if (!line.productId || !(line.shortage > 0)) continue;
-      const onOrder = outstanding.get(line.productId) || 0;
-      const quantity = Math.max(0, line.shortage - onOrder);
-      outstanding.set(line.productId, Math.max(0, onOrder - line.shortage));
-      if (!quantity) continue;
+      if (!line.productId) continue;
       const product = await getRecord(tx, actor.organizationId, "product", line.productId);
-      if (!product?.supplierId) fail(`${product?.name || line.sku} has no supplier. Add one to the part first.`);
-      const lines = bySupplier.get(product!.supplierId) || [];
+      let quantity = 0;
+      if (product?.onlineOnly) {
+        const due = Math.max(0, Number(line.ordered || 0) - Number(line.canceled || 0) - Number(line.refunded || 0) - Number(line.shipped || 0));
+        const already = ordered.get(line.productId) || 0;
+        quantity = Math.max(0, due - already);
+        ordered.set(line.productId, Math.max(0, already - due));
+      } else {
+        if (!(line.shortage > 0)) continue;
+        const onOrder = outstanding.get(line.productId) || 0;
+        quantity = Math.max(0, line.shortage - onOrder);
+        outstanding.set(line.productId, Math.max(0, onOrder - line.shortage));
+      }
+      if (!quantity) continue;
+      let supplierId: string | null = chosen[line.productId] ? String(chosen[line.productId]) : product?.supplierId || null;
+      if (supplierId && !(await getRecord(tx, actor.organizationId, "supplier", supplierId))) supplierId = null;
+      if (!supplierId) {
+        if (!product?.onlineOnly) fail(`${product?.name || line.sku} has no supplier. Add one to the part first.`);
+        needsSupplier.push({ productId: product!.id, sku: product!.sku, name: product!.name, quantity });
+        continue;
+      }
+      const lines = bySupplier.get(supplierId) || [];
       const samePart = lines.find((item) => item.productId === product!.id);
       if (samePart) samePart.quantity += quantity;
-      else lines.push({ productId: product!.id, quantity, cost: Number(product!.cost || 0), received: 0 });
-      bySupplier.set(product!.supplierId, lines);
+      else
+        lines.push({
+          productId: product!.id,
+          quantity,
+          cost: Number(product!.lastPurchaseCost ?? product!.cost ?? 0),
+          received: 0,
+          ...(product!.onlineOnly ? { onlineOnly: true } : {}),
+        });
+      bySupplier.set(supplierId, lines);
     }
-    if (!bySupplier.size) fail("All missing units are already on order or in stock.", 409);
+    if (!bySupplier.size && !needsSupplier.length) fail("All missing units are already on order or in stock.", 409);
     const created = [];
     for (const [supplierId, lines] of bySupplier) {
       const po = {
@@ -432,18 +479,20 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
         branchId: actor.branchId,
         supplierId,
         lines,
-        status: "open",
+        // Online-only parts: a draft to check and place with the supplier.
+        status: lines.some((l) => l.onlineOnly) ? "draft" : "open",
         createdAt: new Date().toISOString(),
         userId: actor.id,
         note: `For online order #${order!.number}`,
         onlineOrderId: order!.id,
+        onlineOrderNumber: order!.number,
       };
       await putRecord(tx, actor.organizationId, "purchaseOrder", po, actor.branchId);
       created.push(po.id);
     }
     order!.purchaseOrderIds = [...(order!.purchaseOrderIds || []), ...created];
     await putRecord(tx, actor.organizationId, "onlineOrder", order!, order!.branchId);
-    return { purchaseOrderIds: created };
+    return { purchaseOrderIds: created, needsSupplier };
   });
 }
 

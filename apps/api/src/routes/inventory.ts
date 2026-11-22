@@ -105,6 +105,7 @@ export function inventoryRoutes(app: FastifyInstance, db: Database, post: Post) 
         fail("Adjustment would consume reserved stock.", 409);
       const product = await scoped(tx, actor, "product", body.productId);
       if (product.type === "service") fail("Services do not carry stock.");
+      if (product.onlineOnly) fail(`${product.name} is online only (sold on the website) and carries no shop stock.`);
       const bin = await scoped(tx, actor, "location", body.binId);
       const serialStatus = bin.kind === "sellable" ? "available" : bin.kind;
       const reference = id("adjust");

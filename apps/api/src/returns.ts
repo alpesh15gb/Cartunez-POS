@@ -229,7 +229,8 @@ export async function returnInvoice(
     const quantity = integer(input.quantity ?? input.qty, `Return quantity for ${original.name}`, 1, original.qty - returned);
     const kind = binKind[disposition];
     let bin: RecordData | null = null;
-    if (original.type !== "service") {
+    // Online-only lines never held shop stock, so they go back to no bin.
+    if (original.type !== "service" && !original.onlineOnly) {
       if (input.binId) {
         bin = await scoped(db, actor, "location", input.binId);
         if (bin.kind !== kind) fail("Return destination must match the condition.");
@@ -330,6 +331,7 @@ export async function returnInvoice(
       quantity,
       binId: bin?.id || null,
       type: original.type,
+      ...(original.onlineOnly ? { onlineOnly: true } : {}),
       disposition,
       condition: kind,
       serials,
@@ -403,7 +405,7 @@ export async function returnInvoice(
   };
   if (exchange) receipt.exchangeApplied = applied;
   for (const line of lines) {
-    if (line.type !== "service")
+    if (line.type !== "service" && !(line as any).onlineOnly)
       await adjust(db, actor, line.productId, line.binId, line.quantity, voided ? "Invoice void" : "Sales return", receipt.id);
     for (const component of (line as any).components || [])
       await adjust(db, actor, component.productId, component.binId, component.qty, voided ? "Invoice void" : "Sales return", receipt.id);

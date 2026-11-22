@@ -235,6 +235,15 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
 
   String _lineState(Map l) {
     if (l['productId'] == null) return 'Not in the POS catalogue (SKU ${l['sku']})';
+    // Online only: ordered from the supplier for this customer (no shop stock).
+    if (orderFromSupplierLine(context.appRead, l)) {
+      return [
+        'Online only · order from supplier',
+        if ((l['posInvoiced'] ?? 0) > 0) '${l['posInvoiced']} invoiced',
+        if ((l['canceled'] ?? 0) > 0) '${l['canceled']} cancelled',
+        if ((l['refunded'] ?? 0) > 0) '${l['refunded']} refunded',
+      ].join(' · ');
+    }
     final parts = [
       if ((l['reserved'] ?? 0) > 0) '${l['reserved']} reserved',
       if ((l['deducted'] ?? 0) > 0) '${l['deducted']} taken from stock',
@@ -305,6 +314,12 @@ class _OnlineOrderDialogState extends State<_OnlineOrderDialog> {
         ),
       ),
       actions: [
+        if (hasSupplierLines(app, o) && app.isManager)
+          OutlinedButton.icon(
+            onPressed: busy ? null : () => createOrderPurchase(context, o),
+            icon: const Icon(Icons.add_shopping_cart, size: 18),
+            label: const Text('Create purchase order'),
+          ),
         if (short)
           OutlinedButton.icon(
             onPressed: busy ? null : () => _run('/online-orders/${o['id']}/purchase-order', 'Purchase order created. Find it in Purchasing › Orders.'),

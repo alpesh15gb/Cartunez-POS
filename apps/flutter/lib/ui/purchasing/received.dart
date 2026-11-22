@@ -132,7 +132,8 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
                   Expanded(child: Text('${l['quantity']} × ${app.productName('${l['productId']}')}', style: const TextStyle(fontWeight: FontWeight.w600))),
                   _syncChip(sync['${l['productId']}']?['state'] as String?),
                 ]),
-                Text(app.locationName(l['binId'] as String?), style: Theme.of(context).textTheme.bodySmall),
+                Text(l['binId'] == null && isOnlineOnly(app.productById('${l['productId']}'))
+                    ? 'Online only · straight to the customer' : app.locationName(l['binId'] as String?), style: Theme.of(context).textTheme.bodySmall),
                 if ('${sync['${l['productId']}']?['error'] ?? ''}'.isNotEmpty)
                   Text('${sync['${l['productId']}']!['error']}', style: const TextStyle(color: Brand.danger, fontSize: 12)),
                 if (l['costHike'] != null) ...[

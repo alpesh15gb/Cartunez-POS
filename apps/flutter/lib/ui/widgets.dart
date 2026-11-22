@@ -39,7 +39,8 @@ class FormProblem implements Exception {
 
 // ---------------- form dialog ----------------
 
-enum FieldKind { text, number, signedNumber, money, multiline, select, checks, password, email, phone, date }
+/// toggle: an on/off switch (value and result are bools).
+enum FieldKind { text, number, signedNumber, money, multiline, select, checks, toggle, password, email, phone, date }
 
 class FieldSpec {
   const FieldSpec(
@@ -134,6 +135,8 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
           _values[field.name] = field.options.any((o) => o.$1 == value) ? value : null;
         case FieldKind.checks:
           _values[field.name] = {...(field.value as Iterable? ?? const []).map((e) => '$e')};
+        case FieldKind.toggle:
+          _values[field.name] = field.value == true || '${field.value}' == 'true';
         default:
           final v = field.value;
           final text = v == null ? '' : v is double && v == v.roundToDouble() ? '${v.toInt()}' : '$v';
@@ -147,6 +150,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
   bool get _complete => widget.fields.where((f) => f.required).every((f) => switch (f.kind) {
         FieldKind.select => '${_values[f.name] ?? ''}'.isNotEmpty,
         FieldKind.checks => (_values[f.name] as Set<String>).isNotEmpty,
+        FieldKind.toggle => true,
         _ => _text[f.name]!.text.trim().isNotEmpty,
       });
 
@@ -172,6 +176,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
       values[field.name] = switch (field.kind) {
         FieldKind.select => _values[field.name] ?? '',
         FieldKind.checks => (_values[field.name] as Set<String>).toList(),
+        FieldKind.toggle => _values[field.name] == true,
         _ => _text[field.name]!.text.trim(),
       };
     }
@@ -238,6 +243,14 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
                 onSelected: (on) => setState(() => on ? set.add(o.$1) : set.remove(o.$1)),
               ),
           ]),
+        );
+      case FieldKind.toggle:
+        return SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(field.label),
+          subtitle: field.help == null ? null : Text(field.help!),
+          value: _values[field.name] == true,
+          onChanged: _busy ? null : (on) => setState(() => _values[field.name] = on),
         );
       default:
         final controller = _text[field.name]!;
@@ -318,7 +331,7 @@ class _FormDialogState<T> extends State<_FormDialog<T>> {
     const half = (_wideWidth - 16) / 2;
     return Wrap(spacing: 16, runSpacing: 14, children: [
       for (final f in fields)
-        SizedBox(width: f.kind == FieldKind.multiline || f.kind == FieldKind.checks ? _wideWidth : half, child: _field(f)),
+        SizedBox(width: f.kind == FieldKind.multiline || f.kind == FieldKind.checks || f.kind == FieldKind.toggle ? _wideWidth : half, child: _field(f)),
     ]);
   }
 

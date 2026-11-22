@@ -65,6 +65,15 @@ export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
           409,
         );
     }
+    // Online only: the part must hold no shop stock (online-only parts carry none).
+    if (existing && product.onlineOnly && !existing.onlineOnly) {
+      const stocked = await tx.query(
+        "SELECT 1 FROM stock WHERE organization_id=$1 AND product_id=$2 AND quantity<>0 LIMIT 1",
+        [actor.organizationId, product.id],
+      );
+      if (stocked.rows.length)
+        fail("This part has shop stock. Sell, return or adjust it to zero before making it online only.", 409);
+    }
     const removed = await records(tx, actor.organizationId, "removedProduct");
     const codes = new CatalogCodes([...products, ...removed].filter((p) => p.id !== product.id));
     codes.check(product, existing);

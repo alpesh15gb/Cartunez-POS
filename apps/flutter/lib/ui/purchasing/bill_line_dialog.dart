@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart' show isOnlineOnly;
 import '../theme.dart';
 import '../widgets.dart';
 import '../screens/inventory.dart';
@@ -113,6 +114,13 @@ Future<Json?> editBillLine(BuildContext context, {required bool gst, Json? origi
                 Expanded(child: TextField(controller: price, keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(labelText: 'New selling price (optional)', helperText: 'Leave blank to keep the current price'))),
               ]),
+              // Online only: the goods go straight out to the website customer (no bin, no shop stock).
+              if (isOnlineOnly(part))
+                const Padding(
+                  padding: EdgeInsets.only(top: 10),
+                  child: Text('Online only: goes straight to the website customer, not into shop stock.'),
+                )
+              else
               DropdownButtonFormField<String>(
                 key: ValueKey(binId),
                 initialValue: app.sellableBins.any((b) => b['id'] == binId) ? binId : null,
@@ -143,7 +151,7 @@ Future<Json?> editBillLine(BuildContext context, {required bool gst, Json? origi
                   err = 'Enter the unit cost.';
                 } else if (gst && (r < 0 || r > 4000)) {
                   err = 'Enter the GST % (for example 18).';
-                } else if (binId == null) {
+                } else if (binId == null && !isOnlineOnly(part)) {
                   err = 'Choose the bin.';
                 } else if (price.text.trim().isNotEmpty && parsePaymentAmount(price.text.trim()) == null) {
                   err = 'Enter a valid selling price.';
@@ -152,7 +160,7 @@ Future<Json?> editBillLine(BuildContext context, {required bool gst, Json? origi
                 }
                 if (err != null) return setLocal(() => problem = err);
                 Navigator.pop(dialogContext, {
-                  'productId': productId, 'quantity': q, 'cost': c, 'taxRate': r.clamp(0, 4000), 'binId': binId,
+                  'productId': productId, 'quantity': q, 'cost': c, 'taxRate': r.clamp(0, 4000), 'binId': isOnlineOnly(part) ? null : binId,
                   'retailPrice': price.text.trim().isEmpty ? null : parsePaymentAmount(price.text.trim()),
                   'serials': serialList,
                 });

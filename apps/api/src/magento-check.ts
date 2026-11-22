@@ -68,8 +68,15 @@ export async function compareMagento(db: Database, options: { fetch?: Fetch; org
       const status = listing.published ? 1 : 2;
       if (Number(mg.status) !== status) found.push(["status", status === 1 ? "enabled" : "disabled", Number(mg.status) === 1 ? "enabled" : "disabled"]);
       if (listing.published) {
-        const mgQty = Number(mg.extension_attributes?.stock_item?.qty ?? NaN);
-        if (mgQty !== qty) found.push(["qty", qty, Number.isNaN(mgQty) ? null : mgQty]);
+        const stockItem = mg.extension_attributes?.stock_item;
+        if (product.onlineOnly) {
+          // Online only: stock is not managed on the website (always sellable).
+          if (stockItem && stockItem.manage_stock !== false && stockItem.manage_stock !== 0)
+            found.push(["stock", "not managed", "managed"]);
+        } else {
+          const mgQty = Number(stockItem?.qty ?? NaN);
+          if (mgQty !== qty) found.push(["qty", qty, Number.isNaN(mgQty) ? null : mgQty]);
+        }
         if (Math.abs(Number(mg.price) - prices.mrp / 100) > 0.005) found.push(["mrp", prices.mrp / 100, Number(mg.price)]);
         const sp = special(mg);
         if (Number.isNaN(sp) || Math.abs(sp - prices.selling / 100) > 0.005) found.push(["price", prices.selling / 100, Number.isNaN(sp) ? null : sp]);

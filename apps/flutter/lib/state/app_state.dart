@@ -157,6 +157,7 @@ class AppState extends ChangeNotifier {
   Future<Uint8List> photoBytes(String imageId) => catalogState.photoBytes(imageId);
   List<Json> get products => catalogState.products;
   List<Json> get saleProducts => catalogState.saleProducts;
+  List<Json> get stockParts => catalogState.stockParts;
   List<Json> get bins => catalogState.bins;
   List<Json> get stock => catalogState.stock;
   List<Json> get sellableBins => catalogState.sellableBins;

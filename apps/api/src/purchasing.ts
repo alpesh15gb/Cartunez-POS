@@ -352,8 +352,11 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     for (const input of body.lines) {
       const product = await scoped(tx, actor, "product", input.productId);
       if (product.type === "service") fail(`${product.name} is a service, not a stock part.`);
-      const bin = await scoped(tx, actor, "location", input.binId);
-      if (bin.kind !== "sellable") fail("Put purchased stock into a sellable bin.");
+      // Online only: billed and owed to the supplier as usual, but the goods go
+      // straight out to the website customer: no bin, no shop stock.
+      const onlineOnly = !!product.onlineOnly;
+      const bin = onlineOnly ? null : await scoped(tx, actor, "location", input.binId);
+      if (bin && bin.kind !== "sellable") fail("Put purchased stock into a sellable bin.");
       if (order) {
         const ordered = order.lines.find((l: any) => l.productId === product.id);
         const outstanding = ordered ? ordered.quantity - (ordered.received || 0) : null;
@@ -369,7 +372,8 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         quantity: integer(input.quantity, "Quantity", 1, 1000000),
         cost: integer(input.cost, "Unit cost"),
         taxRate: gst ? integer(input.taxRate ?? 0, "GST rate", 0, 4000) : 0,
-        binId: bin.id,
+        binId: bin?.id || null,
+        ...(onlineOnly ? { onlineOnly: true } : {}),
         serials: [] as string[],
         mrp: input.retailPrice != null && input.retailPrice !== "" ? integer(input.retailPrice, "Selling price") : null,
       };
@@ -409,7 +413,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         await putRecord(tx, actor.organizationId, "serial",
           { id: serialId, branchId: actor.branchId, productId: product.id, serial, binId: line.binId, status: "available" }, actor.branchId);
       }
-      await adjust(tx, actor, product.id, line.binId, line.quantity, "Purchase bill", billId);
+      if (!line.onlineOnly) await adjust(tx, actor, product.id, line.binId, line.quantity, "Purchase bill", billId);
       if (order) {
         const ordered = order.lines.find((l: any) => l.productId === product.id);
         if (ordered) ordered.received = Math.min(ordered.quantity, (ordered.received || 0) + line.quantity);
@@ -460,7 +464,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       fail("Parts on this bill were already returned to the supplier. Return the rest instead of cancelling.", 409);
     const reason = text(body.reason, "reason");
     for (const line of bill.lines) {
-      await adjust(tx, actor, line.productId, line.binId, -line.quantity, "Purchase bill cancelled", bill.id);
+      if (!line.onlineOnly) await adjust(tx, actor, line.productId, line.binId, -line.quantity, "Purchase bill cancelled", bill.id);
       for (const serial of line.serials || []) {
         const serialId = line.productId + ":" + serial;
         const record = await getRecord(tx, actor.organizationId, "serial", serialId);
@@ -502,7 +506,8 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     let total = 0;
     for (const input of body.lines) {
       const product = await scoped(tx, actor, "product", input.productId);
-      const bin = await scoped(tx, actor, "location", input.binId);
+      // Online-only goods were never shop stock: the return takes none out.
+      const bin = product.onlineOnly ? null : await scoped(tx, actor, "location", input.binId);
       const quantity = integer(input.quantity, "Quantity", 1, 1000000);
       let cost = integer(input.cost ?? product.cost, "Unit cost");
       if (bill) {
@@ -525,13 +530,14 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         for (const serial of list) {
           const serialId = product.id + ":" + serial;
           const record = await getRecord(tx, actor.organizationId, "serial", serialId);
-          if (!record || record.status !== "available" || record.binId !== bin.id) fail(`Serial ${serial} is not in stock in that bin.`);
+          if (!record || record.status !== "available" || record.binId !== bin?.id) fail(`Serial ${serial} is not in stock in that bin.`);
           await tx.query("DELETE FROM records WHERE organization_id=$1 AND kind='serial' AND id=$2", [actor.organizationId, serialId]);
           serials.push(serial);
         }
       }
-      await adjust(tx, actor, product.id, bin.id, -quantity, "Returned to supplier", returnId);
-      lines.push({ productId: product.id, sku: product.sku, name: product.name, quantity, cost, binId: bin.id, amount: quantity * cost, serials });
+      if (bin) await adjust(tx, actor, product.id, bin.id, -quantity, "Returned to supplier", returnId);
+      lines.push({ productId: product.id, sku: product.sku, name: product.name, quantity, cost, binId: bin?.id || null, amount: quantity * cost, serials,
+        ...(bin ? {} : { onlineOnly: true }) });
       total += quantity * cost;
     }
     const record = {

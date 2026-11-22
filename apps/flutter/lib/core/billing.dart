@@ -118,6 +118,8 @@ Quote quote(Json cart, List<Json> products, {int roundingIncrement = 1, String t
     final product = products.firstWhere((p) => p['id'] == line['productId'],
         orElse: () => throw BillingError('A selected part is no longer in this branch catalog.'));
     if (product['salesStopped'] == true) throw BillingError('Sales are stopped for ${product['sku']}. Remove it before checkout.');
+    // Online only: sold on the website, never at the counter.
+    if (product['onlineOnly'] == true) throw BillingError('${product['name']} is online only — sold on the website. Remove it before checkout.');
     final qty = line['qty'] as int? ?? 0;
     if (qty < 1 || qty > 9999) throw BillingError('Quantity must be a whole number between 1 and 9999.');
     amount((product['taxRate'] ?? 0) as int, 'Tax rate', 10000);

@@ -150,7 +150,7 @@ export async function dashboard(db: Database, actor: Actor, query: any = {}) {
   const cutoff = new Date(at.getTime() - deadDays * 86400000).toISOString();
   const dead = [...onHand.entries()]
     .map(([productId, quantity]) => ({ product: byProduct.get(productId), productId, quantity }))
-    .filter(({ product, productId, quantity }) => product && product.type !== "service" && quantity > 0 &&
+    .filter(({ product, productId, quantity }) => product && product.type !== "service" && !product.onlineOnly && quantity > 0 &&
       (lastSold.get(productId) || "") < cutoff && (firstIn.get(productId) || "") < cutoff)
     .map(({ product, productId, quantity }) => ({
       productId, sku: product!.sku, name: product!.name, quantity,

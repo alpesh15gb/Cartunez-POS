@@ -14,6 +14,7 @@ export async function startCount(db: Database, actor: Actor, body: any) {
   allow(actor, counterRoles);
   const product = await scoped(db, actor, "product", body.productId);
   if (product.type === "service") fail("Select a stock part.");
+  if (product.onlineOnly) fail(`${product.name} is online only (sold on the website) and has no shop stock to count.`);
   const bin = await scoped(db, actor, "location", body.binId);
   const fields = { productId: product.id, binId: bin.id, branchId: actor.branchId, startedBy: actor.id };
   return idempotent(db, actor, body.transactionId, { action: "count-start", ...fields }, async () =>

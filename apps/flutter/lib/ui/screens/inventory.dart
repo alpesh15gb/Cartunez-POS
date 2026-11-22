@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart' show isOnlineOnly;
 import '../shell.dart';
 import '../photos.dart';
 import '../purchasing/bill_entry_dialog.dart'; // QA #6: receive a new part against a supplier bill
@@ -15,12 +16,21 @@ import 'physical_count.dart';
 
 int _minor(Object? value) => ((double.tryParse('$value') ?? 0) * 100).round();
 
-class PartsScreen extends StatelessWidget {
+class PartsScreen extends StatefulWidget {
   const PartsScreen({super.key});
+
+  @override
+  State<PartsScreen> createState() => _PartsScreenState();
+}
+
+class _PartsScreenState extends State<PartsScreen> {
+  /// Online only filter: 'all', 'shop' (shop stock) or 'online' (website only).
+  String _kind = 'all';
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
+    final anyOnlineOnly = app.products.any(isOnlineOnly);
     final shell = ShellScope.of(context);
     return ValueListenableBuilder(
       valueListenable: shell.search,
@@ -31,7 +41,10 @@ class PartsScreen extends StatelessWidget {
             .where((p) => exactIds.isNotEmpty ? exactIds.contains(p['id']) : q.isEmpty ||
                 [p['name'], p['sku'], p['partNumber'], p['brand'], p['category'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
                     .any((v) => normalize(v).contains(q)))
+            .where((p) => !anyOnlineOnly || _kind == 'all' || (_kind == 'online') == isOnlineOnly(p))
             .toList();
+        // Online-only parts have no shelf, so they need no labels.
+        final labelRows = rows.where((p) => !isOnlineOnly(p)).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           if (app.canStock)
             Toolbar([
@@ -40,17 +53,25 @@ class PartsScreen extends StatelessWidget {
               if (app.isManager && app.list('removedProducts').isNotEmpty)
                 OutlinedButton(onPressed: () => restorePart(context), child: const Text('Restore part')),
               OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
-              OutlinedButton(onPressed: app.online && app.bins.isNotEmpty && app.products.any((p) => p['type'] != 'service')
+              OutlinedButton(onPressed: app.online && app.bins.isNotEmpty && app.stockParts.isNotEmpty
                   ? () => startPhysicalCount(context) : null, child: const Text('Stock count')),
               if (app.list('stockCounts').isNotEmpty)
                 OutlinedButton(onPressed: app.online ? () => openPhysicalCounts(context) : null,
                   child: Text("Open counts (${app.list('stockCounts').length})")),
               OutlinedButton.icon(
-                onPressed: rows.isEmpty ? null : () => printLabels(context, [for (final p in rows) productLabel(context.appRead, p)]),
+                onPressed: labelRows.isEmpty ? null : () => printLabels(context, [for (final p in labelRows) productLabel(context.appRead, p)]),
                 icon: const Icon(Icons.qr_code_2, size: 18),
-                label: Text(q.isEmpty ? 'Print all labels' : 'Print ${rows.length} ${rows.length == 1 ? 'label' : 'labels'}'),
+                label: Text(q.isEmpty ? 'Print all labels' : 'Print ${labelRows.length} ${labelRows.length == 1 ? 'label' : 'labels'}'),
               ),
             ]),
+          if (anyOnlineOnly)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Wrap(spacing: 8, runSpacing: 4, children: [
+                for (final (key, label) in const [('all', 'All parts'), ('shop', 'Shop stock'), ('online', 'Online only')])
+                  ChoiceChip(label: Text(label), selected: _kind == key, onSelected: (_) => setState(() => _kind = key)),
+              ]),
+            ),
           if (app.canStock && app.bins.isEmpty && app.products.isNotEmpty)
             Align(alignment: Alignment.centerLeft, child: TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a bin to receive or adjust stock'))),
           LayoutBuilder(builder: (context, c) {
@@ -80,6 +101,7 @@ class PartsScreen extends StatelessWidget {
               columns: [
                 Col('Part', (p) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       if (p['salesStopped'] == true) const StatusChip('Sales stopped'),
+                      if (isOnlineOnly(p)) const StatusChip('Online only'),
                       Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
                       Text('${p['sku']}${'${p['partNumber'] ?? ''}'.isNotEmpty ? ' · ${p['partNumber']}' : ''}',
                           style: Theme.of(context).textTheme.bodySmall, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -115,6 +137,8 @@ class _StockText extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.app;
     if (part['type'] == 'service') return const Text('Service');
+    // Online only: ordered from the supplier when sold on the website; no shop stock.
+    if (isOnlineOnly(part)) return const Text('Website');
     final n = app.available('${part['id']}');
     return Wrap(spacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
       Text('$n', style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -185,6 +209,7 @@ class _PartTile extends StatelessWidget {
               Flexible(child: Text('${part['name']}', maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
               if (part['salesStopped'] == true) ...[const SizedBox(width: 6), const StatusChip('Sales stopped')],
+              if (isOnlineOnly(part)) ...[const SizedBox(width: 6), const StatusChip('Online only')],
             ]),
             const SizedBox(height: 2),
             Row(children: [
@@ -245,6 +270,12 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
           options: const [('true', 'All vehicles (universal)'), ('false', 'Specific vehicles only')],
           help: fitmentOn ? 'For specific vehicles, add them under Fitment after saving.' : null,
           advanced: !fitmentOn),
+      FieldSpec('onlineOnly', 'Online only (sold on the website, not at the counter)',
+          kind: FieldKind.toggle,
+          value: product['onlineOnly'] == true,
+          help: 'For parts you do not keep in the shop: listed only on shop.cartunez.in and ordered from the supplier '
+              'when a customer buys one. The website always shows it as available. It never counts as shop stock '
+              'and is hidden from Billing, stock counts and reorder alerts.'),
       FieldSpec('sku', product['id'] == null ? 'SKU / item code (optional)' : 'SKU / item code', value: product['sku'], required: product['id'] != null,
           help: product['id'] == null ? 'Leave blank to create one automatically.' : null),
       if (product['id'] != null && app.isManager)
@@ -324,7 +355,9 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
         'reorderLevel': int.tryParse('${v['reorderLevel']}') ?? 0,
         'packSize': int.tryParse('${v['packSize']}') ?? 1,
         'universal': v['universal'] == 'true',
-        'serialTracked': v['serialTracked'] == 'true',
+        // An online-only part takes no serial numbers (the website cannot record them).
+        'serialTracked': v['serialTracked'] == 'true' && v['onlineOnly'] != true,
+        'onlineOnly': v['onlineOnly'] == true,
         'unit': '${v['unit']}'.isEmpty ? 'Each' : v['unit'],
         for (final k in ['oemReferences', 'supplierReferences', 'supersedes', 'interchanges']) k: splitList(v[k]),
         // WS-C (workshop)
@@ -348,7 +381,8 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
     },
   );
   final newPart = createdPart;
-  if (newPart != null && context.mounted) await offerFirstStock(context, newPart);
+  // Online-only parts carry no shop stock, so there is no first stock to add.
+  if (newPart != null && !isOnlineOnly(newPart) && context.mounted) await offerFirstStock(context, newPart);
 }
 
 /// QA #6: a new part starts with no stock, so offer the two ways to add it.
@@ -379,7 +413,7 @@ Future<void> offerFirstStock(BuildContext context, Json part) async {
 Future<void> stockOperation(BuildContext context, String kind, {String? productId}) async {
   final app = context.appRead;
   final transactionId = uuid();
-  final parts = optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']}');
+  final parts = optionsOf(app.stockParts, (p) => '${p['sku']} · ${p['name']}');
   final allBins = optionsOf(app.bins, (b) => '${app.binName(b)} · ${b['kind']}');
   await showFormDialog<void>(
     context,
@@ -569,7 +603,7 @@ Future<void> dispatchTransfer(BuildContext context) async {
       FieldSpec('destinationBranchId', 'To branch',
           kind: FieldKind.select, required: true, value: destinations.length == 1 ? destinations.single['id'] : null,
           options: optionsOf(destinations)),
-      FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, barcodeChoice: app.uniqueProductIdForCode, options: optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => '${p['sku']} · ${p['name']}')),
+      FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, barcodeChoice: app.uniqueProductIdForCode, options: optionsOf(app.stockParts, (p) => '${p['sku']} · ${p['name']}')),
       FieldSpec('binId', 'From bin', kind: FieldKind.select, required: true, barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),
       const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
       const FieldSpec('reason', 'Reason', required: true),

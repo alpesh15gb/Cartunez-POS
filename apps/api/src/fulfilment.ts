@@ -191,9 +191,11 @@ export async function pickList(db: Database, actor: Actor, orders: any[]) {
           qty,
           serialTracked: !!product?.serialTracked,
           barcodes: product?.barcodes || [],
-          bins: (line.productId && bins.get(line.productId)) || [],
+          bins: product?.onlineOnly ? [] : (line.productId && bins.get(line.productId)) || [],
+          // Online only: ordered from the supplier for this customer; nothing to pick.
+          ...(product?.onlineOnly ? { onlineOnly: true, orderFromSupplier: true } : {}),
         };
-        if (line.productId) {
+        if (line.productId && !product?.onlineOnly) {
           const total = items.get(line.productId) || { ...row, qty: 0, orders: [] };
           total.qty += qty;
           total.orders.push({ id: order.id, number: order.number, itemId: line.itemId, qty });
@@ -234,13 +236,22 @@ export function shares(total: number, weights: number[]) {
 async function saleLines(db: Database, actor: Actor, order: any, picks: any[], sellBeyondStock: boolean) {
   const stock = await inventory(db, actor);
   const sellable = (await records(db, actor.organizationId, "location", actor.branchId)).filter((b) => b.kind === "sellable");
-  if (!sellable.length) fail("Add a sellable bin first (Catalog › Bins).", 409);
   const lines = new Map<string, any>();
   for (const line of order.lines) {
     const qty = toShip(line);
     if (!qty) continue;
     const product = await getRecord(db, actor.organizationId, "product", line.productId);
+    if (product?.onlineOnly) {
+      // Online only: invoiced as a non-stock line (no bin, no stock movement).
+      const key = line.productId + "|";
+      const saleLine = lines.get(key) || { productId: line.productId, binId: "", qty: 0, serials: [], onlineRowTotal: 0 };
+      saleLine.qty += qty;
+      saleLine.onlineRowTotal += rowPaid(line, qty);
+      lines.set(key, saleLine);
+      continue;
+    }
     const mine = picks.filter((pick) => pick.itemId === line.itemId);
+    if (!sellable.length) fail("Add a sellable bin first (Catalog › Bins).", 409);
     const picked = mine.reduce((n, pick) => n + pick.qty, 0);
     if (picked !== qty) fail(`Pick ${qty} × ${product?.name || line.sku} first (${picked} picked).`, 409);
     const serials = mine.flatMap((pick) => pick.serials);
@@ -298,7 +309,9 @@ async function saleLines(db: Database, actor: Actor, order: any, picks: any[], s
   return [...lines.values()];
 }
 
-function readPicks(value: unknown) {
+/** allowNone: every line is online only (ordered from the supplier), so nothing is picked. */
+function readPicks(value: unknown, allowNone = false) {
+  if (allowNone && (value === undefined || value === null || (Array.isArray(value) && !value.length))) return [];
   if (!Array.isArray(value) || !value.length) fail("Pick the items before invoicing.");
   return (value as any[]).map((pick) => ({
     itemId: pick.itemId,
@@ -429,7 +442,8 @@ export function fulfilmentRoutes(app: FastifyInstance, db: Database, post: Post,
           "(Catalog › Parts, type Service, with its SAC code and GST rate) so it can be billed, then invoice the order.",
         409,
       );
-    const picks = readPicks(body.picks);
+    const onlineOnlyIds = new Set(products.filter((p) => p.onlineOnly).map((p) => p.id));
+    const picks = readPicks(body.picks, due.every((line: any) => onlineOnlyIds.has(line.productId)));
     // Release this order's hold so its units can be sold to it.
     for (const line of due) line.reserved = 0;
     await putRecord(tx, actor.organizationId, "onlineOrder", order, order.branchId);

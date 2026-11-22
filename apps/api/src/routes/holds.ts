@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Database } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
-import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves, heldUnits } from "../domain.js";
+import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves, heldUnits, ONLINE_ONLY_MESSAGE } from "../domain.js";
 import { isKit, reserveKitComponents } from "../hooks/kit-reserve.js";
 import { queueMagentoSync } from "../online-queue.js";
 
@@ -65,6 +65,7 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
       delete line.components;
       const product = await scoped(tx, actor, "product", line.productId);
       if (product.salesStopped) fail("New sales are stopped for " + product.sku + ".", 409);
+      if (product.onlineOnly) fail(`${product.name}: ${ONLINE_ONLY_MESSAGE}. It cannot be parked at the counter.`, 409);
       if (isKit(product)) kitLines.push({ line, product });
       if (product.type === "service") continue;
       const bin = await scoped(tx, actor, "location", line.binId);

@@ -11,7 +11,7 @@ Future<void> startPhysicalCount(BuildContext context) async {
     header: const Text('Choose the part and bin before counting. A stock movement during the count requires a recount.'),
     fields: [
       FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, barcodeChoice: app.uniqueProductIdForCode,
-        options: optionsOf(app.products.where((p) => p['type'] != 'service').toList(), (p) => "${p['sku']} · ${p['name']}")),
+        options: optionsOf(app.stockParts, (p) => "${p['sku']} · ${p['name']}")),
       FieldSpec('binId', 'Bin', kind: FieldKind.select, required: true, barcodeChoice: app.binIdForCode,
         options: optionsOf(app.bins, (bin) => "${app.binName(bin)} · ${bin['kind']}")),
     ],

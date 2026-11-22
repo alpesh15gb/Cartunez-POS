@@ -10,7 +10,7 @@ import '../../main.dart';
 import '../widgets.dart';
 
 const _columns = 'sku,name,brand,category,unit,cost,retailPrice,taxPercent,barcodes,wholesalePrice,'
-    'hsnSac,partNumber,reorderLevel,serialTracked,universal,type';
+    'hsnSac,partNumber,reorderLevel,serialTracked,universal,type,onlineOnly'; // onlineOnly: yes for website-only parts
 const _limit = 512 * 1024;
 
 Future<void> importCatalog(BuildContext context) {

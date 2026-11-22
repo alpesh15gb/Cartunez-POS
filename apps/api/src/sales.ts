@@ -16,7 +16,9 @@ import {
   adjust,
   audit,
   inventory,
+  ONLINE_ONLY_MESSAGE,
 } from "./domain.js";
+import { isOnlineSale } from "./hooks/online-channel.js";
 import {
   invoiceProfile,
   gstProfile,
@@ -218,6 +220,10 @@ async function buildLines(ctx: SaleContext) {
           "India GST mode does not support refundable core deposits without a separately configured tax treatment.",
         );
     }
+    // Online-only parts are sold only on the website (invoiced from Online orders).
+    const onlineOnly = !!(currentProduct.onlineOnly || product.onlineOnly);
+    if (onlineOnly && !isOnlineSale(ctx))
+      fail(`${product.name}: ${ONLINE_ONLY_MESSAGE}. It cannot be sold at the counter.`, 409);
     if ((!product.serialTracked || product.type === "service") && input.serials?.length)
       fail("Only serial-tracked stock accepts serial numbers.");
     const qty = integer(input.qty, "Quantity", 1, 9999);
@@ -233,7 +239,7 @@ async function buildLines(ctx: SaleContext) {
       text(input.overrideReason, "fitment override reason");
       ctx.requiresFitmentApproval = true;
     }
-    if (product.type !== "service") {
+    if (product.type !== "service" && !onlineOnly) {
       const bin = await scoped(db, actor, "location", input.binId);
       if (bin.kind !== "sellable") fail("Sale picks must use a sellable bin.");
       const available =
@@ -286,8 +292,9 @@ async function buildLines(ctx: SaleContext) {
       category: product.category,
       supplierId: product.supplierId,
       qty,
-      binId: input.binId,
-      serials: input.serials || [],
+      // An online-only line is a non-stock line: no bin, no stock movement.
+      binId: onlineOnly ? "" : input.binId,
+      serials: onlineOnly ? [] : input.serials || [],
       unitPrice: price,
       cost: product.cost,
       // Not GST registered: the price is final, no tax on any line.
@@ -297,6 +304,7 @@ async function buildLines(ctx: SaleContext) {
       fitment: decision,
       overrideReason: input.overrideReason || "",
       type: product.type,
+      ...(onlineOnly ? { onlineOnly: true } : {}),
     };
     await runValidateLine(ctx, input, line);
     ctx.lines.push(line);

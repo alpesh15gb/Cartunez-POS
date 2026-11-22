@@ -19,6 +19,55 @@ Future<void> openPickPack(BuildContext context, String orderId) => Navigator.of(
       MaterialPageRoute<void>(builder: (_) => PickPackPage(orderId: orderId)),
     );
 
+/// Online only: a line the shop orders from the supplier for this customer
+/// (nothing to pick; invoiced as a non-stock line).
+bool orderFromSupplierLine(AppState app, Map line) =>
+    line['onlineOnly'] == true || isOnlineOnly(app.productById('${line['productId']}'));
+
+/// Online-only lines of the order still to send.
+bool hasSupplierLines(AppState app, Json order) =>
+    order['mode'] == 'pos' &&
+    (order['lines'] as List? ?? []).cast<Map>().any((l) => toPickQty(l) > 0 && orderFromSupplierLine(app, l));
+
+/// "Create purchase order": draft orders to each online-only part's usual
+/// supplier, linked to the website order. Parts without a supplier are asked for.
+Future<void> createOrderPurchase(BuildContext context, Json order) async {
+  final app = context.appRead;
+  final path = '/online-orders/${order['id']}/purchase-order';
+  try {
+    final result = await app.mutate(path, {}) as Map?;
+    final created = (result?['purchaseOrderIds'] as List? ?? []).length;
+    final missing = (result?['needsSupplier'] as List? ?? []).cast<Map>();
+    if (missing.isEmpty) {
+      app.toast('$created purchase order${created == 1 ? '' : 's'} created as draft. Check and place ${created == 1 ? 'it' : 'them'} in Purchasing › Orders.');
+      return;
+    }
+    if (!context.mounted) return;
+    final suppliers = app.list('suppliers');
+    if (suppliers.isEmpty) {
+      app.toast('Add a supplier in Purchasing first, then create the purchase order.');
+      return;
+    }
+    await showFormDialog<void>(
+      context,
+      title: 'Choose the supplier',
+      submit: 'Create purchase order',
+      fields: [
+        for (final m in missing)
+          FieldSpec('${m['productId']}', '${m['quantity']} × ${m['name']}', kind: FieldKind.select, required: true, options: optionsOf(suppliers),
+              help: '${m['sku']} has no usual supplier.'),
+      ],
+      onSubmit: (v) async {
+        final again = await app.mutate(path, {'suppliers': v}) as Map?;
+        final more = created + (again?['purchaseOrderIds'] as List? ?? []).length;
+        app.toast('$more purchase order${more == 1 ? '' : 's'} created as draft. Check and place ${more == 1 ? 'it' : 'them'} in Purchasing › Orders.');
+      },
+    );
+  } catch (e) {
+    app.toast(errorText(e));
+  }
+}
+
 class PickPackPage extends StatefulWidget {
   const PickPackPage({super.key, required this.orderId});
   final String orderId;
@@ -49,6 +98,9 @@ class _PickPackPageState extends State<PickPackPage> {
   Json? get order => context.appRead.list('onlineOrders').where((o) => o['id'] == widget.orderId).firstOrNull;
 
   List<Map> _due(Json o) => (o['lines'] as List? ?? []).cast<Map>().where((l) => toPickQty(l) > 0).toList();
+
+  /// Lines picked from the shelves (online-only lines come from the supplier).
+  List<Map> _toPick(Json o) => _due(o).where((l) => !orderFromSupplierLine(context.appRead, l)).toList();
 
   int _picked(Map line) => picked[line['itemId']]?.qty ?? 0;
 
@@ -98,7 +150,14 @@ class _PickPackPageState extends State<PickPackPage> {
     final o = order;
     if (o == null) return;
     final productId = app.uniqueProductIdForCode(code);
-    final lines = _due(o);
+    final supplierLine = _due(o).where((l) => orderFromSupplierLine(app, l) &&
+        ((productId != null && l['productId'] == productId) || '${l['sku']}'.toUpperCase() == code.toUpperCase())).firstOrNull;
+    if (supplierLine != null) {
+      _say('${supplierLine['name']} is ordered from the supplier. Nothing to pick.', error: true);
+      if (mounted) scanFocus.requestFocus();
+      return;
+    }
+    final lines = _toPick(o);
     final match = lines.where((l) => productId != null && l['productId'] == productId).toList()
       ..addAll(lines.where((l) => '${l['sku']}'.toUpperCase() == code.toUpperCase()));
     final open = match.where((l) => _picked(l) < toPickQty(l)).firstOrNull;
@@ -132,7 +191,7 @@ class _PickPackPageState extends State<PickPackPage> {
         final app = context.appRead;
         final result = await app.mutate('/online-orders/${o['id']}/invoice', {
           'picks': [
-            for (final l in _due(o))
+            for (final l in _toPick(o))
               {'itemId': l['itemId'], 'qty': _picked(l), if ((picked[l['itemId']]?.serials ?? []).isNotEmpty) 'serials': picked[l['itemId']]!.serials},
           ],
         }, 'Invoice made. Pack the order and print the packing slip.');
@@ -255,7 +314,9 @@ class _PickPackPageState extends State<PickPackPage> {
     final shipment = f['shipment'] == null ? null : Map<String, dynamic>.from(f['shipment'] as Map);
     final due = _due(o);
     final invoicing = canInvoice(o);
-    final allPicked = due.isNotEmpty && due.every((l) => _picked(l) == toPickQty(l));
+    final toPick = _toPick(o);
+    final allPicked = due.isNotEmpty && toPick.every((l) => _picked(l) == toPickQty(l));
+    final supplierLines = due.where((l) => orderFromSupplierLine(app, l)).toList();
     final unknown = due.where((l) => l['productId'] == null).toList();
     final small = Theme.of(context).textTheme.bodySmall;
     final customer = (o['customer'] as Map?) ?? {};
@@ -337,7 +398,38 @@ class _PickPackPageState extends State<PickPackPage> {
                     IconButton(tooltip: 'Scan with camera', onPressed: _camera, icon: const Icon(Icons.photo_camera_outlined)),
                 ]),
                 const SizedBox(height: 8),
-                for (final l in due)
+                // Online only: ordered from the supplier for this customer, no scan or bin.
+                for (final l in supplierLines)
+                  Card(
+                    key: ValueKey('supplier-line-${l['itemId']}'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(children: [
+                        const Icon(Icons.local_shipping_outlined, color: Brand.forest),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text('${l['name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                            Text('${l['sku']} · Order from supplier', style: small),
+                          ]),
+                        ),
+                        Text('${toPickQty(l)}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                      ]),
+                    ),
+                  ),
+                if (supplierLines.isNotEmpty)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: OutlinedButton.icon(
+                        onPressed: busy || !app.isManager ? null : () => createOrderPurchase(context, o),
+                        icon: const Icon(Icons.add_shopping_cart, size: 18),
+                        label: const Text('Create purchase order'),
+                      ),
+                    ),
+                  ),
+                for (final l in toPick)
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12),

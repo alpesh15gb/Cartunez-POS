@@ -12,7 +12,11 @@ class CatalogState extends ChangeNotifier {
   List<Json> _list(String key) => _app.syncState.list(key);
 
   List<Json> get products => _list('products');
-  List<Json> get saleProducts => products.where((p) => p['salesStopped'] != true).toList();
+  /// What the counter can sell: not stopped, and not online only (website-only
+  /// parts are ordered from the supplier and never sold at the counter).
+  List<Json> get saleProducts => products.where((p) => p['salesStopped'] != true && !isOnlineOnly(p)).toList();
+  /// Parts that carry shop stock (adjust, move, count, transfer, labels).
+  List<Json> get stockParts => products.where((p) => p['type'] != 'service' && !isOnlineOnly(p)).toList();
   List<Json> get bins => _list('locations');
   List<Json> get stock => _list('stock');
   List<Json> get sellableBins => bins.where((b) => b['kind'] == 'sellable').toList();
@@ -76,7 +80,7 @@ class CatalogState extends ChangeNotifier {
     final gtin = canonicalGtin(scannedProductCode(raw));
     final catalog = products;
     List<Json> allowed(List<Json> matches) =>
-        forSale ? matches.where((p) => p['salesStopped'] != true).toList() : matches;
+        forSale ? matches.where((p) => p['salesStopped'] != true && !isOnlineOnly(p)).toList() : matches;
     final barcodeMatches = catalog.where((p) => (p['barcodes'] as List? ?? const []).any((v) {
       final stored = '$v'.trim();
       return stored == raw || (gtin != null && canonicalGtin(stored) == gtin);
@@ -144,3 +148,10 @@ class CatalogState extends ChangeNotifier {
     });
   }
 }
+
+/// Online only: listed only on the website (shop.cartunez.in) and ordered from
+/// the supplier when a customer buys it. Never shop stock, never sold at the counter.
+bool isOnlineOnly(Map? product) => product?['onlineOnly'] == true;
+
+/// What the counter says when an online-only part is scanned or chosen.
+String onlineOnlyMessage(Map product) => '${product['name']} is online only — sold on the website, not at the counter.';

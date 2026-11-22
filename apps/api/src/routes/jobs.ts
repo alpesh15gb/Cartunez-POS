@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import type { Database, RecordData } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
-import { type Actor, allow, audit, fail, heldUnits, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text } from "../domain.js";
+import { type Actor, allow, audit, fail, heldUnits, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text, ONLINE_ONLY_MESSAGE } from "../domain.js";
 import { reserveKitComponents } from "../hooks/kit-reserve.js";
 import { nextNumber } from "../number-series.js";
 import { invoiceProfile, noTax } from "../settings.js";
@@ -71,6 +71,7 @@ async function documentLines(
   for (const raw of inputs as any[]) {
     const product = await scoped(db, actor, "product", text(raw?.productId, "part or labour", true, 200));
     if (product.salesStopped) fail(`New sales are stopped for ${product.sku}.`, 409);
+    if (product.onlineOnly) fail(`${product.name}: ${ONLINE_ONLY_MESSAGE}. It cannot be used on a job card.`, 409);
     const qty = integer(raw.qty ?? 1, "Quantity", 1, 9999);
     const before = (options.previous || []).find((line) => line.id === raw.id && line.productId === product.id);
     let unitPrice = product.retailPrice;

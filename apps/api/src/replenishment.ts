@@ -16,7 +16,8 @@ export function reorderSuggestions(products: RecordData[], stock: RecordData[], 
       onOrder.set(line.productId, (onOrder.get(line.productId) || 0) + outstanding);
     }
   }
-  return products.filter(p => !p.salesStopped && p.type !== "service" && p.reorderLevel > 0 && (available.get(p.id) || 0) <= p.reorderLevel)
+  // Online-only parts are not shop stock, so they are never reorder alerts.
+  return products.filter(p => !p.salesStopped && p.type !== "service" && !p.onlineOnly && p.reorderLevel > 0 && (available.get(p.id) || 0) <= p.reorderLevel)
     .map(p => {
       const shelf = available.get(p.id) || 0;
       const inbound = onOrder.get(p.id) || 0;

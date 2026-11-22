@@ -100,7 +100,7 @@ class LabelsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    final parts = app.products.where((p) => p['type'] != 'service').toList();
+    final parts = app.stockParts; // online-only parts need no shelf labels
     return _ToolCard(
       icon: Icons.qr_code_2,
       title: labelPrinterSummary(app),

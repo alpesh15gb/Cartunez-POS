@@ -354,8 +354,10 @@ export async function report(
     const orders = await records(db, actor.organizationId, "purchaseOrder", actor.branchId);
     rows = reorderSuggestions(products.filter(productMatch), stock, locations, orders);
   } else if (["stock-by-bin", "valuation", "aging"].includes(name)) {
+    // Online-only parts are never shop stock (no valuation, bins or aging).
+    const onlineOnly = new Set(products.filter((p: any) => p.onlineOnly).map((p: any) => p.id));
     const stock = (await inventory(db, actor)).filter((item) =>
-      productIds.has(item.productId),
+      productIds.has(item.productId) && !onlineOnly.has(item.productId),
     );
     const locations = await records(
       db,

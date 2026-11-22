@@ -11,6 +11,14 @@ import { getRecord, putRecord, records } from "./db.js";
 
 export const id = (prefix = "id") => `${prefix}-${randomUUID()}`;
 export const now = () => new Date().toISOString();
+/**
+ * Online only: a part listed only on the website (shop.cartunez.in) and ordered
+ * from the supplier when a customer buys it. It is never shop stock: no bins,
+ * stock movements, valuation, counts, transfers or counter sales.
+ */
+export const ONLINE_ONLY_MESSAGE = "Online only — sold on the website";
+/** A part that carries shop stock (not a service / kit, not an online-only part). */
+export const holdsStock = (product: any) => !!product && product.type !== "service" && !product.onlineOnly;
 export function fail(message: string, statusCode = 400): never {
   throw Object.assign(new Error(message), { statusCode });
 }
@@ -163,6 +171,9 @@ export async function adjust(
   allowNegative = false,
 ) {
   const product = await scoped(db, actor, "product", productId);
+  // Online-only parts never carry shop stock.
+  if (product.onlineOnly)
+    fail(`${product.name}: ${ONLINE_ONLY_MESSAGE}. It carries no shop stock.`, 409);
   const bin = await scoped(db, actor, "location", binId);
   const old = await db.query(
     "SELECT quantity FROM stock WHERE organization_id=$1 AND branch_id=$2 AND product_id=$3 AND bin_id=$4",
@@ -235,7 +246,7 @@ export async function inventory(db: Database, actor: Actor) {
   const online = new Map<string, number>();
   for (const order of await records(db, actor.organizationId, "onlineOrder", actor.branchId))
     for (const line of order.lines || [])
-      if (line.productId)
+      if (line.productId && !line.onlineOnly)
         online.set(line.productId, (online.get(line.productId) || 0) + Number(line.reserved || 0) + Number(line.awaiting || 0));
   const sellable = new Set(
     (await records(db, actor.organizationId, "location", actor.branchId)).filter((b) => b.kind === "sellable").map((b) => b.id),

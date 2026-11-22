@@ -118,8 +118,11 @@ export function purchaseOrderRoutes(app: FastifyInstance, db: Database, post: Po
             line.quantity - line.received,
           );
           const product = await scoped(tx, actor, "product", line.productId);
-          const bin = await scoped(tx, actor, "location", input.binId);
-          if (bin.kind !== "sellable")
+          // Online only: the goods go straight out to the website customer, so
+          // the receipt is recorded without a bin and adds no shop stock.
+          const onlineOnly = !!product.onlineOnly;
+          const bin = onlineOnly ? null : await scoped(tx, actor, "location", input.binId);
+          if (bin && bin.kind !== "sellable")
             fail("Purchases must be put away into a sellable bin.");
           cumulative += quantity;
           const next = roundRatio(landedCost, cumulative, totalUnits);
@@ -155,22 +158,23 @@ export function purchaseOrderRoutes(app: FastifyInstance, db: Database, post: Po
                   branchId: actor.branchId,
                   productId: product.id,
                   serial,
-                  binId: bin.id,
+                  binId: bin!.id,
                   status: "available",
                 },
                 actor.branchId,
               );
             }
           }
-          await adjust(
-            tx,
-            actor,
-            product.id,
-            bin.id,
-            quantity,
-            "Goods receipt",
-            receiptId,
-          );
+          if (bin)
+            await adjust(
+              tx,
+              actor,
+              product.id,
+              bin.id,
+              quantity,
+              "Goods receipt",
+              receiptId,
+            );
           line.received += quantity;
           lines.push({
             productId: product.id,
@@ -178,8 +182,9 @@ export function purchaseOrderRoutes(app: FastifyInstance, db: Database, post: Po
             name: product.name,
             category: product.category,
             quantity,
-            binId: bin.id,
-            location: [bin.area, bin.rack, bin.shelf, bin.bin].filter(Boolean).join(" / "),
+            binId: bin?.id || null,
+            location: bin ? [bin.area, bin.rack, bin.shelf, bin.bin].filter(Boolean).join(" / ") : "Order from supplier (online only)",
+            ...(onlineOnly ? { onlineOnly: true } : {}),
             cost: unitCost,
             landedCost: extra,
             ...(costHike ? { costHike } : {}),
