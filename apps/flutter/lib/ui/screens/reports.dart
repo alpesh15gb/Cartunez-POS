@@ -23,6 +23,7 @@ const _stockReports = [
   'valuation', 'stock-by-bin', 'stock-movement', 'low-stock', 'fast-moving', 'slow-moving', 'aging', 'purchase-receipts', 'warranty',
 ];
 const _moneyKeys = {
+  'accountApplied', 'accountReturned', 'accountNet',
   'gross', 'returns', 'coreReturns', 'net', 'discount', 'tax', 'cost', 'margin', 'value', 'landedCost', 'total', 'openingCash',
   'cashSales', 'cashRefunds', 'cashIn', 'cashOut', 'netMovement',
   'expectedCash', 'countedCash', 'variance', 'collected', 'refunded', 'charged', 'outstanding', 'revenue', 'amount', 'taxable',
@@ -43,7 +44,7 @@ const _reportColumns = {
   'stock-movement': ['createdAt', 'sku', 'name', 'location', 'quantity', 'reason', 'userId'],
   'purchase-receipts': ['date', 'source', 'sku', 'supplier', 'location', 'quantity', 'cost', 'landedCost', 'total'], // QA #2: source = Goods receipt / PO bill / Supplier bill
   'cash-movements': ['createdAt', 'userId', 'direction', 'amount', 'reason'],
-  'tenders': ['type', 'collected', 'refunded', 'net'],
+  'tenders': ['type', 'collected', 'refunded', 'net', 'accountApplied', 'accountReturned'],
 };
 // QA #12: sales KPIs say whether they are before or after discount. The
 // same names head the CSV / Excel columns ([salesKpiLabels]; the API keeps
@@ -55,6 +56,8 @@ const salesKpiLabels = {
 
 /// Reports whose exports use [salesKpiLabels] for their column headings.
 const salesKpiReports = {'daily-sales', 'sales'};
+const tenderLabels = {'collected':'Money collected','refunded':'Money refunded','net':'Net money',
+  'accountApplied':'Non-cash settlement','accountReturned':'Non-cash credit','accountNet':'Net non-cash settlement'};
 
 /// One-line definitions shown under the KPI tiles of [salesKpiReports].
 const salesKpiDefinitions = 'Billed before discount = Net billed + Discounts · '
@@ -151,6 +154,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   String columnLabel(String key) {
+    if (name == 'tenders') return tenderLabels[key] ?? reportLabel(key);
     if (name == 'fast-moving' || name == 'slow-moving') {
       if (key == 'quantity') return 'Net units';
       if (key == 'revenue') return 'Net billed';
@@ -178,7 +182,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         if (hasPartFilters && category.isNotEmpty) 'category': category,
         if (hasPartFilters && supplier.isNotEmpty) 'supplierId': supplier,
         if (_cashierReports.contains(name) && cashier.isNotEmpty) 'cashier': cashier,
-        if (_tenderFilters.contains(name) && payment.isNotEmpty) 'paymentType': payment,
+        if (_tenderFilters.contains(name) && payment.isNotEmpty && (name == 'tenders' || ['Cash','Card','UPI'].contains(payment))) 'paymentType': payment,
       };
   }
 
@@ -243,7 +247,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         csv = data['csv'] as String;
       } else {
         csv = reportCsv(rows, currency: '${snapshot['currency'] ?? app.settings['currency'] ?? 'INR'}',
-            labels: salesKpiReports.contains(name) ? salesKpiLabels : const {});
+            labels: salesKpiReports.contains(name) ? salesKpiLabels : name == 'tenders' ? tenderLabels : const {});
       }
       final message = await saveTextFile('${snapshot['name']}-${DateTime.now().millisecondsSinceEpoch}.csv', '\uFEFF$csv');
       if (mounted) context.appRead.toast(message);
@@ -387,7 +391,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         if (hasPartFilters && categories.isNotEmpty) filter('Category', category, [for (final value in categories) (value, value)], (value) => category = value),
         if (hasPartFilters && app.list('suppliers').isNotEmpty) filter('Supplier', supplier, optionsOf(app.list('suppliers')), (value) => supplier = value),
         if (_cashierReports.contains(name) && users.isNotEmpty) filter('Cashier', cashier, [for (final user in users) (user, app.userName(user))], (value) => cashier = value),
-        if (_tenderFilters.contains(name)) filter('Payment', payment, const [('Cash', 'Cash'), ('Card', 'Card'), ('UPI', 'UPI')], (value) => payment = value),
+        if (_tenderFilters.contains(name)) filter('Payment', payment, [
+          ('Cash','Cash'), ('Card','Card'), ('UPI','UPI'), if (name == 'tenders') ...[('Online','Online'),('Credit','Credit'),('Advance','Advance'),('Exchange','Exchange')]],
+          (value) => payment = value),
         // WS-F: GSTR-1 and Tally, for the accountant.
         if (app.isManager) OutlinedButton.icon(onPressed: () => showAccountingExports(context, range: range),
             icon: const Icon(Icons.account_balance_outlined), label: const Text('GST & Tally')),
@@ -412,7 +418,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (report != null) ...[
         const SizedBox(height: 12),
         Text('$branch · ${report!['timeZone'] == 'Asia/Kolkata' ? 'IST' : 'UTC'} · Confirmed transactions'),
-        if (name == 'tenders') const Text('Recorded payments less cash change and refunds. Card and UPI payouts are reconciled with your provider separately.'),
+        if (name == 'tenders') const Text('Invoice collections include cash after change, Card, UPI and prepaid website sales. Credit, advance use and exchanges settle bills separately. Later account collections appear in the party ledger.'),
         if (salesKpiReports.contains(name))
           Text(salesKpiDefinitions, key: const ValueKey('kpi-definitions'), style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 10),

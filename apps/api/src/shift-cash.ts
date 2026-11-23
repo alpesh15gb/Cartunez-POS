@@ -2,9 +2,15 @@ import type { Database, RecordData } from "./db.js";
 import type { Actor } from "./domain.js";
 import { refundBy, refundParts } from "./returns.js";
 
+// Older releases marked the original payment void. A later void did not change what was in the drawer at close.
+function postedAtClose(payment: RecordData, closedAt?: string) {
+  return !payment.voided || !!(closedAt && payment.voidedAt && payment.voidedAt > closedAt);
+}
+
 /** Read complete shifts, including activity after midnight and before the report's start date. */
 export async function shiftCashSummaries(db: Database, actor: Actor, shifts: RecordData[]) {
   if (!shifts.length) return [];
+  const closed = new Map(shifts.map(s => [s.id, s.closedAt]));
   const totals = new Map(shifts.map(shift => [shift.id, {
     cashSales: 0, cashRefunds: 0, cashIn: 0, cashOut: 0,
   }]));
@@ -23,7 +29,7 @@ export async function shiftCashSummaries(db: Database, actor: Actor, shifts: Rec
       cash.cashSales -= data.change || 0;
     } else if (kind === "partyPayment") {
       // Cash paid to a supplier or received from a customer through this drawer.
-      if (!data.voided && data.mode === "Cash") {
+      if (postedAtClose(data, closed.get(data.shiftId)) && data.mode === "Cash") {
         if (data.direction === "in") cash.cashIn += data.amount;
         else cash.cashOut += data.amount;
       }
@@ -97,9 +103,10 @@ export async function shiftSummary(db: Database, actor: Actor, shift: RecordData
       cashMovements.push({ id: data.id, direction: data.direction, amount: data.amount, reason: data.reason,
         createdAt: data.createdAt, userId: data.userId });
     } else if (kind === "partyPayment") {
-      if (!data.voided && data.mode === "Cash")
+      if (postedAtClose(data, shift.closedAt) && data.mode === "Cash")
         partyPayments.push({ id: data.id, partyKind: data.partyKind, partyId: data.partyId, direction: data.direction,
-          amount: data.amount, reference: data.reference || "", createdAt: data.createdAt });
+          amount: data.amount, reference: data.reference || "", reversesId: data.reversesId || null,
+          notes: data.notes, createdAt: data.createdAt });
     } else {
       // What was paid back, per method; an exchange's applied part shows as "Exchange".
       for (const part of refundParts(data)) refunds[part.type] = (refunds[part.type] || 0) + part.amount;

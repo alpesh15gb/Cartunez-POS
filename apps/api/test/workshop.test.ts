@@ -106,6 +106,14 @@ test("Workshop: vehicle registry, estimate -> job card -> invoice, kits, serial 
     const scanned = await call(`jobs/${job.id}/lines`, { lines: [...job.lines, { productId: "bulb", qty: 1 }] }, cashier);
     assert.equal(scanned.lines.length, 3);
     assert.equal(scanned.total, job.total + 35282);
+    assert.equal(scanned.linesRevision, 1, "first legacy save starts tracking revisions");
+    // Another desk still has the original two-line list. Neither a modern nor
+    // an older app may remove the bulb and release its reservation by mistake.
+    await call(`jobs/${job.id}/lines`, { expectedLinesRevision: 0, lines: job.lines }, manager, 409);
+    await call(`jobs/${job.id}/lines`, { lines: job.lines }, manager, 409);
+    const afterConflict = await get("bootstrap", manager);
+    assert.deepEqual(afterConflict.jobs.find((j: any) => j.id === job.id).lines, scanned.lines);
+    assert.equal(afterConflict.holds.find((h: any) => h.jobId === job.id).cart.lines.find((l: any) => l.productId === "bulb").qty, 1);
 
     // ---------- one click to a GST invoice ----------
     const invoice = await call(`jobs/${job.id}/invoice`, {
@@ -252,6 +260,25 @@ test("Workshop: vehicle registry, estimate -> job card -> invoice, kits, serial 
     assert.equal(lookup.warranty, "in warranty");
     assert.equal(lookup.canReturn, true);
     assert.deepEqual((await get("serials/lookup?code=NOPE", cashier)).rows, []);
+
+    // A pre-upgrade job has no stored revision. Two updated counters see zero.
+    const legacyJob = await call("jobs", {}, manager);
+    delete legacyJob.linesRevision;
+    await putRecord(db, "demo", "job", legacyJob, legacyJob.branchId);
+    const jobPath = `jobs/${legacyJob.id}/lines`;
+    const concurrent = await Promise.all([manager, cashier].map((token, i) => app.inject({
+      method: "POST", url: "/api/v1/" + jobPath, headers: { authorization: "Bearer " + token },
+      payload: { expectedLinesRevision: 0, lines: [{ productId: "service", qty: i + 1 }] },
+    })));
+    assert.deepEqual(concurrent.map(r => r.statusCode).sort(), [200, 409]);
+    const winner = concurrent.find(r => r.statusCode === 200)!.json();
+    const appended = await call(jobPath, { lines: [...winner.lines, { productId: "filter", qty: 1 }] }, cashier);
+    assert.equal(appended.linesRevision, 2, "a legacy append retains the other counter's work");
+    const removed = await call(jobPath, { expectedLinesRevision: 2, lines: winner.lines }, manager);
+    assert.equal(removed.linesRevision, 3);
+    await call(jobPath, { lines: appended.lines }, cashier, 409);
+    const rebased = await call(jobPath, { expectedLinesRevision: 3, lines: [] }, manager);
+    assert.deepEqual(rebased.lines, [], "deliberate removal after refresh releases the reservation");
   } finally {
     await app.close();
     await db.close();

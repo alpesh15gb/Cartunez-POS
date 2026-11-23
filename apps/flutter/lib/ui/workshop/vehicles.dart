@@ -321,7 +321,7 @@ class _VehicleDetailState extends State<VehicleDetail> {
           title: Text('${i['number']}'),
           subtitle: Text(formatDate(i['createdAt'])),
           trailing: Text(app.money(i['total'] as num?)),
-          onTap: () => context.go('/orders/invoices/${i['id']}'),
+          onTap: app.canSell ? () => context.go('/orders/invoices/${i['id']}') : null,
         ),
     ]);
   }

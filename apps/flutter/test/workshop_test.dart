@@ -1,29 +1,47 @@
+import 'dart:convert';
+
 import 'package:cartunez_pos/core/api.dart';
+import 'package:cartunez_pos/core/billing.dart' show Json;
 import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
 import 'package:cartunez_pos/ui/prefs.dart';
+import 'package:cartunez_pos/ui/router.dart';
 import 'package:cartunez_pos/ui/shell.dart';
 import 'package:cartunez_pos/ui/workshop/common.dart';
 import 'package:cartunez_pos/ui/workshop/jobs.dart';
 import 'package:cartunez_pos/ui/workshop/kits.dart';
 import 'package:cartunez_pos/ui/workshop/vehicles.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Register extends AppState {
+  Json? submitted;
+  void refreshJobs(List<dynamic> jobs) {
+    snapshot = {...snapshot, 'jobs': jobs};
+    notifyListeners();
+  }
+
   @override
   Future<dynamic> api(String path, {Object? body, String? method}) async => {'rows': []};
+
+  @override
+  Future<dynamic> mutate(String path, Json body, [String? message]) async {
+    if (!path.endsWith('/lines')) return super.mutate(path, body, message);
+    submitted = body;
+    return {};
+  }
 }
 
 const _phone = Size(390, 844);
 
-AppState _workshop() => _Register()
+_Register _workshop({String role = 'manager'}) => _Register()
   ..ready = true
   ..lastSync = '2026-11-21T09:00:00Z'
   ..session = Session(
     api: 'https://pos.example.test/api/v1',
     token: 't',
-    user: {'id': 'u1', 'name': 'Asha', 'role': 'manager'},
+    user: {'id': 'u1', 'name': 'Asha', 'role': role},
     branchId: 'main',
     organizationId: 'org',
     expiresAt: DateTime.now().add(const Duration(days: 1)).toIso8601String(),
@@ -77,6 +95,62 @@ Future<void> _open(WidgetTester tester, AppState app, String location) async {
 }
 
 void main() {
+  testWidgets('inventory technician reaches assigned job from vehicle history without billing actions', (tester) async {
+    final app = _workshop(role: 'inventory');
+    expect(homePath(app), '/catalog/parts');
+    expect(redirectFor(app, Uri.parse('/orders/jobs/new?vehicle=v1')), isNull);
+    expect(redirectFor(app, Uri.parse('/orders/estimates/new?vehicle=v1')), isNull);
+    expect(redirectFor(app, Uri.parse('/orders/invoices/example')), '/catalog/parts');
+    await _open(tester, app, '/people/vehicles/v1');
+    final history = find.text('JOB-MAIN-1 · In progress');
+    await tester.ensureVisible(history);
+    await tester.pumpAndSettle();
+    await tester.tap(history);
+    await tester.pumpAndSettle();
+    expect(find.byType(JobCard), findsOneWidget);
+    expect(find.text('Move to ready'), findsOneWidget);
+    expect(find.textContaining('Bill job ('), findsNothing);
+    expect(find.text('Take advance'), findsNothing);
+  });
+
+  testWidgets('editing a job line keeps the displayed revision across a background sync', (tester) async {
+    final app = _workshop();
+    await _open(tester, app, '/orders/jobs/j1');
+    await tester.ensureVisible(find.text('1 × Oil Filter'));
+    await tester.tap(find.text('1 × Oil Filter'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
+    final jobs = app.list('jobs');
+    app.refreshJobs([{...jobs.first, 'linesRevision': 7}, ...jobs.skip(1)]);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(app.submitted?['expectedLinesRevision'], 0);
+    expect(app.submitted?['lines'][0]['qty'], 2);
+  });
+
+  testWidgets('Share PDF paginates all 100 lines of a workshop document', (tester) async {
+    final app = _workshop();
+    late BuildContext context;
+    await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (c) {
+      context = c;
+      return const SizedBox();
+    }))));
+    List<int>? pdf;
+    const channel = MethodChannel('net.nfet.printing');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'sharePdf') pdf = call.arguments['doc'];
+      return 1;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final document = {'number': 'EST-TEST', 'createdAt': '2026-11-20T09:00Z', 'subtotal': 10000, 'total': 10000,
+      'lines': List.generate(100, (i) => {'name': 'Part ${i + 1}', 'kind': 'part', 'qty': 1, 'unitPrice': 100})};
+    await tester.runAsync(() => shareDocumentPdf(context, document, title: 'Estimate'));
+    expect(pdf, isNotNull);
+    expect(RegExp(r'/Type\s*/Page\b').allMatches(latin1.decode(pdf!)).length, greaterThan(1));
+  });
+
   test('workshop routes are registered under their workspaces', () {
     expect(matchPath('/orders/jobs')?.tab.id, 'jobs');
     expect(matchPath('/orders/jobs/j1')?.arg, 'j1');

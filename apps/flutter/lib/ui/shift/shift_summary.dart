@@ -55,7 +55,7 @@ List<SummaryLine> shiftSummaryLines(AppState app, Json s) {
     if (payments.isNotEmpty) ...[
       _h('Party payments in cash'),
       for (final p in payments)
-        _r('  ${p['direction'] == 'in' ? 'From' : 'To'} ${party(p)}', '${p['direction'] == 'in' ? '' : '−'}${app.money(_int(p['amount']))}'),
+        _r('  ${p['reversesId'] != null ? 'Reversal · ' : ''}${p['direction'] == 'in' ? 'From' : 'To'} ${party(p)}', '${p['direction'] == 'in' ? '' : '−'}${app.money(_int(p['amount']))}'),
     ],
     _h('Drawer'),
     _r('Opening cash', app.money(_int(s['openingCash']))),

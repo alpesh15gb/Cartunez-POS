@@ -76,7 +76,11 @@ void main() {
     await tester.tap(find.text('Save bill · add to stock'));
     await tester.pumpAndSettle();
     // What is posted gives the API the same ₹60 total and ₹20 paid (₹40 left).
-    expect(app.saved!['paidNow'], {'amount': 2000, 'mode': 'Cash'});
+    expect(app.saved!['paidNow'], {
+      'amount': 2000,
+      'mode': 'Cash',
+      'fromDrawer': true,
+    });
     expect(app.saved!['otherCharges'], 0);
     expect(app.saved!['discount'], 0);
     expect(app.saved!['purchaseOrderId'], 'po');

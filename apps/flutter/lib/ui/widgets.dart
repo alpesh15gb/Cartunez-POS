@@ -594,12 +594,12 @@ class Toolbar extends StatelessWidget {
 Future<bool> confirm(BuildContext context, String title, String message, {String action = 'Continue'}) async {
   final result = await showDialog<bool>(
     context: context,
-    builder: (_) => AlertDialog(
+    builder: (dialogContext) => AlertDialog(
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(action)),
+        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text(action)),
       ],
     ),
   );

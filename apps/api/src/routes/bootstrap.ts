@@ -119,9 +119,11 @@ export function bootstrapRoutes(app: FastifyInstance, db: Database) {
     data.purchaseReturns = stockRole
       ? (await records(db, actor.organizationId, "purchaseReturn", actor.branchId)).slice(-300)
       : [];
-    data.partyPayments = (await records(db, actor.organizationId, "partyPayment"))
+    const payments = await records(db, actor.organizationId, "partyPayment");
+    const reversedPayments = new Set(payments.map(p => p.reversesId).filter(Boolean));
+    data.partyPayments = payments
       .filter((p) => stockRole || p.partyKind === "customer")
-      .slice(-500);
+      .slice(-500).map(p => reversedPayments.has(p.id) ? { ...p, reversed: true } : p);
     data.partyBalances = {
       customers: await partyBalances(db, actor.organizationId, "customer"),
       suppliers: stockRole ? await partyBalances(db, actor.organizationId, "supplier") : {},

@@ -114,14 +114,15 @@ class _LedgerDialogState extends State<_LedgerDialog> {
                                     style: TextStyle(color: debit > 0 ? Brand.danger : Brand.forest, fontWeight: FontWeight.w600)),
                                 Text('Bal. ${app.money(e['balance'])}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                               ]),
-                              if (payment && app.isManager)
+                              if (payment && e['reversible'] != false && app.isManager)
                                 IconButton(
                                   tooltip: 'Cancel this payment',
                                   icon: const Icon(Icons.block, size: 18),
                                   onPressed: () => _then(showFormDialog<void>(
                                     context,
-                                    title: 'Cancel this payment?',
-                                    submit: 'Cancel payment',
+                                    title: 'Record a payment reversal?',
+                                    header: const Text('A drawer payment is reversed through your open shift. The original entry stays on the ledger.'),
+                                    submit: 'Record reversal',
                                     fields: const [FieldSpec('reason', 'Reason', required: true)],
                                     onSubmit: (v) async => app.mutate('/party-payments/${e['id']}/void', {'reason': v['reason']}, 'Payment cancelled.'),
                                   )),

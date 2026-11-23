@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api.dart' show ApiError;
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../barcode_scan.dart';
@@ -267,13 +268,20 @@ class _JobCardState extends State<JobCard> {
     }
   }
 
-  Future<void> _saveLines(List<Json> next) => _run(() async {
-        await context.appRead.mutate('/jobs/${job['id']}/lines', {
-          'lines': [
-            for (final l in next)
-              {for (final k in ['id', 'productId', 'qty', 'unitPrice', 'description', 'staffId', 'kind', 'binId', 'serials']) if (l[k] != null) k: l[k]},
-          ],
-        });
+  Future<void> _saveLines(List<Json> next, int revision) => _run(() async {
+        final app = context.appRead;
+        try {
+          await app.mutate('/jobs/${job['id']}/lines', {
+            'expectedLinesRevision': revision,
+            'lines': [
+              for (final l in next)
+                {for (final k in ['id', 'productId', 'qty', 'unitPrice', 'description', 'staffId', 'kind', 'binId', 'serials']) if (l[k] != null) k: l[k]},
+            ],
+          });
+        } on ApiError catch (error) {
+          if (error.status == 409) await app.sync(afterMutation: true);
+          rethrow;
+        }
       });
 
   Future<void> _addProduct(Json product) async {
@@ -284,7 +292,7 @@ class _JobCardState extends State<JobCard> {
     } else {
       current.add(newLine(product));
     }
-    await _saveLines(current);
+    await _saveLines(current, job['linesRevision'] as int? ?? 0);
     if (mounted && product['serialTracked'] == true) {
       context.appRead.toast('${product['sku']} tracks serials. Tap the line to scan them before billing.');
     }
@@ -435,10 +443,14 @@ class _JobCardState extends State<JobCard> {
   Widget build(BuildContext context) {
     final app = context.app;
     final vehicle = vehicleById(app, job['vehicleId']);
-    final jobAdvances = app.list('partyPayments').where((p) => p['jobId'] == job['id'] && p['voided'] != true && p['refund'] != true).toList();
+    final jobAdvances = app.list('partyPayments').where((p) => p['jobId'] == job['id'] && p['voided'] != true &&
+      p['reversed'] != true && p['reversesId'] == null && p['refund'] != true).toList();
     final held = job['customerId'] == null ? 0 : availableAdvance(app, '${job['customerId']}');
     final blocked = _billBlocked(app.canSell);
     final photos = [for (final p in job['photos'] as List? ?? const []) Map<String, dynamic>.from(p as Map)];
+    // Keep the version that produced the visible list, even when a background
+    // sync refreshes this card while a line-edit dialog is open.
+    final revision = job['linesRevision'] as int? ?? 0;
     final status = '${job['status']}';
     final next = switch (status) {
       'checked-in' => 'in-progress',
@@ -467,7 +479,7 @@ class _JobCardState extends State<JobCard> {
       if ('${job['notes'] ?? ''}'.isNotEmpty) Text('Notes: ${job['notes']}'),
       if (job['estimateId'] != null)
         TextButton(onPressed: () => context.go('/orders/estimates/${job['estimateId']}'), child: const Text('Open the estimate')),
-      if (job['invoiceId'] != null)
+      if (job['invoiceId'] != null && app.canSell)
         TextButton(onPressed: () => context.go('/orders/invoices/${job['invoiceId']}'), child: Text('Invoice ${job['invoiceNumber'] ?? ''}')),
       const SizedBox(height: 10),
       if (open)
@@ -493,7 +505,7 @@ class _JobCardState extends State<JobCard> {
                   ),
                 ])
               : null),
-      DocumentLines(lines: lines, job: true, onChanged: open && !busy ? _saveLines : null),
+      DocumentLines(lines: lines, job: true, onChanged: open && !busy ? (next) => _saveLines(next, revision) : null),
       if (open && lines.isNotEmpty)
         const Padding(padding: EdgeInsets.only(top: 4), child: Text('Parts on an open job are reserved (they show under Parked sales at the counter).')),
       const SizedBox(height: 10),

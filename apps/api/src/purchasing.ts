@@ -11,7 +11,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Database, RecordData } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
-import { adjust, allow, audit, fail, id, integer, multiline, now, scoped, text, roundRatio, type Actor } from "./domain.js";
+import { adjust, allow, audit, fail, id, integer, inventory, reservingHolds, multiline, now, scoped, text, roundRatio, type Actor } from "./domain.js";
 import type { Post } from "./routes/types.js";
 import { noteCost } from "./cost-changes.js"; // WS-E
 import { refundBy } from "./returns.js"; // money and stock review: per-tender refunds
@@ -67,6 +67,7 @@ export interface LedgerEntry {
   /** Lowers the balance. */
   credit: number;
   balance: number;
+  reversible?: boolean;
 }
 
 /**
@@ -95,16 +96,19 @@ export async function partyLedgers(db: Database, org: string, kind: "supplier" |
         credit: Math.max(-opening, 0),
       });
   }
-  for (const payment of await records(db, org, "partyPayment")) {
+  const payments = await records(db, org, "partyPayment");
+  const reversedIds = new Set(payments.map(p => p.reversesId).filter(Boolean));
+  for (const payment of payments) {
     if (payment.partyKind !== kind || payment.voided) continue;
     // A refund goes the other way: money given back to a customer, or received back from a supplier.
     add(payment.partyId, {
       date: payment.date,
       at: payment.createdAt,
-      type: payment.refund ? "refund" : "payment",
+      type: payment.reversesId ? "void" : payment.refund ? "refund" : "payment",
+      reversible: !payment.reversesId && !reversedIds.has(payment.id),
       id: payment.id,
       // WS-B: advances (routes/customers.ts) are labelled as such.
-      reference: [payment.advance ? (payment.refund ? "Advance refund" : "Advance") : "", payment.mode, payment.reference].filter(Boolean).join(" · "),
+      reference: [payment.reversesId ? "Payment reversal" : payment.advance ? (payment.refund ? "Advance refund" : "Advance") : "", payment.mode, payment.reference].filter(Boolean).join(" · "),
       note: payment.notes || "",
       debit: payment.refund ? payment.amount : 0,
       credit: payment.refund ? 0 : payment.amount,
@@ -265,12 +269,15 @@ export async function payment(db: Database, actor: Actor, body: any, partyKind: 
   if (!PAYMENT_MODES.includes(mode)) fail("Choose how the money was paid.");
   // Cash taken or paid at the counter goes through the user's open cash drawer,
   // so the shift's expected cash stays right. (fromDrawer: false for cash kept elsewhere.)
-  const shift = mode === "Cash" && body.fromDrawer !== false
+  const fromDrawer = mode === "Cash" && (body.fromDrawer !== false || (partyKind === "customer" && !extra.onlineOrderId));
+  const shift = fromDrawer
     ? (await records(db, actor.organizationId, "shift", actor.branchId)).find((s) => s.userId === actor.id && !s.closedAt)
     : null;
+  if (fromDrawer && !shift) fail("Open your shift before recording cash in or out of the drawer.", 409);
   const record = {
     id: id("payment"),
     shiftId: shift?.id || null,
+    ...(mode === "Cash" && { fromDrawer }),
     branchId: actor.branchId,
     partyKind,
     partyId,
@@ -290,6 +297,36 @@ export async function payment(db: Database, actor: Actor, body: any, partyKind: 
   await audit(db, actor, partyKind === "supplier" ? "supplier-payment" : "customer-payment", record.id,
     `${record.direction === "out" ? "Paid" : "Received"} ${amount} by ${mode}${record.refund ? " (refund)" : ""}`);
   return record;
+}
+
+/** Supplier documents can withdraw only free stock from their stated bin.
+ * Use one reservation snapshot for the whole document and consume it per line. */
+async function supplierWithdrawal(db: Database, actor: Actor) {
+  const stock = await inventory(db, actor);
+  const free = new Map(stock.map((row) => [row.productId + "|" + row.binId, row.available]));
+  const heldSerials = new Set<string>();
+  for (const hold of await reservingHolds(db, actor.organizationId, actor.branchId)) {
+    for (const line of hold.cart?.lines || []) {
+      for (const serial of line.serials || []) heldSerials.add(line.productId + ":" + serial);
+    }
+  }
+  return async (productId: string, binId: string, qty: number, serials: string[], reason: string, reference: string) => {
+    const key = productId + "|" + binId;
+    const available = free.get(key) || 0;
+    if (qty > available) fail("There are insufficient unreserved units in the selected bin for this withdrawal.", 409);
+    for (const serial of serials) {
+      const serialId = productId + ":" + serial;
+      if (heldSerials.has(serialId)) fail("Serial " + serial + " is reserved by a parked sale or job card.", 409);
+      const removed = await db.query(
+        `DELETE FROM records WHERE organization_id=$1 AND branch_id=$2 AND kind='serial' AND id=$3
+           AND data->>'status'='available' AND data->>'binId'=$4 RETURNING id`,
+        [actor.organizationId, actor.branchId, serialId, binId],
+      );
+      if (!removed.rows.length) fail("Serial " + serial + " is no longer available in the selected bin.", 409);
+    }
+    await adjust(db, actor, productId, binId, -qty, reason, reference);
+    free.set(key, available - qty);
+  };
 }
 
 export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post) {
@@ -486,14 +523,9 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     if ((await records(tx, actor.organizationId, "purchaseReturn")).some((r) => r.billId === bill.id))
       fail("Parts on this bill were already returned to the supplier. Return the rest instead of cancelling.", 409);
     const reason = text(body.reason, "reason");
+    const withdraw = await supplierWithdrawal(tx, actor);
     for (const line of bill.lines) {
-      if (!line.onlineOnly) await adjust(tx, actor, line.productId, line.binId, -line.quantity, "Purchase bill cancelled", bill.id);
-      for (const serial of line.serials || []) {
-        const serialId = line.productId + ":" + serial;
-        const record = await getRecord(tx, actor.organizationId, "serial", serialId);
-        if (record && record.status !== "available") fail(`Serial ${serial} has already been sold.`, 409);
-        await tx.query("DELETE FROM records WHERE organization_id=$1 AND kind='serial' AND id=$2", [actor.organizationId, serialId]);
-      }
+      if (!line.onlineOnly) await withdraw(line.productId, line.binId, line.quantity, line.serials || [], "Purchase bill cancelled", bill.id);
     }
     if (bill.purchaseOrderId) {
       const order = await getRecord(tx, actor.organizationId, "purchaseOrder", bill.purchaseOrderId);
@@ -526,6 +558,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     const earlierReturns = bill
       ? (await records(tx, actor.organizationId, "purchaseReturn")).filter((r) => r.billId === bill.id).flatMap((r) => r.lines)
       : [];
+    const withdraw = await supplierWithdrawal(tx, actor);
     let total = 0;
     for (const input of body.lines) {
       const product = await scoped(tx, actor, "product", input.productId);
@@ -561,19 +594,14 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         }
       }
       inRequest.set(product.id, (inRequest.get(product.id) || 0) + quantity);
-      const serials: string[] = [];
+      const serials: string[] = Array.isArray(input.serials) ? input.serials.map((s: any) => text(s, "serial")) : [];
       if (product.serialTracked && !nonStock) {
-        const list = Array.isArray(input.serials) ? input.serials.map((s: any) => text(s, "serial")) : [];
-        if (list.length !== quantity || new Set(list).size !== quantity) fail(`Enter the serial number of each ${product.name} being returned.`);
-        for (const serial of list) {
-          const serialId = product.id + ":" + serial;
-          const record = await getRecord(tx, actor.organizationId, "serial", serialId);
-          if (!record || record.status !== "available" || record.binId !== bin?.id) fail(`Serial ${serial} is not in stock in that bin.`);
-          await tx.query("DELETE FROM records WHERE organization_id=$1 AND kind='serial' AND id=$2", [actor.organizationId, serialId]);
-          serials.push(serial);
-        }
-      }
-      if (bin) await adjust(tx, actor, product.id, bin.id, -quantity, "Returned to supplier", returnId);
+        if (serials.length !== quantity || new Set(serials).size !== quantity)
+          fail("Enter one unique serial number per returned unit of " + product.name + ".");
+        if (bill && serials.some(serial => !sourceLines.some((l: any) => l.serials?.includes(serial))))
+          fail("Choose serials supplied on the original bill.", 409);
+      } else if (serials.length) fail("This return line does not take serial numbers.");
+      if (bin) await withdraw(product.id, bin.id, quantity, serials, "Returned to supplier", returnId);
       lines.push({ productId: product.id, sku: product.sku, name: product.name, quantity, cost, binId: bin?.id || null, amount: creditAmount ?? quantity * cost, serials,
         ...(bin ? {} : { onlineOnly: true }) });
       total += creditAmount ?? quantity * cost;
@@ -610,12 +638,28 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     allow(actor, ["owner", "manager"]);
     const record = await getRecord(tx, actor.organizationId, "partyPayment", String(params.id));
     if (!record || (record.branchId && record.branchId !== actor.branchId)) fail("Payment not found.", 404);
-    if (record!.voided) fail("This payment is already cancelled.");
+    if (record.voided || record.reversesId) fail("This payment is already cancelled or is a reversal.", 409);
+    const reversalId = "reversal:" + record.id;
+    if (await getRecord(tx, actor.organizationId, "partyPayment", reversalId)) fail("This payment has already been reversed.", 409);
     const reason = text(body.reason, "reason");
-    const voided = { ...record, voided: true, voidReason: reason, voidedAt: now(), voidedBy: actor.id };
-    await putRecord(tx, actor.organizationId, "partyPayment", voided, record!.branchId || "");
-    await audit(tx, actor, "payment-void", record!.id, reason);
-    return voided;
+    if (record.advance && !record.refund && record.partyKind === "customer") {
+      const { availableAdvance } = await import("./customer-account.js");
+      if (await availableAdvance(tx, actor.organizationId, record.partyId) < record.amount)
+        fail("This advance has been applied or refunded. Restore the customer's available advance before reversing the receipt.", 409);
+    }
+    const fromDrawer = record.mode === "Cash" && !!record.shiftId;
+    const shift = fromDrawer ? (await records(tx, actor.organizationId, "shift", actor.branchId))
+      .find(s => s.userId === actor.id && !s.closedAt) : null;
+    if (fromDrawer && !shift) fail("Open your shift before reversing this drawer payment.", 409);
+    const createdAt = now();
+    const reversal = { ...record, id: reversalId, reversesId: record.id, shiftId: shift?.id ?? null,
+      userId: actor.id, createdAt, date: createdAt.slice(0, 10), direction: record.direction === "in" ? "out" : "in",
+      refund: !record.refund, notes: reason, voided: false };
+    if (record.onlineOrderId)
+      await (await import("./fulfilment.js")).reverseOrderCollection(tx, actor, record);
+    await putRecord(tx, actor.organizationId, "partyPayment", reversal, actor.branchId);
+    await audit(tx, actor, "payment-void", record.id, reason, { reversalId, shiftId: reversal.shiftId, amount: record.amount });
+    return reversal;
   });
 
   // ---------- Ledgers ----------

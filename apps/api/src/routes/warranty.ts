@@ -2,7 +2,37 @@ import type { FastifyInstance } from "fastify";
 import type { Database } from "../db.js";
 import type { Post } from "./types.js";
 import { records, putRecord } from "../db.js";
-import { allow, scoped, integer, text, fail, id, now, audit, idempotent } from "../domain.js";
+import { type Actor, allow, scoped, integer, text, fail, id, now, audit, idempotent } from "../domain.js";
+import { checkAccountRefund, refundBreakdown, refundTypeOf, REFUND_TYPES } from "../returns.js";
+
+async function coreRefund(db: Database, actor: Actor, body: any) {
+  allow(actor, ["owner", "manager"]);
+  const invoice = await scoped(db, actor, "invoice", text(body.invoiceId, "invoice"));
+  const lines = invoice.lines.filter((line: any) => line.productId === body.productId && line.coreCharge > 0);
+  if (!lines.length) fail("This invoice has no core charge for that part.");
+  const previous = (await records(db, actor.organizationId, "coreReturn", actor.branchId)).filter(r => r.invoiceId === invoice.id);
+  let skip = previous.filter(r => r.productId === body.productId).reduce((n, r) => n + r.quantity, 0);
+  const unitsLeft = lines.reduce((n: number, l: any) => n + l.qty, 0) - skip;
+  if (unitsLeft <= 0) fail("This part's core deposit was already refunded.");
+  const quantity = integer(body.quantity, "Core return quantity", 1, unitsLeft);
+  let remaining = quantity, total = 0;
+  for (const line of lines) {
+    const already = Math.min(skip, line.qty);
+    skip -= already;
+    const units = Math.min(remaining, line.qty - already);
+    total += units * line.coreCharge;
+    remaining -= units;
+  }
+  const method = body.refundType || "";
+  if (method && !REFUND_TYPES.includes(method)) fail("Choose a supported refund method.");
+  // Deposits occupy the final part of the invoice's original tender allocation. Line returns use the first part.
+  const deposits = invoice.lines.reduce((n: number, l: any) => n + (l.coreCharge || 0) * l.qty, 0);
+  const offset = invoice.total - deposits + previous.reduce((n, r) => n + r.total, 0);
+  const refunds = refundBreakdown(invoice, offset, total, method);
+  checkAccountRefund(invoice, refunds);
+  return { invoiceId: invoice.id, productId: body.productId, currency: invoice.currency,
+    quantity, total, refunds, refundType: refundTypeOf(refunds, method || "Cash") };
+}
 
 export function warrantyRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("warranty-claims", async (tx, actor, body) => {
@@ -43,47 +73,27 @@ export function warrantyRoutes(app: FastifyInstance, db: Database, post: Post) {
       actor.branchId,
     );
   });
+  app.post("/api/v1/core-returns/preview", async (request: any) =>
+    db.readSnapshot(snapshot => coreRefund(snapshot, request.actor, request.body ?? {})));
   post("core-returns", async (tx, actor, body) => {
+    allow(actor, ["owner", "manager"]);
     return idempotent(tx, actor, body.transactionId, body, async () => {
-      allow(actor, ["owner", "manager"]);
-      const invoice = await scoped(tx, actor, "invoice", body.invoiceId);
-      const originals = invoice.lines.filter(
-        (line: any) => line.productId === body.productId && line.coreCharge > 0,
-      );
-      if (!originals.length)
-        fail("This invoice has no core charge for that part.");
+      const quote = await coreRefund(tx, actor, body);
+      if (body.reviewedRefunds !== undefined) {
+        const reviewed = body.reviewedRefunds;
+        if (!Array.isArray(reviewed) || reviewed.length !== quote.refunds.length ||
+            !quote.refunds.every((part, i) => part.type === reviewed[i]?.type && part.amount === reviewed[i]?.amount))
+          fail("The refund allocation changed. Reopen the preview before recording this core return.", 409);
+      }
       const shift = (
         await records(tx, actor.organizationId, "shift", actor.branchId)
       ).find((item) => item.userId === actor.id && !item.closedAt);
       if (!shift) fail("Open your shift before recording a refund.", 409);
-      const previous = (
-        await records(tx, actor.organizationId, "coreReturn", actor.branchId)
-      )
-        .filter(
-          (item) =>
-            item.invoiceId === invoice.id && item.productId === body.productId,
-        )
-        .reduce((sum, item) => sum + item.quantity, 0);
-      const quantity = integer(
-        body.quantity,
-        "Core return quantity",
-        1,
-        originals.reduce((sum: number, line: any) => sum + line.qty, 0) -
-          previous,
-      );
-      if (!["Cash", "Card", "UPI", "Credit"].includes(body.refundType || "Cash"))
-        fail("Choose a supported refund method.");
-      if (body.refundType === "Credit" && !invoice.customerId)
-        fail("Only a sale to a named customer can be refunded to their account.");
       const entry = {
         id: id("core"),
         branchId: actor.branchId,
-        invoiceId: invoice.id,
-        productId: body.productId,
-        quantity,
-        total: quantity * originals[0].coreCharge,
+        ...quote,
         reason: text(body.reason, "reason"),
-        refundType: body.refundType || "Cash",
         createdAt: now(),
         userId: actor.id,
         shiftId: shift.id,

@@ -20,6 +20,7 @@ Future<void> supplierReturn(BuildContext context, Json supplier, {Json? bill}) a
     }
   }
   bool nonStock(Map row) => row['onlineOnly'] == true || isOnlineOnly(app.productById('${row['productId']}'));
+  bool serialTracked(Map row) => !nonStock(row) && app.productById('${row['productId']}')?['serialTracked'] == true;
   final transactionId = uuid();
   final byProduct = <String, Json>{};
   if (bill != null) {
@@ -51,6 +52,8 @@ Future<void> supplierReturn(BuildContext context, Json supplier, {Json? bill}) a
           value: bill == null ? (app.sellableBins.firstOrNull?['id']) : ((bill['lines'] as List).firstOrNull?['binId']),
           barcodeChoice: app.binIdForCode,
           options: [for (final b in app.list('locations')) ('${b['id']}', app.binName(b))]),
+      if (candidates.any(serialTracked))
+        const FieldSpec('serials', 'Serial numbers', help: 'For tracked items, enter one serial per unit, separated by commas.'),
       const FieldSpec('cost', 'Credit per unit (blank = bill cost)', kind: FieldKind.money),
       const FieldSpec('reason', 'Reason', required: true, help: 'For example: damaged, wrong part, excess.'),
     ],
@@ -60,13 +63,17 @@ Future<void> supplierReturn(BuildContext context, Json supplier, {Json? bill}) a
       final q = int.tryParse('${v['quantity']}') ?? 0;
       if (q < 1) throw FormProblem('Enter the quantity.');
       if (c['max'] != null && q > (c['max'] as int)) throw FormProblem('Only ${c['max']} can be returned against this bill.');
+      final serials = splitList(v['serials']);
+      if (serialTracked(c) && (serials.length != q || serials.toSet().length != q)) {
+        throw FormProblem('Enter one unique serial number per returned unit.');
+      }
       await app.mutate('/purchase-returns', {
         'transactionId': transactionId,
         'supplierId': supplier['id'],
         if (bill != null) 'billId': bill['id'],
         'reason': v['reason'],
         'lines': [
-          {'productId': v['productId'], 'quantity': q, 'binId': nonStock(c) ? null : v['binId'], if ('${v['cost'] ?? ''}'.isNotEmpty) 'cost': amountMinor(v['cost'])},
+          {'productId': v['productId'], 'quantity': q, 'binId': nonStock(c) ? null : v['binId'], if (serialTracked(c)) 'serials': serials, if ('${v['cost'] ?? ''}'.isNotEmpty) 'cost': amountMinor(v['cost'])},
         ],
       }, 'Supplier return recorded.');
     },

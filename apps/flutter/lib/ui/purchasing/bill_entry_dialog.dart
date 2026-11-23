@@ -47,6 +47,7 @@ class _BillDialogState extends State<_BillDialog> {
   final paidNow = TextEditingController(text: '0.00');
   final notes = TextEditingController();
   String paidMode = 'Cash';
+  bool cashFromDrawer = true;
   bool gst = false;
   bool interState = false;
   final lines = <Json>[];
@@ -210,7 +211,7 @@ class _BillDialogState extends State<_BillDialog> {
         'discount': amountMinor(discount.text),
         'photoIds': [for (final p in photos) p['id']],
         'notes': notes.text.trim(),
-        if (paid > 0) 'paidNow': {'amount': paid, 'mode': paidMode},
+        if (paid > 0) 'paidNow': {'amount': paid, 'mode': paidMode, if (paidMode == 'Cash') 'fromDrawer': cashFromDrawer},
       }, 'Supplier bill saved.');
       if (mounted) Navigator.pop(context, saved is Map ? Map<String, dynamic>.from(saved) : <String, dynamic>{});
     } catch (e) {
@@ -360,6 +361,8 @@ class _BillDialogState extends State<_BillDialog> {
                 ),
               ),
               TextButton(onPressed: () => setState(() => paidNow.text = plainAmount(t.total < 0 ? 0 : t.total)), child: const Text('Paid in full')),
+              if (paidMode == 'Cash') CheckboxListTile(value: cashFromDrawer, title: const Text('Cash paid from the counter drawer'),
+                subtitle: const Text('Clear for cash kept outside the drawer.'), onChanged: (v) => setState(() => cashFromDrawer = v == true)),
               Text('Left on the supplier\'s account: ${app.money(supplierBillDue(t.total, amountMinor(paidNow.text)))}',
                   key: const ValueKey('bill-due')),
             ]),

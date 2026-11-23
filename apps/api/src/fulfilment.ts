@@ -355,6 +355,20 @@ async function dropJob(db: Database, organizationId: string, kind: string, order
 /** A worker is sending this job to Magento right now. */
 const inFlight = (job: any) => !!job?.claimedAt && Date.parse(job.nextAt) > Date.now();
 
+export async function reverseOrderCollection(db: Database, actor: Actor, collection: any) {
+  const order = await branchOrder(db, actor, collection.onlineOrderId);
+  const f = order.fulfilment;
+  if (!f || f.invoiceId !== collection.invoiceId) return; // Linked to a previous, voided invoice.
+  const job = await getRecord(db, actor.organizationId, MAGENTO_JOBS.invoice, order.id);
+  if (inFlight(job)) fail("The website invoice is being sent. Retry the reversal after it finishes.", 409);
+  const dueKey = f.cod ? "codDue" : "paymentDue";
+  f[dueKey] = Number(f[dueKey] || 0) + collection.amount;
+  f.paidAt = null;
+  if (job) await dropJob(db, actor.organizationId, MAGENTO_JOBS.invoice, order.id);
+  if (!["sent", "skipped"].includes(f.magentoInvoice?.state)) f.magentoInvoice = null;
+  await putRecord(db, actor.organizationId, "onlineOrder", order, order.branchId);
+}
+
 /** The Magento invoice is created by the worker once the POS knows the money is in. */
 async function queueMagentoInvoice(db: Database, organizationId: string, order: any) {
   if (order.mode !== "pos") return;
@@ -388,9 +402,6 @@ export async function onlineInvoiceVoided(db: Database, actor: Actor, invoice: a
     await dropJob(db, actor.organizationId, MAGENTO_JOBS.shipment, order.id);
     await dropJob(db, actor.organizationId, MAGENTO_JOBS.invoice, order.id);
     order.fulfilment = { status: "new", voidedInvoices: [...(f.voidedInvoices || []), record] };
-    order.previousHeld = Object.fromEntries(
-      (order.lines || []).filter((l: any) => l.productId).map((l: any) => [l.productId, (l.reserved || 0) + (l.awaiting || 0)]),
-    );
     await applyOnlineOrder(db, order, order.branchId);
   }
   await putRecord(db, actor.organizationId, "onlineOrder", order, order.branchId);
@@ -566,7 +577,8 @@ export function fulfilmentRoutes(app: FastifyInstance, db: Database, post: Post,
     if (!f.shipment) fail("Ship the order before marking it delivered.", 409);
     if (f.status === "delivered") fail("This order is already marked delivered.", 409);
     let collection = null;
-    if (f.cod && Number(f.codDue) > 0) {
+    let codSettled = false;
+    if (f.cod) {
       // Less any credit notes on the invoice; nothing can be collected on a voided one
       // (the order can still be marked delivered, without a collection).
       const notes = await creditNotes(tx, actor, f.invoiceId);
@@ -593,9 +605,10 @@ export function fulfilmentRoutes(app: FastifyInstance, db: Database, post: Post,
         f.codDue = Number(f.codDue) - amount;
         f.codPayments = [...(f.codPayments || []), collection.id];
       }
+      codSettled = !f.invoiceVoided && !notes.voided && (collection?.amount ?? 0) === due;
     }
     order.fulfilment = { ...f, status: "delivered", deliveredAt: now(), deliveredBy: actor.id };
-    if (f.cod && !f.invoiceVoided) await queueMagentoInvoice(tx, actor.organizationId, order);
+    if (codSettled) await queueMagentoInvoice(tx, actor.organizationId, order);
     await putRecord(tx, actor.organizationId, "onlineOrder", order, order.branchId);
     return { order, payment: collection };
   });
@@ -606,9 +619,13 @@ export function fulfilmentRoutes(app: FastifyInstance, db: Database, post: Post,
     const order = await branchOrder(tx, actor, String(params.id));
     const f = order.fulfilment || {};
     if (!f.invoiceId) fail("Invoice and pack the order before recording its payment.", 409);
-    if (f.paymentKind !== "bank") fail("This order is not waiting for a bank transfer or UPI payment.", 409);
+    const cod = f.cod === true && f.status === "delivered";
+    if (!cod && f.paymentKind !== "bank") fail("This order has no outstanding delivery or bank payment.", 409);
+    if (!cod && !["UPI", "Bank transfer"].includes(body.mode || "UPI"))
+      fail("Record a bank transfer or UPI payment for this order.");
     if (f.invoiceVoided) fail(`Invoice ${f.invoiceNumber} was voided, so no payment can be recorded against it.`, 409);
-    const due = await stillDue(tx, actor, f, f.paymentDue);
+    const dueKey = cod ? "codDue" : "paymentDue";
+    const due = await stillDue(tx, actor, f, f[dueKey]);
     if (due <= 0) fail(`Nothing is left to pay on invoice ${f.invoiceNumber}.`, 409);
     const reference = text(body.reference, "UPI / bank transfer reference", true, 120);
     const amount = integer(body.amount ?? due, "Amount received", 1, due);
@@ -620,15 +637,16 @@ export function fulfilmentRoutes(app: FastifyInstance, db: Database, post: Post,
         mode: body.mode || "UPI",
         reference,
         notes: `Payment for online order #${order.number}, invoice ${f.invoiceNumber}`,
-        fromDrawer: false,
+        fromDrawer: body.fromDrawer === true,
         date: body.date,
       },
       "customer",
       f.customerId,
       { invoiceId: f.invoiceId, onlineOrderId: order.id },
     );
-    f.paymentDue = Number(f.paymentDue) - amount;
-    f.payments = [...(f.payments || []), record.id];
+    f[dueKey] = Number(f[dueKey]) - amount;
+    const paymentsKey = cod ? "codPayments" : "payments";
+    f[paymentsKey] = [...(f[paymentsKey] || []), record.id];
     f.paidAt = due - amount <= 0 ? now() : f.paidAt || null;
     order.fulfilment = f;
     if (due - amount <= 0) await queueMagentoInvoice(tx, actor.organizationId, order);

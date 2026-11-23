@@ -8,6 +8,7 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
 import '../barcode_scan.dart';
+import '../screens/receipt.dart' show pdfTheme;
 import '../widgets.dart';
 import 'kits.dart';
 import '../../core/receipt_print.dart' show openWhatsApp, whatsappUri;
@@ -93,19 +94,21 @@ Future<void> shareOnWhatsApp(BuildContext context, Json doc, {required String ti
       copied: 'Could not open WhatsApp, so the link was copied. Paste it in a browser or chat, or use Share PDF.');
 }
 
-/// A one-page PDF of an estimate or job card, handed to the system share sheet.
+/// A paginated estimate or job card, handed to the system share sheet.
 Future<void> shareDocumentPdf(BuildContext context, Json doc, {required String title}) async {
   final app = context.appRead;
   try {
-    final pdf = pw.Document();
+    final pdf = pw.Document(theme: await pdfTheme());
     final vehicle = vehicleById(app, doc['vehicleId']);
     final business = app.business;
     final lines = [for (final l in (doc['lines'] as List? ?? const [])) Map<String, dynamic>.from(l as Map)];
-    // Rupee sign is not in the PDF's base font; amounts print as "Rs".
-    String money(num? v) => app.money(v).replaceAll('₹', 'Rs ');
-    pdf.addPage(pw.Page(
+    String money(num? v) => app.money(v);
+    pdf.addPage(pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      build: (_) => pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+      maxPages: lines.length + 30,
+      footer: (page) => pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text(
+          '${doc['number']} · ${page.pageNumber} / ${page.pagesCount}', style: const pw.TextStyle(fontSize: 9))),
+      build: (_) => [
         pw.Text('${business['legalName'] ?? ''}', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
         if ('${business['address'] ?? ''}'.isNotEmpty) pw.Text('${business['address']}'),
         pw.SizedBox(height: 12),
@@ -117,6 +120,10 @@ Future<void> shareDocumentPdf(BuildContext context, Json doc, {required String t
         pw.SizedBox(height: 12),
         pw.TableHelper.fromTextArray(
           headers: ['Item', 'Type', 'Qty', 'Rate', 'Amount'],
+          columnWidths: const {
+            0: pw.FlexColumnWidth(3.5), 1: pw.FlexColumnWidth(1), 2: pw.FlexColumnWidth(0.6),
+            3: pw.FlexColumnWidth(1.2), 4: pw.FlexColumnWidth(1.3),
+          },
           data: [
             for (final l in lines)
               [
@@ -135,6 +142,7 @@ Future<void> shareDocumentPdf(BuildContext context, Json doc, {required String t
             pw.Text('Subtotal: ${money(doc['subtotal'] as num?)}'),
             pw.Text('Tax: ${money(doc['tax'] as num?)}'),
             if ((doc['core'] ?? 0) != 0) pw.Text('Core deposits: ${money(doc['core'] as num?)}'),
+            if ((doc['rounding'] ?? 0) != 0) pw.Text('Rounding: ${money(doc['rounding'] as num?)}'),
             pw.Text('Total: ${money(doc['total'] as num?)}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
           ]),
         ),
@@ -144,7 +152,7 @@ Future<void> shareDocumentPdf(BuildContext context, Json doc, {required String t
         ],
         pw.SizedBox(height: 16),
         pw.Text('This is not a tax invoice.', style: const pw.TextStyle(fontSize: 9)),
-      ]),
+      ],
     ));
     await Printing.sharePdf(bytes: await pdf.save(), filename: '${doc['number']}.pdf');
   } catch (e) {

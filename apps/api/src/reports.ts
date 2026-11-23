@@ -53,7 +53,7 @@ export async function report(
   const productFiltered = !!(filters.category || filters.supplierId || filters.sku);
   if (name === "tenders" && productFiltered)
     fail("Tender amounts are recorded per invoice. Remove part filters to reconcile payments.");
-  if (filters.paymentType && !["Cash", "Card", "UPI", "Credit"].includes(filters.paymentType))
+  if (filters.paymentType && !["Cash", "Card", "UPI", "Credit", ...(name === "tenders" ? ["Online", "Advance", "Exchange"] : [])].includes(filters.paymentType))
     fail("Choose a supported payment method.");
   const products = await records(db, actor.organizationId, "product");
   const byProduct = new Map(products.map(p => [p.id, p]));
@@ -96,7 +96,7 @@ export async function report(
       (item) =>
         inDate(item.createdAt) &&
         (!filters.cashier || item.userId === filters.cashier) &&
-        (!filters.paymentType || refundBy(item, filters.paymentType) > 0),
+        (!filters.paymentType || refundBy(item, filters.paymentType) > 0 || (filters.paymentType === "Exchange" && item.exchangeApplied > 0)),
     )
     .map((item) => ({
       ...item,
@@ -310,23 +310,26 @@ export async function report(
   } else if (name === "tenders")
     // "Credit" = sold on customers' accounts (not money collected).
     // "Online" = paid on the website (collected by the payment gateway).
-    rows = ["Cash", "Card", "UPI", "Credit", "Online"]
+    rows = ["Cash", "Card", "UPI", "Online", "Credit", "Advance", "Exchange"]
       .filter((type) => !filters.paymentType || filters.paymentType === type)
       .map((type) => {
-        const collected = sales.reduce(
+        const applied = sales.reduce(
           (sum, sale) =>
             sum +
             sale.tenders
               .filter((tender: any) => tender.type === type)
               .reduce((n: number, tender: any) => n + tender.amount, 0) -
-            (type === "Cash" ? sale.change : 0),
+            (type === "Cash" ? (sale.change || 0) : 0),
           0,
         );
         // Per-tender refund breakdown (returns.ts); an exchange's applied part is not a refund.
-        const refunded =
+        const returned =
           returns.reduce((sum, item) => sum + refundBy(item, type), 0) +
-          coreRefunds.reduce((sum, item) => sum + refundBy(item, type), 0);
-        return { type, collected, refunded, net: collected - refunded };
+          coreRefunds.reduce((sum, item) => sum + refundBy(item, type), 0) +
+          (type === "Exchange" ? returns.reduce((n, r) => n + Number(r.exchangeApplied || 0), 0) : 0);
+        const monetary = ["Cash", "Card", "UPI", "Online"].includes(type);
+        return { type, collected: monetary ? applied : 0, refunded: monetary ? returned : 0,
+          net: monetary ? applied - returned : 0, accountApplied: monetary ? 0 : applied, accountReturned: monetary ? 0 : returned };
       });
   else if (name === "stock-movement")
     rows = (
@@ -621,6 +624,8 @@ export async function report(
       collected: sum("collected"),
       refunded: sum("refunded"),
       net: sum("collected") - sum("refunded"),
+      accountApplied: sum("accountApplied"), accountReturned: sum("accountReturned"),
+      accountNet: sum("accountApplied") - sum("accountReturned"),
     };
   else if (name === "warranty")
     totals = {

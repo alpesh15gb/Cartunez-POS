@@ -5,6 +5,7 @@ import { type CellFormat, xlsx } from "./exports/xlsx.js";
 
 type Report = Awaited<ReturnType<typeof report>>;
 const money = new Set([
+  "accountApplied", "accountReturned", "accountNet",
   "gross", "returns", "coreReturns", "net", "discount", "tax", "cost", "margin", "value", "landedCost", "total", "openingCash",
   "cashSales", "cashRefunds", "cashIn", "cashOut", "netMovement", "expectedCash", "countedCash", "variance", "collected",
   "refunded", "charged", "outstanding", "revenue", "amount", "taxable", "unitPrice", "subtotal", "coreCharge", "coreDeposits",
@@ -19,7 +20,10 @@ const salesKpiLabels: Record<string, string> = {
   returns: "Refunds", coreReturns: "Core refunds", net: "Net after refunds",
 };
 const labelsFor = (name: string): Record<string, string> =>
-  name === "daily-sales" || name === "sales" ? salesKpiLabels : {};
+  name === "daily-sales" || name === "sales" ? salesKpiLabels : name === "tenders" ? {
+    collected: "Money collected", refunded: "Money refunded", net: "Net money", accountApplied: "Non-cash settlement",
+    accountReturned: "Non-cash credit", accountNet: "Net non-cash settlement",
+  } : {};
 
 function csv(rows: Record<string, unknown>[], currency: string, labels: Record<string, string> = {}) {
   const keys = [...new Set(rows.flatMap(Object.keys))];

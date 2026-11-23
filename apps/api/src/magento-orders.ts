@@ -12,7 +12,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
-import { adjust, allow, fail, id, reservingHolds, type Actor } from "./domain.js";
+import { adjust, allow, fail, heldUnits, id, reservingHolds, type Actor } from "./domain.js";
 import { magentoConfig } from "./online-queue.js";
 import { magentoRequest, MagentoError } from "./magento.js";
 import type { Post } from "./routes/types.js";
@@ -55,9 +55,12 @@ export function itemTargets(item: any, previous: any = {}) {
 }
 
 /** Units per product held for open online orders in [branchId]. */
-export async function onlineReservations(db: Database, organizationId: string, branchId: string) {
+export async function onlineReservations(db: Database, organizationId: string, branchId: string, beforeOrderId?: string) {
   const held = new Map<string, number>();
   for (const order of await records(db, organizationId, "onlineOrder", branchId)) {
+    // records() returns import order. Earlier orders retain their allocation
+    // when a later order arrives or the same order is polled again.
+    if (order.id === beforeOrderId) break;
     for (const line of order.lines || []) {
       if (!line.productId || line.onlineOnly) continue;
       const units = Number(line.reserved || 0) + Number(line.awaiting || 0);
@@ -80,14 +83,7 @@ async function binStock(db: Database, actor: Actor, productId: string) {
   return bins
     .map((bin) => {
       const onHand = Number(rows.find((r) => r.bin_id === bin.id)?.quantity || 0);
-      const parked = holds.reduce(
-        (sum, hold) =>
-          sum +
-          (hold.cart?.lines || [])
-            .filter((l: any) => l.productId === productId && l.binId === bin.id)
-            .reduce((s: number, l: any) => s + Number(l.qty || 0), 0),
-        0,
-      );
+      const parked = holds.reduce((sum, hold) => sum + heldUnits(hold.cart?.lines, productId, bin.id), 0);
       return { binId: bin.id as string, available: onHand - parked };
     })
     .filter((b) => b.available > 0)
@@ -104,6 +100,7 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
     if (product?.onlineOnly) line.onlineOnly = true;
     else delete line.onlineOnly;
   }
+  const earlier = await onlineReservations(db, actor.organizationId, actor.branchId, order.id);
   if (order.mode === "pos") applyPosOrder(order);
   else for (const line of order.lines) {
     line.moves ||= [];
@@ -118,8 +115,10 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
     const product = await getRecord(db, order.organizationId, "product", line.productId);
     line.serialPickRequired = !!product?.serialTracked && want > line.deducted;
     if (want > line.deducted && !line.serialPickRequired) {
-      let need = want - line.deducted;
-      for (const bin of await binStock(db, actor, line.productId)) {
+      const bins = await binStock(db, actor, line.productId);
+      const uncommitted = Math.max(0, bins.reduce((n, b) => n + b.available, 0) - (earlier.get(line.productId) || 0));
+      let need = Math.min(want - line.deducted, uncommitted);
+      for (const bin of bins) {
         if (need <= 0) break;
         const take = Math.min(need, bin.available);
         await adjust(db, actor, line.productId, bin.binId, -take, `Online order #${order.number}`, order.id);
@@ -131,22 +130,28 @@ export async function applyOnlineOrder(db: Database, order: any, branchId: strin
     line.awaiting = Math.max(0, want - line.deducted);
     line.reserved = Number(line.reserve || 0);
   }
-  // Shortage: units this order still needs that the branch does not have.
-  const held = await onlineReservations(db, order.organizationId, branchId);
-  for (const line of order.lines) {
-    if (!line.productId) continue;
-    if (line.onlineOnly) {
+  await updateShortages(db, actor, order, earlier);
+  order.posState = orderState(order);
+  return order;
+}
+
+/** Allocate branch stock once per SKU, then consume it across this order's lines. */
+async function updateShortages(db: Database, actor: Actor, order: any, earlier: Map<string, number>) {
+  const free = new Map<string, number>();
+  for (const line of order.lines || []) {
+    if (!line.productId || line.onlineOnly) {
       line.shortage = 0;
       continue;
     }
-    const otherOrders = (held.get(line.productId) || 0) - (order.previousHeld?.[line.productId] || 0);
-    const available = (await binStock(db, actor, line.productId)).reduce((s, b) => s + b.available, 0);
-    const mine = line.reserved + line.awaiting;
-    line.shortage = Math.max(0, mine - Math.max(0, available - Math.max(0, otherOrders)));
+    let remaining = free.get(line.productId);
+    if (remaining === undefined) {
+      const bins = await binStock(db, actor, line.productId);
+      remaining = Math.max(0, bins.reduce((n, b) => n + b.available, 0) - (earlier.get(line.productId) || 0));
+    }
+    const required = Number(line.reserved || 0) + Number(line.awaiting || 0);
+    line.shortage = Math.max(0, required - remaining);
+    free.set(line.productId, Math.max(0, remaining - required));
   }
-  delete order.previousHeld;
-  order.posState = orderState(order);
-  return order;
 }
 
 /** WS-E: units stay reserved until the POS invoices them; Magento invoices move no stock. */
@@ -201,10 +206,6 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
     const products = await records(tx, organizationId, "product");
     const address = mg.extension_attributes?.shipping_assignments?.[0]?.shipping?.address || mg.billing_address || {};
     const items = (mg.items || []).filter((item: any) => !item.parent_item_id);
-    const previousHeld: Record<string, number> = {};
-    for (const line of existing?.lines || []) {
-      if (line.productId) previousHeld[line.productId] = (previousHeld[line.productId] || 0) + (line.reserved || 0) + (line.awaiting || 0);
-    }
     const order: any = {
       ...(existing || {}),
       id: recordId,
@@ -234,7 +235,6 @@ export async function importMagentoOrder(db: Database, organizationId: string, b
       createdAt: isoDate(mg.created_at),
       updatedAt: isoDate(mg.updated_at),
       importedAt: existing?.importedAt || new Date().toISOString(),
-      previousHeld,
       lines: items.map((item: any) => {
         const before = (existing?.lines || []).find((l: any) => l.itemId === item.item_id) || {};
         const product = products.find((p) => p.sku === item.sku);
@@ -317,13 +317,13 @@ async function flagCreditNote(db: Database, organizationId: string, order: any) 
 /** Re-applies orders still waiting for stock (after goods arrive). */
 async function retryAwaiting(db: Database, organizationId: string, branchId: string) {
   for (const order of await records(db, organizationId, "onlineOrder", branchId)) {
-    if (order.posState !== "awaiting" && !(order.lines || []).some((l: any) => l.shortage > 0)) continue;
+    const demand = (order.lines || []).filter((l: any) => l.productId && !l.onlineOnly && (l.reserved > 0 || l.awaiting > 0));
+    // Upgrade existing open orders whose duplicate lines previously reported no shortage.
+    const repeatedSku = new Set(demand.map((l: any) => l.productId)).size < demand.length;
+    if (order.posState !== "awaiting" && !repeatedSku && !demand.some((l: any) => l.shortage > 0)) continue;
     await db.transaction(async (tx) => {
       const fresh = await getRecord(tx, organizationId, "onlineOrder", order.id);
       if (!fresh) return;
-      fresh.previousHeld = Object.fromEntries(
-        (fresh.lines || []).filter((l: any) => l.productId).map((l: any) => [l.productId, (l.reserved || 0) + (l.awaiting || 0)]),
-      );
       await applyOnlineOrder(tx, fresh, branchId);
       await putRecord(tx, organizationId, "onlineOrder", fresh, branchId);
     });
@@ -429,9 +429,6 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
     allow(actor, ["owner", "manager"]);
     const order = await getRecord(tx, actor.organizationId, "onlineOrder", String(params.id));
     if (!order) fail("Online order not found.", 404);
-    order!.previousHeld = Object.fromEntries(
-      (order!.lines || []).filter((l: any) => l.productId).map((l: any) => [l.productId, (l.reserved || 0) + (l.awaiting || 0)]),
-    );
     if (order!.branchId !== actor.branchId) fail("Switch to the fulfilment branch for this order.", 409);
     await applyOnlineOrder(tx, order, order!.branchId);
     return putRecord(tx, actor.organizationId, "onlineOrder", order!, order!.branchId);
@@ -450,6 +447,8 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
     const chosen: Record<string, unknown> = body?.suppliers && typeof body.suppliers === "object" ? body.suppliers : {};
     const linked = await Promise.all((order!.purchaseOrderIds || []).map((id: string) =>
       getRecord(tx, actor.organizationId, "purchaseOrder", id)));
+    const earlier = await onlineReservations(tx, actor.organizationId, actor.branchId, order!.id);
+    await updateShortages(tx, actor, order, earlier);
     const { open: outstanding, needed } = supplierCoverage(order!.lines || [], linked);
     const bySupplier = new Map<string, any[]>();
     const needsSupplier: any[] = [];

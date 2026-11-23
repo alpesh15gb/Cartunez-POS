@@ -77,18 +77,19 @@ _Register _fill(_Register app) => app
     ],
   };
 
-Future<ShellController> _mount(WidgetTester tester, AppState app, Size size, {Widget? above}) async {
+Future<ShellController> _mount(WidgetTester tester, AppState app, Size size, {Widget? above, bool nested = false}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final shell = ShellController()..section = 'billing';
+  final counter = ShellScope(
+    controller: shell,
+    child: Scaffold(body: Column(children: [?above, const Expanded(child: BillingScreen())])),
+  );
   await tester.pumpWidget(AppScope(
     state: app,
     child: MaterialApp(
-      home: ShellScope(
-        controller: shell,
-        child: Scaffold(body: Column(children: [?above, const Expanded(child: BillingScreen())])),
-      ),
+      home: nested ? Navigator(onGenerateRoute: (_) => MaterialPageRoute<void>(builder: (_) => counter)) : counter,
     ),
   ));
   await tester.pump();
@@ -99,6 +100,31 @@ const _oneFilter = [{'productId': 'p', 'qty': 1, 'binId': 'bin', 'serials': <Str
 
 void main() {
   setUp(() => ReceiptPrinterPrefs.instance.reset());
+
+  testWidgets('Clear sale stays on the nested counter after cancel and confirm', (tester) async {
+    final app = await _ready(tester);
+    await _mount(tester, app, const Size(1400, 900), nested: true);
+    app.updateCart({'lines': _oneFilter});
+    await tester.pump();
+    final clearSale = find.byTooltip('Clear sale');
+
+    await tester.tap(clearSale);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear this sale?'), findsNothing);
+    expect(app.cart['lines'], _oneFilter);
+
+    await tester.tap(clearSale);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear this sale?'), findsNothing);
+    expect(find.byType(BillingScreen), findsOneWidget);
+    expect(app.cart['lines'], isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
 
   testWidgets('F9 completes an exact-cash sale and the counter resets for the next customer', (tester) async {
     final app = await _ready(tester);

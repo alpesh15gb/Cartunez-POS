@@ -237,13 +237,17 @@ class _PickPackPageState extends State<PickPackPage> {
       fields: [
         FieldSpec('amount', 'Amount received', kind: FieldKind.money, required: true, value: plainAmount(paymentDue(f)),
             help: 'For invoice ${f['invoiceNumber']}. It is recorded on the customer\'s account, then Magento is invoiced.'),
-        FieldSpec('mode', 'Received by', kind: FieldKind.select, value: 'UPI', options: const [('UPI', 'UPI'), ('Bank transfer', 'Bank transfer')]),
+        FieldSpec('mode', 'Received by', kind: FieldKind.select, value: 'UPI',
+          options: [('UPI', 'UPI'), ('Bank transfer', 'Bank transfer'), if (f['cod'] == true) ('Cash','Cash')]),
+        if (f['cod'] == true) const FieldSpec('cashSource', 'For cash collections', kind: FieldKind.select, value: 'courier',
+          options: [('courier','Held outside the drawer'),('drawer','Received in counter drawer')]),
         const FieldSpec('reference', 'UPI / bank reference (UTR)', required: true),
       ],
       onSubmit: (v) async {
         await app.mutate('/online-orders/${o['id']}/payment-received', {
           'amount': amountMinor(v['amount']),
           'mode': v['mode'],
+          if (v['mode'] == 'Cash') 'fromDrawer': v['cashSource'] == 'drawer',
           'reference': '${v['reference']}'.trim(),
         }, 'Payment recorded. Magento will be invoiced.');
         await _push();
@@ -293,11 +297,14 @@ class _PickPackPageState extends State<PickPackPage> {
               help: 'Cash on delivery for invoice ${f['invoiceNumber']}. It is recorded on the customer\'s account.'),
           FieldSpec('mode', 'Received by', kind: FieldKind.select, value: 'Bank transfer', options: [for (final m in paymentModes) (m, m)]),
           const FieldSpec('reference', 'Courier remittance reference'),
+          const FieldSpec('cashSource', 'For cash collections', kind: FieldKind.select, value: 'courier',
+            options: [('courier','Held outside the drawer'),('drawer','Received in counter drawer')]),
         ],
       ],
       onSubmit: (v) async {
         await app.mutate('/online-orders/${o['id']}/delivered', {
-          if (cod) ...{'amount': amountMinor(v['amount']), 'mode': v['mode'], if ('${v['reference'] ?? ''}'.isNotEmpty) 'reference': v['reference']},
+          if (cod) ...{'amount': amountMinor(v['amount']), 'mode': v['mode'], if (v['mode'] == 'Cash') 'fromDrawer': v['cashSource'] == 'drawer',
+            if ('${v['reference'] ?? ''}'.isNotEmpty) 'reference': v['reference']},
         }, cod ? 'Payment recorded. Order delivered.' : 'Order marked delivered.');
       },
     );

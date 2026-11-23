@@ -29,7 +29,8 @@ String paymentLabel(Map f) => switch (f['paymentKind'] ?? (f['cod'] == true ? 'c
     };
 
 /// Bank transfer / UPI still owed on the invoice (before credit notes).
-int paymentDue(Map f) => f['paymentKind'] == 'bank' && f['invoiceVoided'] == null ? _n(f['paymentDue']) : 0;
+int paymentDue(Map f) => f['invoiceVoided'] != null ? 0 : f['paymentKind'] == 'bank' ? _n(f['paymentDue'])
+  : f['cod'] == true && f['status'] == 'delivered' ? _n(f['codDue']) : 0;
 
 /// Where the order is in Pick → Invoice & pack → Ship → Delivered.
 String fulfilmentStage(Json order) {

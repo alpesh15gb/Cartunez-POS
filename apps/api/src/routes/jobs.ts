@@ -15,6 +15,7 @@
 // change and released when the job is billed or cancelled.
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { Database, RecordData } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
@@ -302,6 +303,7 @@ async function createJob(db: Database, actor: Actor, body: any, estimate?: Recor
     complaint: multiline(body.complaint ?? estimate?.notes ?? "", "complaint", false, 1000),
     notes: multiline(body.notes || "", "notes", false, 1000),
     lines: [],
+    linesRevision: 0,
     photos: [],
     holdId: null,
     invoiceId: null,
@@ -519,7 +521,21 @@ export function jobRoutes(_app: FastifyInstance, _db: Database, post: Post) {
     allow(actor, WORKSHOP);
     const job = await scoped(tx, actor, "job", params.id);
     openJob(job);
-    job.lines = await documentLines(tx, actor, body.lines, { job, previous: job.lines });
+    const revision = job.linesRevision ?? 0;
+    if (body.expectedLinesRevision !== undefined && integer(body.expectedLinesRevision, "Job line revision") !== revision)
+      fail("The parts on this job changed at another counter. Review the refreshed job and apply your edit again.", 409);
+    const next = await documentLines(tx, actor, body.lines, { job, previous: job.lines });
+    // A legacy counter cannot prove which revision it opened. Its first save
+    // still works, as do later appends that preserve every existing line.
+    if (body.expectedLinesRevision === undefined && revision > 0) {
+      const currentIds = new Set(job.lines.map((line: Line) => line.id));
+      const preservesExisting = job.lines.every((old: Line) => next.some(line => isDeepStrictEqual(line, old)));
+      const restoresMissing = body.lines.some((line: Line) => line.id && !currentIds.has(line.id));
+      if (!preservesExisting || restoresMissing)
+        fail("The parts on this job have changed. Reload the updated app before changing or removing an existing line.", 409);
+    }
+    job.lines = next;
+    job.linesRevision = revision + 1;
     job.updatedAt = now();
     await syncJobHold(tx, actor, job);
     await withTotals(tx, actor, job);
@@ -554,11 +570,7 @@ export function jobRoutes(_app: FastifyInstance, _db: Database, post: Post) {
     openJob(job);
     if (!job.customerId) fail("Choose the customer on the job before taking an advance.");
     const customer = await scoped(tx, actor, "customer", job.customerId);
-    const record = await advanceMovement(tx, actor, body, customer.id, false);
-    const notes = String(body.notes || "").trim();
-    Object.assign(record, { jobId: job.id, jobNumber: job.number, notes: `Advance · Job ${job.number}${notes ? ` · ${notes}` : ""}` });
-    await putRecord(tx, actor.organizationId, "partyPayment", record, actor.branchId);
-    return record;
+    return advanceMovement(tx, actor, body, customer.id, false, { id: job.id, number: job.number });
   });
 
   // One-click GST invoice from the job card, through the normal checkout.

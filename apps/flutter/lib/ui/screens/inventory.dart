@@ -735,16 +735,57 @@ Future<void> coreReturn(BuildContext context) async {
   final app = context.appRead;
   final invoices = app.list('invoices').where((i) => (i['lines'] as List).any((l) => (l['coreCharge'] ?? 0) > 0)).toList();
   if (invoices.isEmpty) return app.toast('No invoices carry a core deposit.');
-  await showFormDialog<void>(
+  final invoiceId = await showFormDialog<String>(
     context,
     title: 'Core deposit refund',
+    submit: 'Choose invoice',
     fields: [
       FieldSpec('invoiceId', 'Invoice', kind: FieldKind.select, required: true, options: optionsOf(invoices, (i) => '${i['number']}')),
-      FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, options: optionsOf(app.products.where((p) => (p['coreCharge'] ?? 0) > 0).toList())),
+    ], onSubmit: (v) async => v['invoiceId'] as String,
+  );
+  if (invoiceId == null || !context.mounted) return;
+  final invoice = invoices.firstWhere((i) => i['id'] == invoiceId);
+  final available = <String, int>{}, names = <String, String>{};
+  for (final l in invoice['lines'] as List) {
+    if ((l['coreCharge'] ?? 0) <= 0) continue;
+    final id = l['productId'] as String;
+    available[id] = (available[id] ?? 0) + (l['qty'] as int);
+    names[id] = l['name'] ?? app.productName(id);
+  }
+  for (final r in app.list('coreReturns').where((r) => r['invoiceId'] == invoiceId)) {
+    final id = r['productId'] as String;
+    available[id] = (available[id] ?? 0) - (r['quantity'] as int);
+  }
+  available.removeWhere((_, n) => n <= 0);
+  if (available.isEmpty) { app.toast('All core deposits on this invoice have been refunded.'); return; }
+  final proposal = await showFormDialog<Json>(context, title: 'Return core on ${invoice['number']}', submit: 'Preview refund',
+    fields: [
+      FieldSpec('productId', 'Part', kind: FieldKind.select, required: true, value: available.length == 1 ? available.keys.first : null,
+        options: [for (final e in available.entries) (e.key, '${names[e.key]} · ${e.value} eligible')]),
       const FieldSpec('quantity', 'Quantity', kind: FieldKind.number, value: 1, required: true),
-      FieldSpec('refundType', 'Refund by', kind: FieldKind.select, value: 'Cash', options: [for (final t in app.tenderTypes) (t, t)]),
+      FieldSpec('refundType', 'Refund by', kind: FieldKind.select, value: 'original', options: [
+        ('original','Same as paid'), for (final t in app.tenderTypes) (t,t), if (invoice['customerId'] != null) ('Credit','Customer account')]),
       const FieldSpec('reason', 'Reason', required: true),
     ],
-    onSubmit: (v) async => app.mutate('/core-returns', {...v, 'quantity': int.tryParse('${v['quantity']}') ?? 1}, 'Core refund recorded.'),
+    onSubmit: (v) async {
+      final n = int.tryParse('${v['quantity']}');
+      if (n == null || n < 1 || n > available[v['productId']]!) throw FormProblem('Enter an eligible quantity.');
+      final body = {'invoiceId': invoiceId, 'productId': v['productId'], 'quantity': n, 'reason': v['reason'],
+        if (v['refundType'] != 'original') 'refundType': v['refundType']};
+      final quote = await app.api('/core-returns/preview', body: body);
+      return {'body': body, 'quote': quote};
+    },
+  );
+  if (proposal == null || !context.mounted) return;
+  final quote = proposal['quote'] as Map;
+  final tx = uuid();
+  await showFormDialog<void>(context, title: 'Review core refund', submit: 'Record core refund', fields: const [],
+    header: Text([for (final p in quote['refunds'] as List)
+      "${p['type'] == 'Credit' ? 'Customer account' : p['type']} · ${app.money(p['amount'], currency: quote['currency'] as String?)}"].join('\n')),
+    onSubmit: (_) async {
+      final issued = await app.mutate('/core-returns', {...proposal['body'] as Map<String,dynamic>,
+        'transactionId': tx, 'reviewedRefunds': quote['refunds']});
+      app.toast('Core return recorded. ${refundInstructions(app, issued as Map)}');
+    },
   );
 }

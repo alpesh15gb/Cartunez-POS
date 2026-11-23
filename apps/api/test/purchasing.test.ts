@@ -60,7 +60,7 @@ test("Purchasing: supplier bills, photos, payments, returns and balances; custom
       ],
       otherCharges: 14000, discount: 4000,
       photoIds: [note.id],
-      paidNow: { amount: 200000, mode: "Cash" },
+      paidNow: { amount: 200000, mode: "Cash", fromDrawer: false },
     };
     await call("purchase-bills", billBody, cashier, 403);
     const bill = await call("purchase-bills", billBody, manager);
@@ -154,13 +154,14 @@ test("Purchasing: supplier bills, photos, payments, returns and balances; custom
     // Cash received from the customer goes through the cashier's drawer.
     const cashPaid = await call("party-payments", { partyKind: "customer", partyId: "customer-1", amount: 1000, mode: "Cash" }, cashier);
     assert.equal(cashPaid.shiftId, shift.id);
-    await call(`party-payments/${cashPaid.id}/void`, { reason: "Test" }, owner);
+    await call(`party-payments/${cashPaid.id}/void`, { reason: "Test" }, owner, 409);
     // Voiding the credit sale reverses it on the account (not as cash from the drawer).
     await call("shifts/open", { openingCash: 0 }, owner);
+    await call(`party-payments/${cashPaid.id}/void`, { reason: "Test" }, owner);
     const voided = await call(`invoices/${onCredit.id}/void`, { transactionId: randomUUID(), reason: "Customer changed mind" }, owner);
     assert.ok(voided);
     const customerLedger = await call("parties/customers/customer-1/ledger", undefined, cashier, 200, "GET");
-    assert.deepEqual(customerLedger.entries.map((e: any) => e.type), ["sale", "payment", "void"]);
+    assert.deepEqual(customerLedger.entries.map((e: any) => e.type), ["sale", "payment", "payment", "void", "void"]);
     // The void follows the tenders: the credit part comes off the account, the cash part
     // goes back in cash. The 200 rupees paid on account leave them in advance.
     assert.deepEqual(voided.refunds, [{ type: "Cash", amount: 50000 }, { type: "Credit", amount: price - 50000 }]);

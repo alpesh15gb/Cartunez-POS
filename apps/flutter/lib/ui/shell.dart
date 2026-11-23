@@ -154,10 +154,10 @@ final workspaces = <Workspace>[
         (_, _) => const OnlineOrdersScreen(),
         path: '/orders/online', feature: 'onlineStore', detail: _openOnlineOrder),
     // WS-C (workshop)
-    TabDef('estimates', 'Estimates', _sellers, 'Quotes for parts, labour and kits; share on WhatsApp, then open a job card.',
+    TabDef('estimates', 'Estimates', _everyone, 'Quotes for parts, labour and kits; share on WhatsApp, then open a job card.',
         (_, id) => EstimatesScreen(id: id),
         path: '/orders/estimates', search: false, takesArg: true),
-    TabDef('jobs', 'Job cards', _sellers, 'Vehicles in the workshop: check-in, work, parts, photos, then one-click invoice.',
+    TabDef('jobs', 'Job cards', _everyone, 'Vehicles in the workshop: check-in, work, parts, photos, then one-click invoice.',
         (_, id) => JobsScreen(id: id),
         path: '/orders/jobs', search: false, takesArg: true),
   ]),
@@ -279,6 +279,7 @@ List<Workspace> visibleWorkspaces(AppState app) => [for (final ws in workspaces)
 
 /// Where a signed-in user lands: the first tab their role may use.
 String homePath(AppState app) {
+  if (app.role == 'inventory') return '/catalog/parts';
   for (final ws in workspaces) {
     final tabs = ws.visibleTabs(app);
     if (tabs.isNotEmpty) return tabs.first.path;

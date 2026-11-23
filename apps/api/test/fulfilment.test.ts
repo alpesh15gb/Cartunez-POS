@@ -165,6 +165,14 @@ test("Online fulfilment: pick, invoice & pack without a shift, ship with retries
     assert.deepEqual(await runMagentoInvoices(db, { fetch: magento.fetch }), { sent: 1, failed: 0 });
     assert.deepEqual(magento.invoices, [{ orderId: 2, body: { capture: false, notify: false } }]);
     assert.equal((await online(2))!.fulfilment.magentoInvoice.state, "sent");
+    await call(`party-payments/${paid.payment.id}/void`, { reason: "Courier remittance reversed" }, owner);
+    assert.equal((await online(2))!.fulfilment.codDue, paid.payment.amount);
+    assert.equal((await online(2))!.fulfilment.status, "delivered");
+    const repaid = await call("online-orders/mg-2/payment-received", { reference: "Replacement remittance", mode: "Bank transfer" }, owner);
+    assert.equal(repaid.order.fulfilment.codDue, 0);
+    assert.equal(repaid.payment.shiftId, null);
+    assert.equal(repaid.order.fulfilment.magentoInvoice.state, "sent");
+    assert.equal((await boot(owner)).partyBalances.customers[customerId], 0);
   } finally {
     await app.close();
     await db.close();
