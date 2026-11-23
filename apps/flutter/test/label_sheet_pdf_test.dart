@@ -2,6 +2,7 @@
 // sheets fit the page, and the local ZPL bridge receives the same ZPL.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cartunez_pos/core/label_layout.dart';
 import 'package:cartunez_pos/core/label_sheet_pdf.dart';
@@ -18,6 +19,24 @@ List<List<double>> _mediaBoxes(List<int> bytes) => RegExp(r'/MediaBox\s*\[\s*([\
     .toList();
 
 void main() {
+  test('wide words on a two-line label fit the bundled PDF typeface at both printer resolutions', () async {
+    final font = PdfTtfFont(PdfDocument(),
+        ByteData.sublistView(await File('assets/fonts/Roboto-Bold.ttf').readAsBytes()));
+    const layout = LabelLayout();
+    for (final dpi in [203, 300]) {
+      for (final name in ['BMW WINDOW MOTOR WITH WIRING LOOM AND CLIPS', 'WINDSCREEN WASHER MOTOR MOUNTINGS LH']) {
+        final plan = planLabel(layout, LabelData(name: name, code: _label.code), dpi: dpi);
+        final lines = plan.elements.where((e) => e.part == 'name').toList();
+        expect(lines, hasLength(2));
+        expect(lines.map((e) => e.text).join(' '), name);
+        for (final line in lines) {
+          expect(font.stringMetrics(line.text).width * line.height * 0.95, lessThanOrEqualTo(line.width));
+        }
+        expect(_mediaBoxes(await labelPdf(layout, [plan])), hasLength(1));
+      }
+    }
+  });
+
   test('roll PDF pages match the configured label size exactly', () async {
     for (final layout in const [
       LabelLayout(widthMm: 50, heightMm: 25),

@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { connectDatabase, migrate, getRecord } from "../src/db.js";
+import { connectDatabase, migrate, getRecord, putRecord } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
 import { pollMagentoOrders } from "../src/magento-orders.js";
@@ -34,6 +34,10 @@ test("online only: product field, CSV column and Magento stock fields", () => {
   assert.equal(site.product.custom_attributes.find((a: any) => a.attribute_code === "description")?.value, "Four-channel amp, 50 W x 4.");
   const own = magentoProduct(described.products[0], { published: true, description: "Listing text" }, { mrp: 500000, selling: 500000 }, 0, {});
   assert.equal(own.product.custom_attributes.find((a: any) => a.attribute_code === "description")?.value, "Listing text");
+  const multi = previewCatalog('name,retailPrice,description\r\nMat,1,"Line one\r\nLine two"\r\n', new CatalogCodes([]), false);
+  assert.equal(multi.products[0].description, "Line one\nLine two");
+  const clear = magentoProduct({ ...online, description: "" }, { description: "" }, { mrp: 1, selling: 1 }, 0, {});
+  assert.equal(clear.product.custom_attributes.find((a: any) => a.attribute_code === "description")?.value, "");
   // Magento: always sellable, stock not managed, never the POS quantity.
   const body = magentoProduct(online, { published: true }, { mrp: 10000, selling: 9000 }, 7, {});
   const stock = body.product.extension_attributes.stock_item as any;
@@ -103,6 +107,34 @@ test("online only: outside POS stock, counter refused, mixed online order, purch
     // No stock: adjust, count and movements refused.
     await call("inventory/adjust", { productId: alloy.id, binId: "bin-a1", quantity: 3, reason: "Found", transactionId: randomUUID() }, owner, 400);
     await call("inventory/count/start", { productId: alloy.id, binId: "bin-a1", transactionId: randomUUID() }, owner, 400);
+
+    // A kit cannot park an online-only item under a service line.
+    await call("products", { name: "Bad kit", retailPrice: 1200, components: [{ productId: alloy.id, qty: 1 }] }, owner, 409);
+    const component = await call("products", { name: "Shop only component", retailPrice: 100, taxRate: 0 }, owner);
+    const kit = await call("products", { name: "Existing kit", retailPrice: 100, components: [{ productId: component.id, qty: 1 }] }, owner);
+    await call("products", { id: component.id, onlineOnly: true }, owner, 409);
+    // A kit already stored by the old release cannot be parked or checked out.
+    await putRecord(db, "demo", "product", { ...kit, components: [{ productId: alloy.id, qty: 1 }] });
+    const kitLines = [{ productId: kit.id, qty: 1 }];
+    await call("holds", { cart: { lines: kitLines } }, owner, 409);
+    await call("invoices", { transactionId: randomUUID(), shiftId: shift.id, lines: kitLines,
+      tenders: [{ type: "Cash", amount: 10000, confirmed: true }] }, cashier, 409);
+
+    const legacy = await call("products", { name: "Previously stocked item", retailPrice: 10000, taxRate: 0, hsnSac: "8708" }, owner);
+    await call("inventory/adjust", { productId: legacy.id, binId: "bin-a1", quantity: 1, reason: "Stock opening" }, owner);
+    const oldSale = await call("invoices", { transactionId: randomUUID(), shiftId: shift.id,
+      lines: [{ productId: legacy.id, qty: 1, binId: "bin-a1" }], tenders: [{ type: "Cash", amount: 10000, confirmed: true }] }, cashier);
+    assert.equal(await onHand(legacy.id), 0);
+    await call("products", { id: legacy.id, onlineOnly: true }, owner, 409);
+    await putRecord(db, "demo", "product", { ...legacy, onlineOnly: true }); // existing clients already converted it
+    await call("shifts/open", { openingCash: 0 }, owner);
+    const movementCount = await movements(legacy.id);
+    const refund = await call("invoices/" + oldSale.id + "/returns", { transactionId: randomUUID(), condition: "sellable",
+      reason: "Customer returned item", lines: [{ lineId: oldSale.lines[0].id, quantity: 1 }] }, owner);
+    assert.equal(refund.refundTotal, 10000);
+    assert.equal(refund.lines[0].stockDisposition, "outside-shop-stock");
+    assert.equal(refund.lines[0].binId, null);
+    assert.equal(await movements(legacy.id), movementCount);
 
     // Reorder alerts and valuation leave it out.
     assert.equal((await boot()).reorderSuggestions.some((r: any) => r.productId === alloy.id), false);
@@ -180,6 +212,26 @@ test("online only: outside POS stock, counter refused, mixed online order, purch
     assert.equal(await onHand(alloy.id), 0);
     assert.equal(await movements(alloy.id), 0);
 
+    // Procurement remains possible after invoicing. Two of five units, across
+    // two order lines for one SKU, were both received on a linked PO and shipped.
+    const partial = { ...order!, id: "mg-partial", number: "partial-sourcing",
+      purchaseOrderIds: ["po-prior"], fulfilment: { invoiceId: invoice.id }, lines: [
+        { ...alloyLine, itemId: 21, ordered: 2, shipped: 2, posInvoiced: 2 },
+        { ...alloyLine, itemId: 22, ordered: 3, shipped: 0, posInvoiced: 3 },
+      ] };
+    await putRecord(db, "demo", "onlineOrder", partial, "pune");
+    await putRecord(db, "demo", "purchaseOrder", { id: "po-prior", status: "received",
+      supplierId: "supplier-1", lines: [{ productId: alloy.id, quantity: 2, received: 2 }] }, "pune");
+    const needed = async () => (await boot()).onlineOrders.find((o: any) => o.id === partial.id).supplierPurchaseNeeded;
+    assert.equal(await needed(), true);
+    const sourced = await call("online-orders/mg-partial/purchase-order", {}, owner);
+    const tail = await getRecord(db, "demo", "purchaseOrder", sourced.purchaseOrderIds[0]);
+    assert.deepEqual(tail!.lines.map((l: any) => l.quantity), [3]);
+    assert.equal(await needed(), false);
+    await call("online-orders/mg-partial/purchase-order", {}, owner, 409);
+    await call("purchase-orders/" + tail!.id + "/cancel", {reason:"Supplier declined"}, owner);
+    assert.equal(await needed(), true);
+
     // The supplier delivers: the receipt is recorded, but no shop stock.
     await call(`purchase-orders/${po!.id}/place`, {}, owner);
     const receipt = await call(`purchase-orders/${po!.id}/receive`, { transactionId: randomUUID(), lines: [{ productId: alloy.id, quantity: 1 }] }, owner);
@@ -195,6 +247,18 @@ test("online only: outside POS stock, counter refused, mixed online order, purch
     assert.equal(bill.total, 6000);
     assert.equal((await boot()).partyBalances.suppliers["supplier-1"], before + 6000);
     assert.equal(await onHand(alloy.id), 0);
+    const unlinked = { supplierId: "supplier-1", reason: "Returned to supplier", lines: [{ productId: alloy.id, quantity: 1 }] };
+    await call("purchase-returns", unlinked, owner, 409);
+    const priced = await call("purchase-bills", { supplierId: "supplier-1", billNumber: "OO-2", discount: 3000,
+      lines: [{ productId: alloy.id, quantity: 1, cost: 12000 }, { productId: alloy.id, quantity: 2, cost: 1500 }] }, owner);
+    const firstCredit = await call("purchase-returns", { ...unlinked, billId: priced.id }, owner);
+    assert.equal(firstCredit.total, 9600);
+    const restCredit = await call("purchase-returns", { ...unlinked, billId: priced.id,
+      lines: [{ productId: alloy.id, quantity: 2, cost: 12000 }] }, owner);
+    assert.equal(restCredit.total, 2400);
+    assert.equal(firstCredit.total + restCredit.total, priced.total);
+    assert.equal(restCredit.lines[0].binId, null);
+    await call("purchase-returns", { ...unlinked, billId: priced.id }, owner, 400);
     await call(`purchase-bills/${bill.id}/void`, { reason: "Entered twice" }, owner);
     assert.equal(await movements(alloy.id), 0);
     assert.equal((await boot()).reorderSuggestions.some((r: any) => r.productId === alloy.id), false);

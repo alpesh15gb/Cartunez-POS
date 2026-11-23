@@ -2,6 +2,7 @@
 // and where they sit. planLabel() places everything in millimetres once; the
 // Zebra (ZPL), PDF and on-screen preview renderers all draw from that plan.
 import 'package:barcode/barcode.dart';
+import 'package:characters/characters.dart';
 
 import 'billing.dart';
 
@@ -259,11 +260,14 @@ class LabelElement {
 }
 
 class LabelPlan {
-  const LabelPlan(this.elements, {this.warning});
+  const LabelPlan(this.elements, {this.warning, this.printProblem});
   final List<LabelElement> elements;
 
   /// Set when the design leaves too little room for a scannable barcode, or lines overlap.
   final String? warning;
+
+  /// A barcode that cannot fit or intersects another field must not be sent.
+  final String? printProblem;
 }
 
 const _margin = 1.2, _rowGap = 0.4;
@@ -293,46 +297,68 @@ int _code128Modules(String code) {
   }
 }
 
-/// Shortens text that would not fit [width] mm at [height] mm (about 0.55 em per character).
+// Printable ASCII advances in hundredths of an em. Each is the maximum of the
+// bundled Roboto Regular/Medium/Bold and Helvetica Bold advances, rounded up.
+// Preview and PDF text is drawn at 95% of the nominal height.
+const _asciiAdvance = [
+  28, 34, 48, 62, 58, 89, 73, 24, 36, 36, 46, 59, 28, 39, 30, 42,
+  58, 58, 58, 58, 58, 58, 58, 58, 58, 58, 34, 34, 59, 59, 59, 62,
+  98, 73, 73, 73, 73, 67, 62, 78, 73, 30, 56, 73, 62, 88, 73, 78,
+  67, 78, 73, 67, 62, 73, 67, 95, 67, 67, 62, 34, 43, 34, 59, 56,
+  34, 56, 62, 56, 62, 56, 36, 62, 62, 28, 28, 56, 28, 89, 62, 62,
+  62, 62, 39, 56, 34, 62, 56, 78, 56, 56, 51, 39, 29, 39, 69,
+];
+
+double _advance(String grapheme) {
+  final code = grapheme.codeUnitAt(0);
+  if (grapheme.length == 1 && code >= 32 && code <= 126) return _asciiAdvance[code - 32] / 100;
+  return 1.1 * grapheme.runes.length;
+}
+
+double textWidth(String text, double height) =>
+    0.4 + text.characters.fold(0.0, (width, char) => width + _advance(char) * height);
+
+String _fittingPrefix(String text, double width, double height) {
+  final out = StringBuffer();
+  var used = 0.4;
+  for (final char in text.characters) {
+    used += _advance(char) * height;
+    if (used > width) break;
+    out.write(char);
+  }
+  return out.toString();
+}
+
 String fitText(String text, double width, double height) {
-  final max = (width / (height * 0.55)).floor();
-  return text.length <= max ? text : '${text.substring(0, (max - 1).clamp(1, text.length))}…';
+  if (textWidth(text, height) <= width) return text;
+  if (textWidth('…', height) > width) return '';
+  return '${_fittingPrefix(text, width - _advance('…') * height, height).trimRight()}…';
 }
 
 /// Splits [text] into at most [maxLines] lines of [width] mm at [height] mm,
 /// breaking between words; the last line ends with "…" if text is left over.
 List<String> wrapText(String text, double width, double height, {int maxLines = 2}) {
-  final max = (width / (height * 0.55)).floor().clamp(1, 1000);
-  final words = text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+  if (maxLines < 1) return [];
+  var rest = text.trim().replaceAll(RegExp(r'\s+'), ' ');
   final lines = <String>[];
-  var current = '';
-  var i = 0;
-  while (i < words.length && lines.length < maxLines - 1) {
-    final word = words[i];
-    final next = current.isEmpty ? word : '$current $word';
-    if (next.length <= max) {
-      current = next;
-      i++;
-    } else if (current.isEmpty) {
-      // A single word longer than the line: break it.
-      lines.add(word.substring(0, max));
-      words[i] = word.substring(max);
-    } else {
-      lines.add(current);
-      current = '';
-    }
+  while (lines.length < maxLines - 1 && rest.isNotEmpty) {
+    final prefix = _fittingPrefix(rest, width, height);
+    if (prefix.isEmpty || prefix == rest) break;
+    final space = prefix.lastIndexOf(' ');
+    final cut = space > 0 && !rest.startsWith(' ', prefix.length) ? space : prefix.length;
+    lines.add(rest.substring(0, cut).trimRight());
+    rest = rest.substring(cut).trimLeft();
   }
-  final rest = [if (current.isNotEmpty) current, ...words.skip(i)].join(' ');
   if (rest.isNotEmpty) lines.add(fitText(rest, width, height));
   return lines;
 }
 
-/// Estimated printed width of [text] at [height] mm.
-double textWidth(String text, double height) => text.length * height * 0.55 + 0.4;
-
 /// Places every enabled line and the barcode on one label of [layout] for a
 /// printer of [dpi] dots per inch. Parts the owner moved keep their position.
-LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
+LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) =>
+    _planLabel(layout, data, dpi, wrapName: true);
+
+LabelPlan _planLabel(LabelLayout layout, LabelData data, int dpi, {required bool wrapName}) {
   final w = layout.widthMm, h = layout.heightMm;
   final inner = w - 2 * _margin;
   final out = <LabelElement>[];
@@ -346,7 +372,7 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
     final size = textHeight(layout, part);
     // A long part name continues on a second line instead of being cut short
     // (only in the automatic flow; a name the owner moved stays one line).
-    if (part == 'name' && !moved.containsKey(part) && textWidth(text.trim(), size) > inner) {
+    if (wrapName && part == 'name' && !moved.containsKey(part) && textWidth(text.trim(), size) > inner) {
       for (final piece in wrapText(text, inner, size)) {
         out.add(LabelElement.text(part, piece, _margin, top, inner, size, bold: bold, align: align));
         top += size + _rowGap;
@@ -411,6 +437,7 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
 
   // Middle: the barcode, as wide and tall as the remaining space allows.
   String? warning;
+  String? printProblem;
   if (data.code.isNotEmpty) {
     final format = barcodeFormat(data.code);
     final modules = barcodeModules(format, data.code);
@@ -430,12 +457,12 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
     final fixed = _barHeightMm[layout.barcodeHeight];
     var bars = fixed ?? bottom - top - 0.2 - digitsHeight;
     if (innerDots < modules) {
-      warning = 'This barcode is too long for a ${_mm(w)} mm label. Use a wider label or a shorter code.';
+      printProblem = 'This barcode is too long for a ${_mm(w)} mm label. Use a wider label or a shorter code.';
+    } else if (fixed == null && bars < 4) {
+      printProblem = 'Too much on this label: the barcode is only ${_mm(bars.clamp(0, 99))} mm tall and may not scan. '
+          'Turn off a line, use smaller text or a taller label.';
     } else if (narrowed) {
       warning = 'The barcode width was reduced so it fits on a ${_mm(w)} mm label.';
-    } else if (fixed == null && bars < 4) {
-      warning = 'Too much on this label: the barcode is only ${_mm(bars.clamp(0, 99))} mm tall and may not scan. '
-          'Turn off a line, use smaller text or a taller label.';
     }
     bars = bars.clamp(2.5, 200);
     // A barcode shorter than the free space sits in the middle of it.
@@ -458,10 +485,19 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
       else
         e,
   ];
-  if (warning == null && (moved.isNotEmpty || layout.barcodeHeight != 'auto') && _overlaps(placed)) {
-    warning = 'Some lines overlap on the label. Drag them apart or use smaller text.';
+  final bar = placed.where((e) => e.barcode).firstOrNull;
+  if (bar != null) {
+    if (bar.y + bar.height > h || placed.any((e) => !e.barcode && _intersects(bar, e))) {
+      printProblem ??= 'The barcode extends past the label or overlaps text. Move the fields or use a taller label.';
+    }
+    if (printProblem != null && wrapName && placed.where((e) => e.part == 'name').length > 1) {
+      return _planLabel(layout, data, dpi, wrapName: false);
+    }
   }
-  return LabelPlan(placed, warning: warning);
+  if (moved.isNotEmpty && _overlaps(placed)) {
+    warning ??= 'Some lines overlap on the label. Drag them apart or use smaller text.';
+  }
+  return LabelPlan(placed, warning: printProblem ?? warning, printProblem: printProblem);
 }
 
 /// The area a part actually covers, in mm (text is measured by its characters,
@@ -475,14 +511,17 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
 
 /// Whether any two parts cover the same area.
 bool _overlaps(List<LabelElement> elements) {
-  final boxes = elements.map(labelBox).toList();
-  for (var i = 0; i < boxes.length; i++) {
-    for (var j = i + 1; j < boxes.length; j++) {
-      final a = boxes[i], b = boxes[j];
-      if (a.l < b.r - 0.3 && b.l < a.r - 0.3 && a.t < b.b - 0.3 && b.t < a.b - 0.3) return true;
+  for (var i = 0; i < elements.length; i++) {
+    for (var j = i + 1; j < elements.length; j++) {
+      if (_intersects(elements[i], elements[j])) return true;
     }
   }
   return false;
+}
+
+bool _intersects(LabelElement first, LabelElement second) {
+  final a = labelBox(first), b = labelBox(second);
+  return a.l < b.r - 0.05 && b.l < a.r - 0.05 && a.t < b.b - 0.05 && b.t < a.b - 0.05;
 }
 
 String _mm(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);

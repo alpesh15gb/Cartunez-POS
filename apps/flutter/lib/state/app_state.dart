@@ -131,6 +131,7 @@ class AppState extends ChangeNotifier {
   Future<dynamic> mutate(String path, Json body, [String? message]) => syncState.mutate(path, body, message);
 
   Future<void> confirmPayment(String transactionId, Json references) => syncState.confirmPayment(transactionId, references);
+  Future<void> retryPendingPayment(Json item) => syncState.retryPendingPayment(item);
 
   Future<void> discardPending(String transactionId) => syncState.discardPending(transactionId);
 

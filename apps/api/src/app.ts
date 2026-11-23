@@ -102,7 +102,7 @@ export async function createApp(db: Database, options: { fetch?: typeof globalTh
     return {
       status: "ok",
       database: process.env.DATABASE_URL ? "postgresql" : "pglite-development",
-      version: "1.2.0",
+      version: "1.2.1",
     };
   });
   app.post(

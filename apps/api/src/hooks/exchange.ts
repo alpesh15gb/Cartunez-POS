@@ -88,6 +88,7 @@ registerSaleHook({
       applied: credit.exchangeApplied,
       refund: credit.refundTotal,
       refundType: credit.refundType,
+      refunds: credit.refunds,
     };
   },
   // Credit notes are immutable once written, so the link back is the shared

@@ -164,7 +164,8 @@ Future<void> returnInvoice(BuildContext context, Json invoice) async {
 
 Future<void> voidInvoice(BuildContext context, Json invoice) async {
   final app = context.appRead;
-  await showFormDialog<void>(
+  final transactionId = uuid();
+  final result = await showFormDialog<Json>(
     context,
     title: 'Void ${invoice['number']}',
     submit: 'Void invoice',
@@ -180,11 +181,15 @@ Future<void> voidInvoice(BuildContext context, Json invoice) async {
     onSubmit: (v) async {
       // "Same as paid" sends no refundType: the server pays each tender back by itself.
       final body = {...v}..removeWhere((k, value) => k == 'refundType' && value == _sameAsPaid);
-      final result = await app.mutate('/invoices/${invoice['id']}/void', body) as Map;
-      app.toast('Invoice voided. Refund ${app.money(result['totalRefund'] as num? ?? 0)} '
-          '${v['refundType'] == _sameAsPaid ? 'the way it was paid' : 'by ${v['refundType']}'}.');
+      return Map<String, dynamic>.from(await app.mutate('/invoices/${invoice['id']}/void', {...body, 'transactionId': transactionId}));
     },
   );
+  if (result != null && context.mounted) {
+    await showDialog<void>(context: context, builder: (dialog) => AlertDialog(
+      title: const Text('Invoice voided'), content: Text(refundInstructions(app, result, includeCore: true)),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Done'))],
+    ));
+  }
 }
 
 const _sameAsPaid = 'original';
@@ -198,15 +203,14 @@ Set<String> _paidBy(Json invoice) => {
 /// A sale on credit is refunded to the customer's account by default; otherwise the
 /// original tender (QA #3) — a split bill "the same way it was paid", like the server default.
 String _refundDefault(Json invoice) {
-  final tenders = (invoice['tenders'] as List? ?? []);
-  if (tenders.any((t) => t['type'] == 'Credit')) return 'Credit';
-  final paid = _paidBy(invoice);
-  if (paid.length > 1) return _sameAsPaid;
-  return paid.firstOrNull ?? 'Cash';
+  final types = {for (final t in invoice['tenders'] as List? ?? []) if ((t['amount'] ?? 0) > 0) t['type']};
+  if (types.isEmpty) return 'Cash';
+  if (types.length != 1 || !const ['Cash','Card','UPI','Credit'].contains(types.first)) return _sameAsPaid;
+  return types.first as String;
 }
 
 List<(String, String)> _refundOptions(AppState app, Json invoice) => [
-      if (_paidBy(invoice).length > 1) (_sameAsPaid, 'Same as paid (${_paidBy(invoice).join(' + ')})'),
+      if (_refundDefault(invoice) == _sameAsPaid) (_sameAsPaid, 'Same as paid'),
       for (final t in {...app.tenderTypes.where((t) => const ['Cash', 'Card', 'UPI'].contains(t)), ..._paidBy(invoice)})
         (t, t == 'Cash' ? 'Cash from the drawer' : _paidBy(invoice).contains(t) ? '$t (as paid)' : t),
       if (invoice['customerId'] != null) ('Credit', "Customer's account (reduce udhaar)"),

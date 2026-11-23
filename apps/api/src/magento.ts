@@ -4,7 +4,7 @@
 import type { FastifyInstance } from "fastify";
 import type { Database } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
-import { allow, fail, integer, reservingHolds, text, type Actor } from "./domain.js";
+import { allow, fail, integer, multiline, reservingHolds, text, type Actor } from "./domain.js";
 import { magentoConfig, queueAllListings, queueMagentoSync } from "./online-queue.js";
 import { productImageData, productImages } from "./product-images.js";
 import type { Post } from "./routes/types.js";
@@ -175,8 +175,7 @@ export function magentoProduct(
     { attribute_code: "cz_fitment", value: fitmentText(product) },
   ];
   // Website text: the listing's own description, else the part's description (e.g. from the catalog import).
-  const description = listing.description || product.description;
-  if (description) custom.push({ attribute_code: "description", value: description });
+  custom.push({ attribute_code: "description", value: listing.description || product.description || "" });
   // Clear the old "Available on order. Ships in N days." notice.
   if (listing.availability === "order") custom.push({ attribute_code: "short_description", value: "" });
   // Online only: the shop orders it from the supplier when a customer buys it, so
@@ -573,7 +572,7 @@ function listingChanges(body: any) {
   }
   if (body.leadDays !== undefined) c.leadDays = integer(body.leadDays, "Lead time (days)", 0, 365);
   if (body.buffer !== undefined) c.buffer = body.buffer === null ? null : integer(body.buffer, "Safety buffer", 0, 9999);
-  if (body.description !== undefined) c.description = text(body.description, "Website description", false, 5000);
+  if (body.description !== undefined) c.description = multiline(body.description, "Website description", false, 5000);
   if (body.onSale !== undefined) {
     if (typeof body.onSale !== "boolean") fail("On sale must be on or off.");
     c.onSale = body.onSale;

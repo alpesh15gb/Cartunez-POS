@@ -92,6 +92,7 @@ const kits: SaleHook = {
     for (const component of kit!.components) {
       const part = await productFor(ctx, component.productId);
       if (!part) fail(`Kit ${kit!.sku} lists an item that is no longer in the catalog. Edit the kit.`, 409);
+      if (part.onlineOnly) fail("Website-only item " + part.sku + " cannot be used in a counter kit.", 409);
       if (isKit(part)) fail(`Kit ${kit!.sku} contains another kit. Edit the kit to list its parts directly.`, 409);
       if (part.serialTracked)
         fail(`Kit ${kit!.sku} contains serial-tracked ${part.sku}. Sell that part as its own line.`, 409);

@@ -64,6 +64,10 @@ export function refundParts(ret: RecordData): RefundPart[] {
 export const refundBy = (ret: RecordData, type: string) =>
   refundParts(ret).filter((part) => part.type === type).reduce((sum, part) => sum + part.amount, 0);
 
+function lineCredit(refundable: number, qty: number, returned: number, prior: number, quantity: number) {
+  return Math.max(0, roundRatio(refundable, returned + quantity, qty) - prior);
+}
+
 /** What each tender of a bill actually brought in (cash net of change). */
 function tenderWeights(invoice: RecordData): RefundPart[] {
   const map = new Map<string, number>();
@@ -156,8 +160,14 @@ export async function returnableLines(db: Database, actor: Actor, invoice: Recor
     (item) => item.invoiceId === invoice.id,
   );
   const voided = previous.some((item) => item.voided);
+  const websiteParts = await db.query(
+    "SELECT id FROM records WHERE organization_id=$1 AND kind='product' AND id=ANY($2::text[]) AND data->>'onlineOnly'='true'",
+    [actor.organizationId, (invoice.lines || []).map((l: any) => l.productId)],
+  );
+  const currentOnlineOnly = new Set(websiteParts.rows.map((r) => r.id));
   return {
     voided,
+    priorCredit: previous.reduce((sum, note) => sum + Number(note.total || 0), 0),
     lines: (invoice.lines || []).map((line: any) => {
       const earlier = previous.flatMap((item) => item.lines).filter((item: any) => item.lineId === line.id);
       const returnedQty = earlier.reduce((sum: number, item: any) => sum + item.quantity, 0);
@@ -168,6 +178,7 @@ export async function returnableLines(db: Database, actor: Actor, invoice: Recor
         sku: line.sku,
         name: line.name,
         type: line.type,
+        onlineOnly: !!line.onlineOnly || currentOnlineOnly.has(line.productId),
         qty: line.qty,
         binId: line.binId,
         supplierId: line.supplierId || "",
@@ -229,8 +240,11 @@ export async function returnInvoice(
     const quantity = integer(input.quantity ?? input.qty, `Return quantity for ${original.name}`, 1, original.qty - returned);
     const kind = binKind[disposition];
     let bin: RecordData | null = null;
-    // Online-only lines never held shop stock, so they go back to no bin.
-    if (original.type !== "service" && !original.onlineOnly) {
+    const product = await scoped(db, actor, "product", original.productId);
+    // An installation may already have converted an item after its last stock
+    // sale. Its original invoice is still refundable through the non-stock route.
+    const nonStockReturn = !!(original.onlineOnly || product.onlineOnly);
+    if (original.type !== "service" && !nonStockReturn) {
       if (input.binId) {
         bin = await scoped(db, actor, "location", input.binId);
         if (bin.kind !== kind) fail("Return destination must match the condition.");
@@ -259,7 +273,6 @@ export async function returnInvoice(
           .filter((entry) => entry.qty > 0);
       }
     }
-    const product = await scoped(db, actor, "product", original.productId);
     const serials = input.serials || [];
     if (original.serials?.length) {
       if (!Array.isArray(serials) || serials.length !== quantity || new Set(serials).size !== quantity)
@@ -268,8 +281,8 @@ export async function returnInvoice(
         const item = await scoped(db, actor, "serial", product.id + ":" + serial);
         if (!original.serials.includes(serial) || item.status !== "sold" || item.invoiceId !== invoiceId)
           fail("Serial was not sold on this invoice or has already been returned.");
-        const updated: RecordData = { ...item, status: kind === "sellable" ? "available" : kind, binId: bin!.id, invoiceId: null };
-        if (kind === "sellable") {
+        const updated: RecordData = { ...item, status: nonStockReturn ? "returned" : kind === "sellable" ? "available" : kind, binId: bin?.id || null, invoiceId: null };
+        if (nonStockReturn || kind === "sellable") {
           // Back in stock: the sale facts move to the serial's history so the
           // warranty lookup shows it as unsold until it is sold again.
           updated.history = [
@@ -318,7 +331,7 @@ export async function returnInvoice(
       .filter((line) => line.lineId === original.id)
       .reduce((sum, line) => sum + line.total, 0);
     const refundable = original.total - (original.coreCharge || 0) * original.qty;
-    const total = Math.max(0, roundRatio(refundable, returned + quantity, original.qty) - priorRefund);
+    const total = lineCredit(refundable, original.qty, returned, priorRefund, quantity);
     const rounding = total - (subtotal - discount + (invoice.taxMode === "inclusive" ? 0 : tax));
     const line = {
       lineId: original.id,
@@ -331,9 +344,9 @@ export async function returnInvoice(
       quantity,
       binId: bin?.id || null,
       type: original.type,
-      ...(original.onlineOnly ? { onlineOnly: true } : {}),
+      ...(nonStockReturn ? { onlineOnly: true, stockDisposition: "outside-shop-stock" } : {}),
       disposition,
-      condition: kind,
+      condition: nonStockReturn && disposition !== "rma" ? "non-stock" : kind,
       serials,
       subtotal,
       discount,
@@ -407,8 +420,14 @@ export async function returnInvoice(
   for (const line of lines) {
     if (line.type !== "service" && !(line as any).onlineOnly)
       await adjust(db, actor, line.productId, line.binId, line.quantity, voided ? "Invoice void" : "Sales return", receipt.id);
-    for (const component of (line as any).components || [])
-      await adjust(db, actor, component.productId, component.binId, component.qty, voided ? "Invoice void" : "Sales return", receipt.id);
+    for (const component of (line as any).components || []) {
+      if ((await scoped(db, actor, "product", component.productId)).onlineOnly) {
+        component.stockDisposition = "outside-shop-stock";
+        component.binId = null;
+      } else {
+        await adjust(db, actor, component.productId, component.binId, component.qty, voided ? "Invoice void" : "Sales return", receipt.id);
+      }
+    }
   }
   const claimIds: string[] = [];
   for (const { line, supplierId } of claims) {
@@ -471,6 +490,8 @@ export async function findInvoicesForReturn(db: Database, actor: Actor, query: s
       customerId: invoice.customerId || null,
       customer: invoice.customer ? { id: invoice.customer.id, name: invoice.customer.name, phone: invoice.customer.phone } : null,
       total: invoice.total,
+      change: invoice.change || 0,
+      currency: invoice.currency,
       tenders: invoice.tenders,
       voided,
       lines,
@@ -480,6 +501,31 @@ export async function findInvoicesForReturn(db: Database, actor: Actor, query: s
 }
 
 export function returnRoutes(app: FastifyInstance, db: Database) {
+  app.post("/api/v1/returns/preview", async (request: any) => db.readSnapshot(async tx => {
+    const actor: Actor = request.actor;
+    allow(actor, ["owner", "manager", "cashier"]);
+    const body = request.body ?? {};
+    const invoice = await scoped(tx, actor, "invoice", text(body.invoiceId, "invoice ID"));
+    if (body.number !== invoice.number || (actor.role === "cashier" && Date.parse(invoice.createdAt) < Date.now() - 180 * 86400000))
+      fail("Look up the invoice again.", 404);
+    const method = body.refundType || "";
+    if (method && !REFUND_TYPES.includes(method)) fail("Choose a supported refund method.");
+    const { voided, priorCredit, lines } = await returnableLines(tx, actor, invoice);
+    if (voided) fail("This invoice was already voided.", 409);
+    if (!Array.isArray(body.lines) || !body.lines.length || body.lines.length > lines.length) fail("Select return lines.");
+    const byId = new Map<string, any>(lines.map((l: any) => [l.lineId, l]));
+    let total = 0;
+    for (const input of body.lines) {
+      const line = byId.get(input?.lineId);
+      if (!line) fail("Choose each original invoice line once.");
+      byId.delete(line.lineId);
+      const quantity = integer(input.quantity, "Return quantity", 1, line.returnableQty);
+      total += lineCredit(line.refundable, line.qty, line.returnedQty, line.refundedSoFar, quantity);
+    }
+    const refunds = refundBreakdown(invoice, priorCredit, total, method);
+    checkAccountRefund(invoice, refunds);
+    return { currency: invoice.currency, total, refunds };
+  }));
   app.get("/api/v1/returns/lookup", async (request: any) => {
     const actor: Actor = request.actor;
     allow(actor, ["owner", "manager", "cashier"]);

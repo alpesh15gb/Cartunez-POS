@@ -77,7 +77,7 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
     final labels = <({LabelItem item, int quantity})>[];
     for (final l in widget.lines) {
       final part = app.productById('${l['productId']}');
-      if (part == null) continue;
+      if (part == null || l['onlineOnly'] == true || isOnlineOnly(part)) continue;
       labels.add((item: productLabel(app, part, binId: l['binId'] as String?), quantity: (l['quantity'] as num).toInt()));
     }
     try {
@@ -106,7 +106,7 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
   Widget build(BuildContext context) {
     final app = context.app;
     final hikes = widget.lines.where((l) => l['costHike'] != null).length;
-    final units = widget.lines.fold<int>(0, (n, l) => n + (l['quantity'] as num).toInt());
+    final units = widget.lines.where((l) => l['onlineOnly'] != true && !isOnlineOnly(app.productById(l['productId']))).fold<int>(0, (n, l) => n + (l['quantity'] as num).toInt());
     final online = sync.values.any((p) => !{'not-online', 'not-connected'}.contains(p['state']));
     return AlertDialog(
       insetPadding: MediaQuery.sizeOf(context).width < 600 ? const EdgeInsets.all(12) : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
@@ -162,7 +162,7 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
         ]),
       ),
       actions: [
-        OutlinedButton.icon(onPressed: _labels, icon: const Icon(Icons.print_outlined), label: Text('Print $units label(s)')),
+        if (units > 0) OutlinedButton.icon(onPressed: _labels, icon: const Icon(Icons.print_outlined), label: Text('Print $units label(s)')),
         if (online)
           OutlinedButton.icon(onPressed: busy ? null : _syncNow, icon: const Icon(Icons.cloud_upload_outlined), label: const Text('Update website now')),
         if (online) IconButton(tooltip: 'Refresh website status', onPressed: _status, icon: const Icon(Icons.refresh)),

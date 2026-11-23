@@ -214,7 +214,21 @@ Future<void> _print(AppState app, List<LabelItem> items, List<int> counts, Label
   final printer = app.labelPrinter;
   final mode = _mode(printer);
   final zebra = !const {_modeDialog, _modeSheet}.contains(mode);
-  final data = [for (final i in items) _data(app, i, zebra: zebra)];
+  final dpi = _dpi(app);
+  final plans = <LabelPlan>[];
+  final quantities = <int>[];
+  for (final (index, item) in items.indexed) {
+    if (counts[index] == 0) continue;
+    final plan = planLabel(layout, _data(app, item, zebra: zebra), dpi: dpi);
+    if (plan.printProblem != null) {
+      app.toast('Cannot print ${item.name}. ${plan.printProblem}');
+      return;
+    }
+    plans.add(plan);
+    quantities.add(counts[index]);
+  }
+  if (plans.isEmpty) return;
+  List<LabelPlan> pdfCopies() => [for (final (i, plan) in plans.indexed) ...List.filled(quantities[i], plan)];
   if (mode == _modeSheet) {
     final grid = SheetGrid.fromJson(printer['sheet'] as Map?);
     final problem = grid.problem(layout);
@@ -222,22 +236,15 @@ Future<void> _print(AppState app, List<LabelItem> items, List<int> counts, Label
       app.toast('Labels not printed: $problem');
       return;
     }
-    final plans = [
-      for (final (i, label) in data.indexed)
-        if (counts[i] > 0) ...List.filled(counts[i], planLabel(layout, label, dpi: _dpi(app))),
-    ];
+    final copies = pdfCopies();
     final theme = await pdfTheme();
     await Printing.layoutPdf(name: 'labels', format: sheetFormat(grid), dynamicLayout: false,
-        onLayout: (_) => labelPdf(layout, plans, sheet: grid, theme: theme));
+        onLayout: (_) => labelPdf(layout, copies, sheet: grid, theme: theme));
     return;
   }
   if (!zebra) {
     final doc = pw.Document(theme: await pdfTheme());
-    final plans = [
-      for (final (i, label) in data.indexed)
-        if (counts[i] > 0) ...List.filled(counts[i], planLabel(layout, label, dpi: _dpi(app))),
-    ];
-    final pages = pdfLabelPages(layout, plans);
+    final pages = pdfLabelPages(layout, pdfCopies());
     for (final page in pages) {
       doc.addPage(page);
     }
@@ -245,7 +252,7 @@ Future<void> _print(AppState app, List<LabelItem> items, List<int> counts, Label
         forceCustomPrintPaper: true, onLayout: (_) => doc.save());
     return;
   }
-  final zpl = zplJob(data, layout, dpi: _dpi(app), darkness: int.tryParse('${printer['darkness'] ?? ''}'), quantities: counts);
+  final zpl = zplFromPlans(plans, layout, dpi: dpi, darkness: int.tryParse('${printer['darkness'] ?? ''}'), quantities: quantities);
   try {
     if (mode == _modeBridge) {
       await sendZplToBridge('${printer['bridgeUrl'] ?? defaultBridgeUrl}', zpl);
@@ -757,6 +764,7 @@ class _PrintHeader extends StatelessWidget {
           decoration: BoxDecoration(color: const Color(0xFFEFF3F0), borderRadius: BorderRadius.circular(10)),
           child: Center(child: LabelPreview(layout: layout, plans: [plan], maxWidth: 300)),
         ),
+        if (plan.warning != null) Text(plan.warning!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         const SizedBox(height: 8),
         Row(children: [
           const Icon(Icons.print_outlined, size: 18),

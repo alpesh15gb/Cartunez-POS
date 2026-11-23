@@ -68,7 +68,10 @@ test("drawer cash follows the shift, preserves the journal and reconciles separa
     assert.ok(!inventoryHome.audit.some((entry: any) => entry.subject === posted.id));
     await call("reports/cash-movements", inventory, undefined, 403);
 
-    const closed = await call("shifts/" + shift.id + "/close", owner, { countedCash: 21600 });
+    await call("shifts/" + shift.id + "/close", owner, { countedCash: 21600, reviewedExpectedCash: 10000 }, 409);
+    const reviewed = await call("shifts/" + shift.id + "/summary", owner);
+    assert.equal(reviewed.closedAt, null);
+    const closed = await call("shifts/" + shift.id + "/close", owner, { countedCash: 21600, reviewedExpectedCash: reviewed.expectedCash });
     assert.equal(closed.expectedCash, 21500);
     assert.equal(closed.variance, 100);
     assert.equal((await call(path, owner, float)).id, posted.id);

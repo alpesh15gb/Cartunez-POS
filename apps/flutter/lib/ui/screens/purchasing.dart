@@ -24,7 +24,7 @@ class OrdersScreen extends StatelessWidget {
         FilledButton.icon(onPressed: hasSuppliers && hasParts ? () => newOrder(context) : null, icon: const Icon(Icons.add), label: const Text('New purchase order')),
         if (!hasSuppliers) TextButton(onPressed: () => shell.open('suppliers'), child: const Text('Add a supplier')),
         if (!hasParts) TextButton(onPressed: () => shell.open('parts'), child: const Text('Add a part')),
-        if (app.sellableBins.isEmpty && app.list('purchaseOrders').isNotEmpty)
+        if (app.sellableBins.isEmpty && app.stockParts.isNotEmpty && app.list('purchaseOrders').isNotEmpty)
           TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a sellable bin to receive stock')),
         // WS-E: reorder alerts (badge) and supplier cost rises.
         const ReorderAlertsButton(),
@@ -47,10 +47,10 @@ class OrdersScreen extends StatelessWidget {
           if (o['status'] == 'draft')
             FilledButton.tonal(onPressed: () => _place(context, o), child: const Text('Place order')),
           if (o['status'] != 'received' && o['status'] != 'cancelled' && o['status'] != 'draft')
-            FilledButton.tonal(onPressed: app.sellableBins.isEmpty ? null : () => enterBill(context, order: o), child: const Text('Enter bill')),
+            FilledButton.tonal(onPressed: () => enterBill(context, order: o), child: const Text('Enter bill')),
           if (o['status'] == 'open' || o['status'] == 'partial')
             IconButton(tooltip: 'Receive goods without a bill', icon: const Icon(Icons.move_to_inbox_outlined),
-                onPressed: app.sellableBins.isEmpty ? null : () => receiveOrder(context, o)),
+                onPressed: () => receiveOrder(context, o)),
           if ((o['status'] == 'draft' || o['status'] == 'open') && (o['lines'] as List).every((l) => (l['received'] ?? 0) == 0))
             IconButton(tooltip: 'Cancel order', icon: const Icon(Icons.close), onPressed: () => _cancel(context, o)),
           if ((o['lines'] as List).any((line) => (line['received'] ?? 0) > 0))
@@ -114,6 +114,7 @@ Future<void> _receiptLabels(BuildContext context, Json order) async {
   final labels = <({LabelItem item, int quantity})>[];
   for (final line in receipt['lines'] as List) {
     final part = app.productById(line['productId']);
+    if (line['onlineOnly'] == true || isOnlineOnly(part)) continue;
     final item = part == null
         ? LabelItem(app.productName(line['productId']), '', sku: 'Unavailable', bin: app.locationName(line['binId']))
         : productLabel(app, part, binId: line['binId']);
@@ -143,7 +144,7 @@ Future<void> _purchaseDialog(BuildContext context, AppState app, {Json? order}) 
   await showFormDialog<void>(
     context,
     title: receiving ? 'Receive goods' : 'New purchase order',
-    submit: receiving ? 'Receive into stock' : 'Create order',
+    submit: !receiving ? 'Create order' : (order['lines'] as List).every((l) => isOnlineOnly(app.productById(l['productId']))) ? 'Record delivery' : 'Receive into stock',
     fields: [
       if (!receiving)
         FieldSpec('supplierId', 'Supplier', kind: FieldKind.select, required: true, options: optionsOf(app.list('suppliers'))),
@@ -214,7 +215,7 @@ class _PurchaseLinesState extends State<_PurchaseLines> {
             value: original == null ? '' : (original['cost'] / 100).toStringAsFixed(2), help: 'Blank uses the current catalog cost.'),
         if (receiving) ...[
           // Online-only parts go straight to the website customer, so they need no bin.
-          FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: !parts.any(isOnlineOnly),
+          if (parts.any((p) => !isOnlineOnly(p))) FieldSpec('binId', 'Put away into', kind: FieldKind.select, required: !parts.any(isOnlineOnly),
             value: original?['binId'] ?? app.sellableBins.firstOrNull?['id'],
             help: parts.any(isOnlineOnly) ? 'Not used for online-only parts: they go straight to the customer.' : null,
             barcodeChoice: app.binIdForCode, options: optionsOf(app.sellableBins, app.binName)),

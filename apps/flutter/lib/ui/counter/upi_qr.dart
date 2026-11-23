@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/receipt_print.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
-import '../widgets.dart';
 
 // WS-A: full-screen static UPI QR (upi://pay?pa=<shop UPI ID>&am=<amount>).
 // No gateway: the cashier checks the customer's phone / the shop's UPI app and
@@ -14,6 +13,10 @@ import '../widgets.dart';
 /// Result of the QR screen: the reference to record, or null when cancelled.
 Future<String?> showUpiQr(BuildContext context, {required int amount, String note = ''}) {
   final app = context.appRead;
+  if (app.settings['currency'] != 'INR' || amount <= 0) {
+    app.toast('UPI QR requires a positive INR amount.');
+    return Future.value(null);
+  }
   return Navigator.of(context, rootNavigator: true).push<String>(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (_) => AppScope(state: app, child: UpiQrScreen(amount: amount, note: note)),
@@ -50,7 +53,9 @@ class _UpiQrScreenState extends State<UpiQrScreen> {
             padding: const EdgeInsets.all(20),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 460),
-              child: vpa.isEmpty ? _noVpa(context, app) : _qr(context, app, vpa, payee),
+              child: app.settings['currency'] != 'INR'
+                  ? const Text('UPI QR requires an INR bill.')
+                  : vpa.isEmpty ? _noVpa(context, app) : _qr(context, app, vpa, payee),
             ),
           ),
         ),
@@ -121,14 +126,15 @@ class _UpiQrScreenState extends State<UpiQrScreen> {
 
   Widget _referenceField() => TextField(
         controller: reference,
-        decoration: const InputDecoration(labelText: 'UPI reference / UTR (optional)'),
+        decoration: const InputDecoration(labelText: 'UPI reference / UTR'),
         onSubmitted: (_) => _confirm(context),
       );
 
   void _confirm(BuildContext context) {
     final app = context.appRead;
     final typed = reference.text.trim();
-    Navigator.pop(context, typed.isNotEmpty ? typed : 'UPI QR · confirmed by ${app.userName(app.session?.userId)} · ${formatDate(DateTime.now().toIso8601String())}');
+    if (typed.isEmpty) { app.toast('Enter the reference from the received UPI payment.'); return; }
+    Navigator.pop(context, typed);
   }
 }
 

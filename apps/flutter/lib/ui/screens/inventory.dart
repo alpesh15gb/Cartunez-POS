@@ -115,7 +115,7 @@ class _PartsScreenState extends State<PartsScreen> {
               actions: app.canStock
                   ? (p) => [
                         // 36px buttons keep the row near 50px high.
-                        SizedBox(height: 36, width: 40, child: IconButton(tooltip: 'Print label', padding: EdgeInsets.zero,
+                        if (!isOnlineOnly(p)) SizedBox(height: 36, width: 40, child: IconButton(tooltip: 'Print label', padding: EdgeInsets.zero,
                             onPressed: () => printLabels(context, [productLabel(context.appRead, p)]), icon: const Icon(Icons.qr_code_2))),
                         SizedBox(height: 36, width: 40, child: _PartMenu(part: p)),
                       ]
@@ -181,7 +181,7 @@ class _PartMenu extends StatelessWidget {
       itemBuilder: (_) => [
         const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit part'), contentPadding: EdgeInsets.zero)),
         const PopupMenuItem(value: 'photos', child: ListTile(leading: Icon(Icons.photo_library_outlined), title: Text('Photos'), contentPadding: EdgeInsets.zero)),
-        const PopupMenuItem(value: 'label', child: ListTile(leading: Icon(Icons.qr_code_2), title: Text('Print label'), contentPadding: EdgeInsets.zero)),
+        if (!isOnlineOnly(part)) const PopupMenuItem(value: 'label', child: ListTile(leading: Icon(Icons.qr_code_2), title: Text('Print label'), contentPadding: EdgeInsets.zero)),
         if (app.isManager) ...[
           const PopupMenuDivider(),
           const PopupMenuItem(value: 'remove', child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Remove part'), contentPadding: EdgeInsets.zero)),
@@ -301,7 +301,7 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
           value: '${(product['barcodes'] as List? ?? []).isEmpty}',
           options: const [('true', 'Create an in-store barcode'), ('false', 'None (labels print the SKU)')],
           advanced: true),
-      FieldSpec('description', 'Description', value: product['description'], advanced: true),
+      FieldSpec('description', 'Description', kind: FieldKind.multiline, value: product['description'], advanced: true),
       FieldSpec('unit', 'Unit', value: product['unit'] ?? 'Each', advanced: true),
       FieldSpec('supplierId', 'Usual supplier', kind: FieldKind.select, value: product['supplierId'], options: optionsOf(app.list('suppliers')), advanced: true),
       FieldSpec('oemReferences', 'OEM references', value: joined('oemReferences'), advanced: true, help: 'Separate with commas.'),

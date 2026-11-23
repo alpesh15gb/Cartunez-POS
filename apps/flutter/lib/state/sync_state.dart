@@ -220,8 +220,9 @@ class SyncState extends ChangeNotifier {
           continue;
         }
         try {
-          await request(s.api, s.token, '/invoices', body: item['transaction']);
+          final invoice = await request(s.api, s.token, '/invoices', body: item['transaction']);
           if (!identical(session, s)) return;
+          item['postedInvoice'] = invoice;
           pending.remove(item);
         } on ApiError catch (error) {
           if (!error.rejected) rethrow;
@@ -275,17 +276,34 @@ class SyncState extends ChangeNotifier {
 
   // ---------- offline queue ----------
   Future<void> confirmPayment(String transactionId, Json references) async {
-    for (final item in pending) {
-      if (item['transaction']['transactionId'] != transactionId) continue;
-      item['status'] = 'pending';
-      item['transaction']['tenders'] = [
-        for (final t in item['transaction']['tenders'] as List)
-          if (t['type'] != 'Cash' && t['confirmed'] != true)
-            {...Map<String, dynamic>.from(t as Map), 'confirmed': true, 'reference': references[t['type']]}
-          else Map<String, dynamic>.from(t as Map),
-      ];
+    final item = pending.where((e) => e['transaction']['transactionId'] == transactionId).firstOrNull;
+    if (item == null || item['status'] != 'awaiting-payment') throw BillingError('Reopen Sync & audit to check this sale.');
+    final tenders = item['transaction']['tenders'] as List;
+    final confirmed = [
+      for (final t in tenders)
+        if (t['type'] != 'Cash' && t['confirmed'] != true)
+          {...Map<String, dynamic>.from(t as Map), 'confirmed': true, 'reference': references[t['type']]}
+        else Map<String, dynamic>.from(t as Map),
+    ];
+    if (confirmed.any((t) => ['UPI', 'Card'].contains(t['type']) && '${t['reference'] ?? ''}'.trim().isEmpty)) {
+      throw BillingError('Enter a provider reference for every card and UPI payment.');
     }
-    await _saveWorkspace();
+    item['transaction']['tenders'] = confirmed;
+    item['status'] = 'pending';
+    try {
+      await _saveWorkspace();
+    } catch (_) {
+      item['transaction']['tenders'] = tenders;
+      item['status'] = 'awaiting-payment';
+      rethrow;
+    }
+    await _app.sync(afterMutation: true);
+  }
+
+  Future<void> retryPendingPayment(Json item) async {
+    if (!pending.contains(item) || item['error'] == null || item['status'] == 'awaiting-payment') return;
+    final priorError = item.remove('error');
+    try { await _saveWorkspace(); } catch (_) { item['error'] = priorError; rethrow; }
     await _app.sync(afterMutation: true);
   }
 

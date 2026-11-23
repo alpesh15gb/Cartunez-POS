@@ -65,7 +65,23 @@ export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
           409,
         );
     }
-    // Online only: the part must hold no shop stock (online-only parts carry none).
+    for (const component of product.components) {
+      const part = products.find((p) => p.id === component.productId);
+      if (!part || part.onlineOnly) fail("Choose an existing shop part or labour for every kit component.", 409);
+    }
+    // Stock mode is part of the provenance of invoices, purchases and reservations.
+    if (existing && Boolean(product.onlineOnly) !== Boolean(existing.onlineOnly)) {
+      const used = await tx.query(
+        `SELECT 1 WHERE EXISTS (SELECT 1 FROM stock_ledger WHERE organization_id=$1 AND product_id=$2)
+           OR EXISTS (SELECT 1 FROM records WHERE organization_id=$1
+             AND kind IN ('invoice','purchaseBill','purchaseOrder','onlineOrder','hold','job','estimate','stockCount','transfer','product')
+             AND NOT (kind='product' AND id=$2)
+             AND jsonb_path_exists(data, 'strict $.** ? (@ == $ref)', jsonb_build_object('ref', $2::text)))`,
+        [actor.organizationId, product.id],
+      );
+      if (used.rows.length) fail("This item is linked to a shop document, kit or stock movement. Create a separate SKU for the other sales channel.", 409);
+    }
+    // Imported stock may predate its movement ledger.
     if (existing && product.onlineOnly && !existing.onlineOnly) {
       const stocked = await tx.query(
         "SELECT 1 FROM stock WHERE organization_id=$1 AND product_id=$2 AND quantity<>0 LIMIT 1",

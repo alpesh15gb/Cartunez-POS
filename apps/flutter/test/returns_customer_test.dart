@@ -68,6 +68,37 @@ Future<void> _openReturn(WidgetTester tester, AppState app) async {
 }
 
 void main() {
+  test('exchange receipt separates the credit, the amount applied and each actual payout', () {
+    final app = _app('manager');
+    final note = {'invoiceId': 'i', 'total': 10000, 'exchangeApplied': 8000, 'refundTotal': 2000,
+      'refunds': [{'type': 'UPI', 'amount': 1200}, {'type': 'Credit', 'amount': 800}]};
+    final text = receiptSummary(app, note);
+    expect(text, contains('Credit note total: ${app.money(10000)}'));
+    expect(text, contains('Set against new bill: ${app.money(8000)}'));
+    expect(text, contains('Amount refunded: ${app.money(2000)}'));
+    expect(refundInstructions(app, note), contains('Send ${app.money(1200)} by UPI.'));
+    expect(refundInstructions(app, note), contains('${app.money(800)} credited to the customer account.'));
+    app.dispose();
+  });
+
+  testWidgets('mixed account and UPI shows the server payout preview before recording the return', (tester) async {
+    final app = _app('owner')..reply = {'currency': 'INR', 'refunds': [{'type': 'Credit', 'amount': 7000}, {'type': 'UPI', 'amount': 4800}]};
+    final bill = {..._invoice, 'tenders': [{'type': 'Advance', 'amount': 21000}, {'type': 'UPI', 'amount': 14400}]};
+    tester.view.physicalSize = const Size(924, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (context) =>
+      Scaffold(body: TextButton(onPressed: () => startReturn(context, bill), child: const Text('Open')))))));
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    expect(app.path, '/returns/preview');
+    expect(find.text('Customer account · ${app.money(7000)}'), findsOneWidget);
+    expect(find.text('UPI · ${app.money(4800)}'), findsOneWidget);
+    expect(find.textContaining('Send ${app.money(11800)}'), findsNothing);
+    app.dispose();
+  });
   test('credit for a partial return follows the server rule; receipt code is the invoice number', () {
     final line = Map<String, dynamic>.from((_invoice['lines'] as List).first as Map);
     expect(creditFor(line, 1), 11800);

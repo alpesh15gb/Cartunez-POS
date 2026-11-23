@@ -88,6 +88,8 @@ test("Money and stock: refunds per tender, exchange till, Tally, kit reservation
     const exchangeCredit = (await records(db, "demo", "return", "pune")).find((r) => r.id === swapped.exchange.returnId)!;
     assert.equal(exchangeCredit.shiftId, till.id, "cash back lands on the sale's till");
     assert.deepEqual(exchangeCredit.refunds, [{ type: "Cash", amount: brakePrice - wiperPrice }]);
+    assert.deepEqual(swapped.exchange.refunds, exchangeCredit.refunds);
+    assert.equal(swapped.exchange.credit - swapped.exchange.applied, swapped.exchange.refund);
     assert.equal(await drawer(till), tillBefore - (brakePrice - wiperPrice));
 
     // The manager opens a till for the refunds below.
@@ -117,6 +119,11 @@ test("Money and stock: refunds per tender, exchange till, Tally, kit reservation
     // ---------- Mixed cash + credit bill ----------
     const half = Math.floor(brakePrice / 2);
     const mixed = await sell(brake, [{ type: "Cash", amount: half, confirmed: true }, { type: "Credit", amount: brakePrice - half }], { customerId: "customer-1" });
+    const selected = { invoiceId: mixed.id, number: mixed.number, lines: [{ lineId: mixed.lines[0].id, quantity: 1 }] };
+    const preview = await call("returns/preview", selected, cashier);
+    assert.deepEqual(preview.refunds, [{ type: "Cash", amount: half }, { type: "Credit", amount: brakePrice - half }]);
+    await call("returns/preview", { ...selected, number: "wrong" }, cashier, 404);
+    await call("returns/preview", { ...selected, lines: [{ lineId: mixed.lines[0].id, quantity: 2 }] }, cashier, 400);
     ownBefore = await drawer(own);
     const mixedBack = await call(`invoices/${mixed.id}/returns`, {
       transactionId: randomUUID(), reason: "Wrong part", refundType: "Cash",
@@ -124,6 +131,7 @@ test("Money and stock: refunds per tender, exchange till, Tally, kit reservation
     }, manager);
     assert.deepEqual(mixedBack.refunds, [{ type: "Cash", amount: half }, { type: "Credit", amount: brakePrice - half }]);
     assert.equal(mixedBack.refundType, "Mixed");
+    assert.deepEqual(mixedBack.refunds, preview.refunds);
     assert.equal(mixedBack.refundTotal, brakePrice);
     assert.equal(await drawer(own), ownBefore - half);
     assert.equal(await balance(), start);
@@ -196,7 +204,8 @@ test("Money and stock: refunds per tender, exchange till, Tally, kit reservation
     assert.equal((await stockOf("brake")).available, brakeFree - 1, "reservation used by the bill");
 
     // ---------- Voiding a job's invoice returns the job to "ready" ----------
-    await call(`invoices/${billed.id}/void`, { transactionId: randomUUID(), reason: "Billed wrong customer" }, manager);
+    const voided = await call(`invoices/${billed.id}/void`, { transactionId: randomUUID(), reason: "Billed wrong customer" }, manager);
+    assert.deepEqual(voided.totalRefunds, [{ type: "Cash", amount: voided.totalRefund }]);
     let reopened = (await get("bootstrap", manager)).jobs.find((j: any) => j.id === job.id);
     assert.equal(reopened.status, "ready");
     assert.equal(reopened.invoiceId, null);

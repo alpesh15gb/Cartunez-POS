@@ -59,6 +59,7 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
     );
     await onlineInvoiceVoided(tx, actor, invoice); // WS-E: an online order goes back to "To pick" (fulfilment.ts)
     let coreRefundTotal = 0;
+    const payout = new Map<string, number>(credit.refunds.map((part: { type: string; amount: number }) => [part.type, part.amount]));
     let credited = credit.total;
     for (const line of invoice.lines.filter(
       (line: any) => line.coreCharge > 0,
@@ -79,6 +80,7 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
       };
       (core as any).refundType = refundTypeOf(core.refunds, body.refundType || "Cash");
       credited += core.total;
+      for (const part of core.refunds) payout.set(part.type, (payout.get(part.type) || 0) + part.amount);
       await putRecord(
         tx,
         actor.organizationId,
@@ -97,6 +99,7 @@ export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
     return {
       ...credit,
       coreRefundTotal,
+      totalRefunds: [...payout].map(([type, amount]) => ({ type, amount })),
       totalRefund: credit.total + coreRefundTotal,
     };
   });

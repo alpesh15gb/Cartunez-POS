@@ -386,21 +386,20 @@ class PaymentDock extends StatelessWidget {
           if (app.cart['transactionId'] != before) onDone?.call();
         }
 
-        Widget pay(String label, String key, IconData icon, Future<void> Function() action, {bool primary = false}) {
-          final child = Row(mainAxisSize: MainAxisSize.min, children: [Flexible(child: Text(label, overflow: TextOverflow.ellipsis)), KeyCap(key, onDark: primary)]);
-          const size = Size(0, 50);
-          const inset = EdgeInsets.symmetric(horizontal: 10);
-          // UI polish: in the narrow tablet side pane the labels need the room more than the icons.
-          final width = MediaQuery.sizeOf(context).width;
-          if (width >= 840 && width < 1200) {
-            return primary
-                ? FilledButton(style: FilledButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, child: child)
-                : OutlinedButton(style: OutlinedButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, child: child);
-          }
-          return primary
-              ? FilledButton.icon(style: FilledButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, icon: Icon(icon, size: 18), label: child)
-              : OutlinedButton.icon(style: OutlinedButton.styleFrom(minimumSize: size, padding: inset), onPressed: can ? () => run(action) : null, icon: Icon(icon, size: 18), label: child);
-        }
+        Widget pay(String label, String key, IconData icon, Future<void> Function() action, {bool primary = false}) =>
+            LayoutBuilder(builder: (context, constraints) {
+              final child = Row(mainAxisSize: MainAxisSize.min, children: [
+                if (constraints.maxWidth >= 150) ...[Icon(icon, size: 18), const SizedBox(width: 6)],
+                Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (constraints.maxWidth >= 118) KeyCap(key, onDark: primary),
+              ]);
+              const size = Size(0, 50);
+              const inset = EdgeInsets.symmetric(horizontal: 10);
+              final onPressed = can ? () => run(action) : null;
+              return primary
+                  ? FilledButton(style: FilledButton.styleFrom(minimumSize: size, padding: inset), onPressed: onPressed, child: child)
+                  : OutlinedButton(style: OutlinedButton.styleFrom(minimumSize: size, padding: inset), onPressed: onPressed, child: child);
+            });
 
         return Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),

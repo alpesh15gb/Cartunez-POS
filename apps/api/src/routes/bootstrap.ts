@@ -5,6 +5,7 @@ import { records, getRecord } from "../db.js";
 import { type Actor, now, inventory } from "../domain.js";
 import { reorderSuggestions } from "../replenishment.js";
 import { productImages } from "../product-images.js";
+import { supplierCoverage } from "../magento-orders.js";
 import { partyBalances } from "../purchasing.js";
 import { invoiceProfile } from "../settings.js";
 import { publicUser } from "./auth-pin.js"; // WS-D
@@ -129,6 +130,13 @@ export function bootstrapRoutes(app: FastifyInstance, db: Database) {
       ? (await records(db, actor.organizationId, "onlineOrder", actor.branchId)).slice(-300)
       : [];
     if (["owner", "manager"].includes(actor.role)) {
+      const websiteOnly = new Set(data.products.filter((p: any) => p.onlineOnly).map((p: any) => p.id));
+      const ordersById = new Map(data.purchaseOrders.map((po: any) => [po.id, po]));
+      for (const order of data.onlineOrders) {
+        const linked = (order.purchaseOrderIds || []).map((id: string) => ordersById.get(id));
+        const { needed } = supplierCoverage(order.lines || [], linked);
+        order.supplierPurchaseNeeded = [...needed].some(([id, units]) => units > 0 && websiteOnly.has(id));
+      }
       const cursor = await getRecord(db, actor.organizationId, "magentoCursor", "orders");
       data.onlineOrdersCheck = cursor ? { at: cursor.checkedAt, error: cursor.error } : null;
       data.magentoCheck = (await getRecord(db, actor.organizationId, "magentoCheck", "latest")) || null;

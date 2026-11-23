@@ -47,6 +47,7 @@ Widget sumRow(String label, String value, {bool bold = false}) => Padding(
     );
 
 String? defaultBin(AppState app, String productId) {
+  if (isOnlineOnly(app.productById(productId))) return null;
   final stocked = app.list('stock').where((s) => s['productId'] == productId && ((s['quantity'] ?? 0) as num) > 0)
       .map((s) => '${s['binId']}').where((id) => app.sellableBins.any((b) => b['id'] == id));
   return stocked.firstOrNull ?? app.sellableBins.firstOrNull?['id'] as String?;

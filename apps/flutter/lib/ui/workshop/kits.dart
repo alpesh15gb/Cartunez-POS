@@ -23,6 +23,7 @@ List<Json> parseKitComponents(AppState app, String value, String? selfId) {
         app.findByCode(code).firstOrNull;
     if (product == null) throw FormProblem('No part with SKU or barcode $code. Check the kit components.');
     if (product['id'] == selfId) throw FormProblem('A kit cannot contain itself.');
+    if (isOnlineOnly(product)) throw FormProblem('Website-only parts cannot be used in a counter kit.');
     if (isKit(product)) throw FormProblem('${product['sku']} is a kit. List its parts directly.');
     if (product['serialTracked'] == true) throw FormProblem('${product['sku']} tracks serial numbers; sell it as its own line.');
     if (result.any((c) => c['productId'] == product['id'])) throw FormProblem('${product['sku']} is listed twice.');

@@ -7,10 +7,12 @@ import 'dart:io';
 import 'package:cartunez_pos/core/store.dart';
 import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
+import 'package:cartunez_pos/ui/screens/online.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 Future<void> _font(String family, List<String> files) async {
   final loader = FontLoader(family);
@@ -116,11 +118,9 @@ void main() {
         await state.mutate('/online-listings', {'productIds': ids, 'changes': {'published': false, 'pricing': {'mode': 'mrp'}}});
       }
     });
-    await tester.pumpWidget(CartunezApp(state: state));
+    await tester.pumpWidget(CartunezApp(state: state, initialLocation: '/catalog/online'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Online store').first);
-    await tester.pumpAndSettle();
     expect(find.text('Magento is not connected'), findsOneWidget);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/online-01-not-connected.png'));
 
@@ -203,7 +203,7 @@ void main() {
     final firstId = '${state.products.first['id']}';
     final before = state.available(firstId);
     orders.add(order(1, first, 2));
-    await tester.tap(find.text('Orders').first);
+    GoRouter.of(tester.element(find.byType(OnlineStoreScreen))).go('/orders/online');
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
       await tester.tap(find.text('Check now'));
@@ -215,18 +215,25 @@ void main() {
     expect(state.available(firstId), before - 2);
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/online-06-orders.png'));
 
-    // Magento invoices it and a second order is bigger than the stock.
+    // Marketplace invoices leave POS stock reserved until this counter bills it.
     orders[0] = {...orders[0], 'updated_at': stamp(), 'state': 'processing', 'status': 'processing',
       'items': [{...(orders[0]['items'] as List).first as Map, 'qty_invoiced': 2}]};
     orders.add(order(2, first, before + 3, invoiced: before + 3));
+    final webPart = await tester.runAsync(() => state.mutate('/products', {
+      'sku': 'QA-WEB-$run', 'name': 'Website order fixture', 'brand': 'Fixture', 'category': 'Fixtures',
+      'unit': 'Each', 'retailPrice': 16000, 'cost': 8000, 'taxRate': 0, 'hsnSac': '8421',
+      'supplierId': state.list('suppliers').first['id'], 'onlineOnly': true,
+    })) as Map;
+    orders.add(order(3, webPart['sku'] as String, 5));
     await tester.runAsync(() async {
       await tester.tap(find.text('Check now'));
       await Future<void>.delayed(const Duration(seconds: 3));
     });
     await tester.pump(const Duration(seconds: 1));
     final placed = {for (final o in state.list('onlineOrders')) o['number']: o['posState']};
-    expect(placed['${run + 1}'], 'sold');
-    expect(placed['${run + 2}'], 'awaiting');
+    expect(placed['${run + 1}'], 'reserved');
+    expect(placed['${run + 2}'], 'reserved');
+    expect(placed['${run + 3}'], 'reserved');
     await tester.tap(find.text('#${run + 2}'));
     await tester.pumpAndSettle();
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/online-07-order.png'));
@@ -240,6 +247,25 @@ void main() {
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
 
+    // Order the website-only SKU from the normal order dialog. It occupies no bin.
+    await tester.tap(find.text('#${run + 3}'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Create purchase order'));
+      await Future<void>.delayed(const Duration(seconds: 2));
+    });
+    await tester.pumpAndSettle();
+    final webOrder = state.list('onlineOrders').firstWhere((o) => o['number'] == '${run + 3}');
+    final webPoId = (webOrder['purchaseOrderIds'] as List).single;
+    final webPo = state.list('purchaseOrders').firstWhere((p) => p['id'] == webPoId);
+    final webLine = (webPo['lines'] as List).single as Map;
+    expect(webLine['productId'], webPart['id']);
+    expect(webLine['quantity'], 5);
+    expect(webLine['onlineOnly'], true);
+    expect(state.available(webPart['id'] as String), 0);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+
     // Remove the test photo.
     await tester.runAsync(() async {
       final id = state.products.first['id'];
@@ -247,8 +273,8 @@ void main() {
         await state.api('/products/$id/images/${p['id']}', method: 'DELETE');
       }
     });
-    // Refund both orders. Only an inspected physical return replenishes a bin.
-    for (var i = 0; i < orders.length; i++) {
+    // Refund the stocked reservations. Neither had a local POS invoice.
+    for (var i = 0; i < 2; i++) {
       final item = (orders[i]['items'] as List).first as Map;
       orders[i] = {...orders[i], 'updated_at': stamp(), 'state': 'closed',
         'items': [{...item, 'qty_refunded': item['qty_invoiced']}]};
@@ -257,10 +283,6 @@ void main() {
       await state.api('/integrations/magento/orders/poll', body: {});
       await state.sync();
     });
-    expect(state.available(firstId), 0);
-    await tester.runAsync(() => state.mutate('/inventory/adjust', {
-      'productId': firstId, 'binId': 'bin-a1', 'quantity': before, 'reason': 'Inspected test order returns',
-    }));
     expect(state.available(firstId), before);
     await tester.runAsync(() async {
       final ids = [for (final l in state.list('onlineListings')) l['productId']];

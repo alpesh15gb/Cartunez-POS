@@ -30,7 +30,7 @@ class BillsScreen extends StatelessWidget {
             FilledButton.icon(onPressed: () => enterBill(context), icon: const Icon(Icons.add), label: const Text('Enter supplier bill')),
             OutlinedButton.icon(onPressed: () => shell.open('suppliers'), icon: const Icon(Icons.account_balance_wallet_outlined),
                 label: Text(owed > 0 ? 'Supplier balances · you owe ${app.money(owed)}' : 'Supplier balances')),
-            if (app.sellableBins.isEmpty) TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a sellable bin first')),
+            if (app.sellableBins.isEmpty && app.stockParts.isNotEmpty) TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a bin for shop stock')),
           ]),
           DataList(
             rows: rows,

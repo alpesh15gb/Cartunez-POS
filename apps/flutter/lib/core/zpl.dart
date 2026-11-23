@@ -7,12 +7,15 @@ import 'label_layout.dart';
 String zplMoney(String formatted) => formatted.replaceAll('₹', 'Rs. ').replaceAll('  ', ' ').trim();
 
 /// Escapes field data with ^FH so ^, ~ and _ in names cannot break the label.
-String _field(String text) {
+String _field(String text, {bool block = false}) {
   final clean = text.replaceAll(RegExp(r'[\r\n\t]+'), ' ');
   final out = StringBuffer();
   for (final rune in clean.runes) {
     final ch = String.fromCharCode(rune);
-    if (ch == '^' || ch == '~' || ch == '_') {
+    if (ch == r'\') {
+      // In a field block a backslash escapes the following character.
+      out.write(block ? '_5C_5C' : '_5C');
+    } else if (ch == '^' || ch == '~' || ch == '_') {
       out.write('_${rune.toRadixString(16).toUpperCase().padLeft(2, '0')}');
     } else {
       out.write(ch);
@@ -41,13 +44,14 @@ String _elements(LabelPlan plan, double offsetMm, int dpi) {
     if (!e.barcode) {
       final h = d(e.height);
       final align = switch (e.align) { LabelAlign.left => 'L', LabelAlign.center => 'C', LabelAlign.right => 'R' };
-      b.write('^FO$x,$y^A0N,$h,$h^FB${d(e.width)},1,0,$align${_field(e.text)}');
+      b.write('^FO$x,$y^A0N,$h,$h^FB${d(e.width)},1,0,$align${_field(e.text, block: true)}');
       continue;
     }
     final bars = d(e.barHeight);
-    // The printer's own number line uses a fixed thin font, so it is switched off
-    // ('N') and the number is printed below the bars in bold instead.
-    const hr = 'N';
+    // The native interpretation line keeps Code 128 data with backslashes
+    // literal. A text block would parse sequences such as \& as line breaks.
+    final nativeDigits = e.digits && e.text.contains(r'\');
+    final hr = nativeDigits ? 'Y' : 'N';
     // EAN/UPC: the printer adds the check digit, so send the digits without it.
     final (command, data) = switch (e.format) {
       'EAN13' => ('^BEN,$bars,$hr,N', e.text.substring(0, 12)),
@@ -57,14 +61,18 @@ String _elements(LabelPlan plan, double offsetMm, int dpi) {
     };
     final quiet = e.module * (e.format == 'CODE128' ? 10 : 9);
     b.write('^BY${e.module},3,$bars^FO${x + quiet},$y$command${_field(data)}');
-    if (e.digits) b.write(_boldDigits(e.text, x, y + bars, d(e.width), d(e.height) - bars, dpi));
+    if (e.digits && !nativeDigits) b.write(_boldDigits(e.text, x, y + bars, d(e.width), d(e.height) - bars, dpi));
   }
   return b.toString();
 }
 
 /// Labels for [labels], each printed [copies] times. With several labels
 /// across the roll, each row of the roll is one label format.
-String zplJob(List<LabelData> labels, LabelLayout layout, {int dpi = 203, int? darkness, int copies = 1, List<int>? quantities}) {
+String zplJob(List<LabelData> labels, LabelLayout layout, {int dpi = 203, int? darkness, int copies = 1, List<int>? quantities}) =>
+    zplFromPlans([for (final label in labels) planLabel(layout, label, dpi: dpi)], layout,
+        dpi: dpi, darkness: darkness, quantities: quantities ?? List.filled(labels.length, copies));
+
+String zplFromPlans(List<LabelPlan> plans, LabelLayout layout, {required int dpi, int? darkness, required List<int> quantities}) {
   int d(double mm) => (mm * dpi / 25.4).round();
   final header = StringBuffer()
     ..write('^XA^CI28^PW${d(layout.rollWidthMm)}^LL${d(layout.heightMm)}^LH0,0')
@@ -72,10 +80,9 @@ String zplJob(List<LabelData> labels, LabelLayout layout, {int dpi = 203, int? d
   final formats = <String>[];
   var row = StringBuffer(header);
   var column = 0;
-  for (final (index, label) in labels.indexed) {
-    var count = quantities?[index] ?? copies;
+  for (final (index, plan) in plans.indexed) {
+    var count = quantities[index];
     if (count <= 0) continue;
-    final plan = planLabel(layout, label, dpi: dpi);
     if (layout.columns == 1) {
       final elements = _elements(plan, 0, dpi);
       while (count > 0) {

@@ -386,6 +386,33 @@ export async function pollMagentoOrders(db: Database, options: { fetch?: Fetch; 
   return { imported };
 }
 
+/** Remaining supplier demand, by SKU. Linked receipts and shipments can cover the same units. */
+export function supplierCoverage(lines: any[], purchaseOrders: any[]) {
+  const open = new Map<string, number>();
+  const received = new Map<string, number>();
+  for (const po of purchaseOrders) {
+    if (!po || po.status === "cancelled") continue;
+    for (const line of po.lines || []) {
+      const delivered = Number(line.received || 0);
+      open.set(line.productId, (open.get(line.productId) || 0) + line.quantity - delivered);
+      received.set(line.productId, (received.get(line.productId) || 0) + delivered);
+    }
+  }
+  const net = new Map<string, number>();
+  const shipped = new Map<string, number>();
+  for (const line of lines) {
+    if (!line.productId) continue;
+    const units = Math.max(0, Number(line.ordered || 0) - Number(line.canceled || 0) - Number(line.refunded || 0));
+    net.set(line.productId, (net.get(line.productId) || 0) + units);
+    shipped.set(line.productId, (shipped.get(line.productId) || 0) + Math.min(units, Number(line.shipped || 0)));
+  }
+  const needed = new Map<string, number>();
+  for (const [id, units] of net) {
+    needed.set(id, Math.max(0, units - Math.max(received.get(id) || 0, shipped.get(id) || 0) - (open.get(id) || 0)));
+  }
+  return { open, needed };
+}
+
 export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Post, fetchImpl: () => Fetch) {
   // "Check now" on the Online orders screen.
   app.post("/api/v1/integrations/magento/orders/poll", async (request: any) => {
@@ -421,18 +448,9 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
     if (!order) fail("Online order not found.", 404);
     if (order!.branchId !== actor.branchId) fail("Switch to the online branch to order parts for this order.", 409);
     const chosen: Record<string, unknown> = body?.suppliers && typeof body.suppliers === "object" ? body.suppliers : {};
-    // Stock parts: units still to arrive. Online-only parts: every unit already ordered
-    // (received units went straight to the customer, so they are never ordered again).
-    const outstanding = new Map<string, number>();
-    const ordered = new Map<string, number>();
-    for (const poId of order!.purchaseOrderIds || []) {
-      const po = await getRecord(tx, actor.organizationId, "purchaseOrder", poId);
-      if (!po || po.status === "cancelled") continue;
-      for (const line of po.lines || []) {
-        outstanding.set(line.productId, (outstanding.get(line.productId) || 0) + line.quantity - line.received);
-        ordered.set(line.productId, (ordered.get(line.productId) || 0) + line.quantity);
-      }
-    }
+    const linked = await Promise.all((order!.purchaseOrderIds || []).map((id: string) =>
+      getRecord(tx, actor.organizationId, "purchaseOrder", id)));
+    const { open: outstanding, needed } = supplierCoverage(order!.lines || [], linked);
     const bySupplier = new Map<string, any[]>();
     const needsSupplier: any[] = [];
     for (const line of order!.lines || []) {
@@ -440,10 +458,8 @@ export function magentoOrderRoutes(app: FastifyInstance, db: Database, post: Pos
       const product = await getRecord(tx, actor.organizationId, "product", line.productId);
       let quantity = 0;
       if (product?.onlineOnly) {
-        const due = Math.max(0, Number(line.ordered || 0) - Number(line.canceled || 0) - Number(line.refunded || 0) - Number(line.shipped || 0));
-        const already = ordered.get(line.productId) || 0;
-        quantity = Math.max(0, due - already);
-        ordered.set(line.productId, Math.max(0, already - due));
+        quantity = needed.get(line.productId) || 0;
+        needed.delete(line.productId); // duplicate order lines were grouped by SKU
       } else {
         if (!(line.shortage > 0)) continue;
         const onOrder = outstanding.get(line.productId) || 0;

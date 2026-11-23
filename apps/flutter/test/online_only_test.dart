@@ -9,6 +9,8 @@ import 'package:cartunez_pos/ui/counter/counter_panes.dart';
 import 'package:cartunez_pos/ui/online/pick_pack.dart';
 import 'package:cartunez_pos/ui/screens/billing.dart';
 import 'package:cartunez_pos/ui/screens/inventory.dart';
+import 'package:cartunez_pos/ui/screens/purchasing.dart';
+import 'package:cartunez_pos/ui/purchasing/supplier_return.dart';
 import 'package:cartunez_pos/ui/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -120,6 +122,76 @@ void main() {
     expect(app.toasts.last, contains('online only'));
     // A cart line for it is refused at checkout.
     expect(() => quote({'lines': [{'productId': 'wheel', 'qty': 1, 'binId': null}]}, app.products), throwsA(isA<BillingError>()));
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('invoiced website order still offers procurement until its units are covered', (tester) async {
+    final order = <String, dynamic>{
+      'id': 'web', 'number': '100', 'mode': 'pos', 'total': 10000,
+      'fulfilment': {'invoiceId': 'inv', 'invoiceNumber': 'I-1'},
+      'lines': [{'productId': 'wheel', 'name': 'Wheel', 'onlineOnly': true, 'ordered': 4, 'posInvoiced': 4, 'shipped': 1}],
+      'supplierPurchaseNeeded': true,
+    };
+    final app = _Shop()..snapshot = {'onlineOrders': [order], 'products': [_wheel]};
+    await tester.pumpWidget(AppScope(state: app, child: const MaterialApp(home: PickPackPage(orderId: 'web'))));
+    await tester.pumpAndSettle();
+    expect(find.text('Invoice & pack'), findsNothing);
+    expect(find.text('Create purchase order'), findsOneWidget);
+    order['supplierPurchaseNeeded'] = false;
+    expect(hasSupplierLines(app, order), isFalse);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('receive, enter bill and return a website-only SKU without a warehouse bin', (tester) async {
+    tester.view.physicalSize = const Size(1280, 1050);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final order = {'id': 'po', 'status': 'open', 'supplierId': 's',
+      'lines': [{'productId': 'wheel', 'quantity': 1, 'received': 0, 'cost': 90000}]};
+    final app = _Shop()..snapshot = {'purchaseOrders': [order], 'products': [_wheel],
+      'suppliers': [{'id': 's', 'name': 'Parts Co'}], 'locations': [], 'settings': {}};
+    Widget orders() => AppScope(state: app, child: MaterialApp(home: ShellScope(controller: ShellController(),
+      child: const Scaffold(body: OrdersScreen()))));
+    await tester.pumpWidget(orders());
+    await tester.tap(find.byTooltip('Receive goods without a bill'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add part'));
+    await tester.pumpAndSettle();
+    expect(find.text('Put away into'), findsNothing);
+    await tester.tap(find.text('Add line'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Record delivery'));
+    await tester.pumpAndSettle();
+    expect(app.calls.single.$1, '/purchase-orders/po/receive');
+    expect((app.calls.single.$2['lines'] as List).single['binId'], null);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(orders());
+    await tester.tap(find.text('Enter bill'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save supplier bill'));
+    await tester.tap(find.text('Save supplier bill'));
+    await tester.pumpAndSettle();
+    expect(app.calls.last.$1, '/purchase-bills');
+    expect((app.calls.last.$2['lines'] as List).single['binId'], null);
+
+    await tester.pumpWidget(const SizedBox());
+    final bill = {'id': 'bill', 'lines': [{'productId': 'wheel', 'cost': 90000, 'onlineOnly': true, 'quantity': 1}]};
+    await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (context) =>
+      Scaffold(body: TextButton(onPressed: () => supplierReturn(context, {'id':'s', 'name':'Parts Co'}, bill: bill),
+          child: const Text('Return shipment')))))));
+    await tester.tap(find.text('Return shipment'));
+    await tester.pumpAndSettle();
+    expect(find.text('Take from bin'), findsNothing);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Reason'), 'Damaged in transit');
+    await tester.tap(find.text('Return and adjust balance'));
+    await tester.pumpAndSettle();
+    expect(app.calls.last.$1, '/purchase-returns');
+    expect(app.calls.last.$2['billId'], 'bill');
+    expect((app.calls.last.$2['lines'] as List).single['binId'], null);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     app.dispose();
   });

@@ -92,7 +92,7 @@ class ExchangeReturnsPanel extends StatelessWidget {
               ]),
             const Divider(height: 12),
             Row(children: [
-              Expanded(child: Text(net >= 0 ? 'Customer pays after exchange' : 'Give back after exchange',
+              Expanded(child: Text(net >= 0 ? 'Customer pays after exchange' : 'Credit remaining after exchange',
                   style: const TextStyle(fontWeight: FontWeight.w700))),
               Text(app.money(net.abs()), style: const TextStyle(fontWeight: FontWeight.w800)),
             ]),
@@ -135,7 +135,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
     final account = net >= 0
         ? app.customerById('${cart['customerId']}') != null
         : returns.isNotEmpty && returns.first['invoiceCustomerId'] != null;
-    return [...app.tenderTypes, if (account) 'Credit'];
+    return [if (net < 0) 'Original', ...app.tenderTypes, if (account) 'Credit'];
   }
 
   @override
@@ -168,7 +168,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
     }
     app.updateCart({
       if (!app.isManager) 'returnApprovalId': approval.text.trim(),
-      'exchangeRefundType': net < 0 ? method : null,
+      'exchangeRefundType': net < 0 && method != 'Original' ? method : null,
     });
     final tenders = net > 0
         ? [{'type': method, 'amount': net, 'confirmed': true, 'reference': reference.text.trim()}]
@@ -198,7 +198,8 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
           _row('New items', app.money(widget.total)),
           _row('Credit for items coming back', '−${app.money(credit)}'),
           const Divider(),
-          _row(net >= 0 ? 'Customer pays' : 'Give back to customer', app.money(net.abs()), big: true),
+          _row(net >= 0 ? 'Customer pays' : 'Credit remaining', app.money(net.abs()), big: true),
+          if (net < 0) const Text('Complete the exchange to see the refund for each payment method.'),
           const SizedBox(height: 12),
           if (net != 0) ...[
             Text(net > 0 ? 'Paid by' : 'Give back by', style: Theme.of(context).textTheme.bodySmall),
@@ -206,7 +207,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
             Wrap(spacing: 8, children: [
               for (final m in list)
                 ChoiceChip(
-                  label: Text(m == 'Credit' ? (net > 0 ? 'On account' : 'Store credit') : m),
+                  label: Text(m == 'Original' ? 'Same as paid' : m == 'Credit' ? (net > 0 ? 'On account' : 'Store credit') : m),
                   selected: method == m,
                   onSelected: (_) => setState(() => method = m),
                 ),

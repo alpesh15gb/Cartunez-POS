@@ -81,6 +81,9 @@ export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
     if (shift.userId !== actor.id) allow(actor, ["owner", "manager"]);
     if (shift.closedAt) fail("Shift already closed.", 409);
     const [summary] = await shiftCashSummaries(tx, actor, [shift]);
+    if (body.reviewedExpectedCash !== undefined &&
+        integer(body.reviewedExpectedCash, "Reviewed expected cash", -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER) !== summary.expectedCash)
+      fail("Drawer activity changed. Review the updated expected cash before closing.", 409);
     shift.expectedCash = summary.expectedCash;
     // WS-D: optional note-by-note count; when given it must add up to the counted cash.
     const count = countDenominations(body.denominations);
@@ -100,9 +103,11 @@ export function shiftRoutes(app: FastifyInstance, db: Database, post: Post) {
   app.get("/api/v1/shifts/:id/summary", async (request: any) => {
     const actor = request.actor;
     allow(actor, ["owner", "manager", "cashier"]);
-    const shift = await scoped(db, actor, "shift", request.params.id);
-    if (shift.userId !== actor.id) allow(actor, ["owner", "manager"]);
-    return shiftSummary(db, actor, shift);
+    return db.readSnapshot(async snapshot => {
+      const shift = await scoped(snapshot, actor, "shift", request.params.id);
+      if (shift.userId !== actor.id) allow(actor, ["owner", "manager"]);
+      return shiftSummary(snapshot, actor, shift);
+    });
   });
   post("approvals", async (tx, actor, body) => {
     allow(actor, ["owner", "manager"]);

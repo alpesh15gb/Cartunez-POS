@@ -51,7 +51,7 @@ Future<void> startCheckout(BuildContext context, {bool split = false, String? te
 }
 
 /// QA #9: the UPI QR needs the shop's UPI ID (Settings › Counter payments).
-bool upiQrAvailable(AppState app) => '${app.settings['upiVpa'] ?? ''}'.trim().isNotEmpty;
+bool upiQrAvailable(AppState app) => app.settings['currency'] == 'INR' && '${app.settings['upiVpa'] ?? ''}'.trim().isNotEmpty;
 
 // WS-D: opening float with quick amounts lives in lib/ui/shift/shift_dialogs.dart.
 Future<bool> openShiftDialog(BuildContext context, {bool forCheckout = false}) =>
@@ -112,6 +112,12 @@ class CheckoutDialogState extends State<CheckoutDialog> {
   }
 
   static bool _external(String type) => type != 'Cash' && type != 'Credit' && type != 'Advance'; // WS-B: Advance
+
+  void resetConfirmation() {
+    confirmed = false;
+    viaQr = false;
+    for (final controller in references.values) { controller.clear(); }
+  }
 
   @override
   void dispose() {
@@ -259,9 +265,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                   second.text = (max(0, total - held) / 100).toStringAsFixed(2);
                 }
                 if (secondTender == tender) secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
-                confirmed = false;
-                viaQr = false;
-                for (final c in references.values) { c.clear(); }
+                resetConfirmation();
               }),
             ),
             const SizedBox(height: 16),
@@ -272,7 +276,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
               decoration: InputDecoration(labelText: split ? '$tender amount' : 'Amount received'),
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setState(resetConfirmation),
               onSubmitted: (_) => _complete(),
             ),
             if (tender == 'Cash' && !split) ...[
@@ -302,6 +306,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 child: TextButton.icon(
                   onPressed: () => setState(() {
                     split = !split;
+                     resetConfirmation();
                     second.text = split ? (max(0, total - _minor(amount.text)) / 100).toStringAsFixed(2) : '0.00';
                   }),
                   icon: Icon(split ? Icons.remove : Icons.call_split, size: 18),
@@ -316,7 +321,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                     initialValue: secondTender,
                     decoration: const InputDecoration(labelText: 'Second payment'),
                     items: [for (final t in types.where((t) => t != tender)) DropdownMenuItem(value: t, child: Text(t))],
-                    onChanged: (v) => setState(() => secondTender = v ?? secondTender),
+                    onChanged: (v) => setState(() { secondTender = v ?? secondTender; resetConfirmation(); }),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -325,7 +330,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                     controller: second,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(labelText: 'Amount'),
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) => setState(resetConfirmation),
                   ),
                 ),
               ]),
@@ -338,14 +343,15 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                   FilledButton.tonalIcon(
                     key: const ValueKey('show-upi-qr'),
                     style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                    onPressed: !upiQrAvailable(app)
+                    onPressed: busy || !upiQrAvailable(app) || (tender == 'UPI' ? _minor(amount.text) : _minor(second.text)) <= 0
                         ? null
                         : () async {
                             final upiAmount = tender == 'UPI' ? _minor(amount.text) : _minor(second.text);
                             final ref = await showUpiQr(context, amount: upiAmount, note: 'Bill ${app.cart['transactionId']}'.substring(0, 13));
                             if (ref == null || !mounted) return;
                             setState(() {
-                              confirmed = true;
+                              // A QR confirmation covers only its UPI leg. A second external tender needs a separate manual check.
+                              confirmed = !split || !_external(tender == 'UPI' ? secondTender : tender);
                               viaQr = true;
                               references['UPI']!.text = ref;
                             });
@@ -353,7 +359,9 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                     icon: const Icon(Icons.qr_code_2),
                     label: Text('UPI QR checkout · ${app.money(tender == 'UPI' ? _minor(amount.text) : _minor(second.text))}'),
                   ),
-                  if (!upiQrAvailable(app))
+                  if (app.settings['currency'] != 'INR')
+                    const Text('UPI QR requires an INR bill.')
+                  else if (!upiQrAvailable(app))
                     Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
                       Text('No UPI ID set, so no QR.', style: Theme.of(context).textTheme.bodySmall),
                       if (app.isManager)
@@ -397,7 +405,10 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                         : 'Off: saved as a pending payment in Sync & audit until confirmed.'),
               ),
               for (final type in {tender, if (split) secondTender}.where(_external))
-                TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference')),
+                TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference'),
+                  onChanged: (_) {
+                    if (viaQr && type == 'UPI') setState(() { confirmed = false; viaQr = false; });
+                  }),
             ],
             if (app.gst) ...[
               const SizedBox(height: 12),

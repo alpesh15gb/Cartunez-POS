@@ -1,6 +1,6 @@
 import { parse } from "csv-parse/sync";
 import { randomInt } from "node:crypto";
-import { id, integer, fail, text, normalize, barcodeKey } from "./domain.js";
+import { id, integer, fail, text, multiline, normalize, barcodeKey } from "./domain.js";
 import type { RecordData } from "./db.js";
 
 /** defaultTaxRate: 1800 (18%) for GST shops, 0 for shops that are not GST registered. */
@@ -14,7 +14,7 @@ export function buildProduct(value: RecordData, productId = id("part"), defaultT
   if (!product.sku) product.sku = `CT-${randomInt(10000000, 100000000)}`;
   if (!product.unit) product.unit = "Each";
   if (!product.category) product.category = "General";
-  product.description = text(
+  product.description = multiline(
     value.description || "",
     "description",
     false,

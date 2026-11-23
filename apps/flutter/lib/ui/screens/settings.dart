@@ -447,6 +447,14 @@ class SyncScreen extends StatelessWidget {
               onPressed: () => confirmPendingPayment(context, e), // QA #8: counter/pending_payment.dart
               child: const Text('Confirm payment'),
             ),
+          if (e['error'] != null && e['status'] != 'awaiting-payment')
+              TextButton(onPressed: !app.online || app.syncState.syncing ? null : () async {
+                try {
+                  final session = app.session;
+                  await app.retryPendingPayment(e);
+                  if (context.mounted && identical(session, app.session)) await showPendingPaymentResult(context, e);
+                } catch (error) { app.toast(errorText(error)); }
+              }, child: const Text('Retry posting')),
           if (e['error'] != null || e['status'] == 'awaiting-payment')
             TextButton(
               onPressed: () async {

@@ -27,7 +27,7 @@ bool orderFromSupplierLine(AppState app, Map line) =>
 /// Online-only lines of the order still to send.
 bool hasSupplierLines(AppState app, Json order) =>
     order['mode'] == 'pos' &&
-    (order['lines'] as List? ?? []).cast<Map>().any((l) => toPickQty(l) > 0 && orderFromSupplierLine(app, l));
+    (order['supplierPurchaseNeeded'] as bool? ?? (order['lines'] as List? ?? []).cast<Map>().any((l) => shippedQty(l) > ((l['shipped'] ?? 0) as num) && orderFromSupplierLine(app, l)));
 
 /// "Create purchase order": draft orders to each online-only part's usual
 /// supplier, linked to the website order. Parts without a supplier are asked for.
@@ -378,6 +378,18 @@ class _PickPackPageState extends State<PickPackPage> {
                   padding: EdgeInsets.only(top: 12),
                   child: Text('This older order had its stock taken when Magento invoiced it. Ship it without a POS invoice.'),
                 ),
+              if (hasSupplierLines(app, o))
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: OutlinedButton.icon(
+                      onPressed: busy || !app.isManager ? null : () => createOrderPurchase(context, o),
+                      icon: const Icon(Icons.add_shopping_cart, size: 18),
+                      label: const Text('Create purchase order'),
+                    ),
+                  ),
+                ),
               // ---------- 1. Pick ----------
               if (invoicing) ...[
                 const SectionTitle('1. Pick'),
@@ -415,18 +427,6 @@ class _PickPackPageState extends State<PickPackPage> {
                         ),
                         Text('${toPickQty(l)}', style: const TextStyle(fontWeight: FontWeight.w800)),
                       ]),
-                    ),
-                  ),
-                if (supplierLines.isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: OutlinedButton.icon(
-                        onPressed: busy || !app.isManager ? null : () => createOrderPurchase(context, o),
-                        icon: const Icon(Icons.add_shopping_cart, size: 18),
-                        label: const Text('Create purchase order'),
-                      ),
                     ),
                   ),
                 for (final l in toPick)

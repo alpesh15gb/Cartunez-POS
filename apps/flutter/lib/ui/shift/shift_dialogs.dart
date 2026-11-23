@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/api.dart';
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../theme.dart';
@@ -179,24 +180,34 @@ Future<void> closeShift(BuildContext context, Json shift) async {
     app.toast('Resolve waiting payments in Settings › Sync & audit before closing this shift.');
     return;
   }
+  final int expected;
+  try {
+    final summary = await app.api('/shifts/${shift['id']}/summary');
+    if (summary['closedAt'] != null) { app.toast('This shift has already closed.'); return; }
+    expected = summary['expectedCash'] as int;
+  } catch (e) {
+    app.toast('Could not load the drawer balance. ${errorText(e)}');
+    return;
+  }
+  if (!context.mounted) return;
   final closed = await showDialog<Json>(
     context: context,
-    builder: (_) => AppScope(state: app, child: CloseShiftDialog(shift: shift)),
+    builder: (_) => AppScope(state: app, child: CloseShiftDialog(shift: shift, expected: expected)),
   );
   if (closed != null && context.mounted) await showShiftSummary(context, closed);
 }
 
 class CloseShiftDialog extends StatefulWidget {
-  const CloseShiftDialog({super.key, required this.shift, this.expected});
+  const CloseShiftDialog({super.key, required this.shift, required this.expected});
   final Json shift;
 
-  /// Expected drawer cash; defaults to the register's calculation.
-  final int? expected;
+  final int expected;
   @override
   State<CloseShiftDialog> createState() => CloseShiftDialogState();
 }
 
 class CloseShiftDialogState extends State<CloseShiftDialog> {
+  late int expected = widget.expected;
   final notes = {for (final n in cashNotes) n: TextEditingController()};
   final coins = TextEditingController();
   final total = TextEditingController();
@@ -249,6 +260,7 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
     try {
       final result = await app.mutate('/shifts/${widget.shift['id']}/close', {
         'countedCash': cash,
+        'reviewedExpectedCash': expected,
         if (byNotes) 'denominations': {
           for (final e in counts.entries)
             if (e.value > 0) '${e.key}': e.value,
@@ -259,6 +271,21 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
       final variance = (result['variance'] ?? 0) as int;
       app.toast(variance == 0 ? 'Shift closed. The drawer balances.' : 'Shift closed with a difference of ${app.money(variance)}.');
       if (mounted) Navigator.pop(context, Map<String, dynamic>.from(result));
+    } on ApiError catch (e) {
+      if (e.status == 409) {
+        try {
+          final summary = await app.api('/shifts/${widget.shift['id']}/summary');
+          if (mounted && summary['closedAt'] != null) {
+            app.toast('This shift has already closed.');
+            Navigator.pop(context);
+            return;
+          }
+          if (mounted) setState(() => expected = summary['expectedCash'] as int);
+        } catch (_) {
+          // The previous reviewed amount remains guarded by the API on retry.
+        }
+      }
+      if (mounted) setState(() => error = errorText(e));
     } catch (e) {
       if (mounted) setState(() => error = errorText(e));
     } finally {
@@ -269,7 +296,6 @@ class CloseShiftDialogState extends State<CloseShiftDialog> {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    final expected = widget.expected ?? app.expectedCash(widget.shift);
     final cash = counted;
     final variance = cash == null ? null : cash - expected;
     // UI polish: the difference appears once counting starts, not as a scary

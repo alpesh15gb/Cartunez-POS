@@ -17,6 +17,10 @@ class _Register extends AppState {
   String? endpoint;
   Json? sent;
   Json? confirmedRefs;
+  String? rejection;
+  @override
+  Future<dynamic> api(String path, {Object? body, String? method}) async =>
+      {'expectedCash': 88000, 'closedAt': null};
 
   @override
   Future<dynamic> mutate(String path, Json body, [String? message]) async {
@@ -32,6 +36,11 @@ class _Register extends AppState {
   @override
   Future<void> confirmPayment(String transactionId, Json references) async {
     confirmedRefs = references;
+    if (rejection != null) {
+      pending.single['error'] = rejection;
+      pending.single['status'] = 'pending';
+      return;
+    }
     pending.clear();
     snapshot = {
       ...snapshot,
@@ -62,6 +71,51 @@ Future<void> _pump(WidgetTester tester, AppState app, Widget child, {Size size =
 }
 
 void main() {
+  testWidgets('QR confirmation applies to the captured amount and requires an INR bill', (tester) async {
+    final app = _app(settings: {'upiVpa': 'shop@upi'});
+    await _pump(tester, app, const CheckoutDialog(total: 50000, initialTender: 'UPI'));
+    await tester.tap(find.byKey(const ValueKey('show-upi-qr')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'UPI reference / UTR'), 'UTR-500');
+    await tester.tap(find.text('Confirm received'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirmed on the UPI QR screen.'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, 'Amount received'), '650.00');
+    await tester.pumpAndSettle();
+    expect(find.text('Save pending payment'), findsOneWidget);
+    expect(find.text('UTR-500'), findsNothing);
+    final usd = _app(settings: {'currency': 'USD', 'upiVpa': 'shop@upi'});
+    await _pump(tester, usd, const CheckoutDialog(total: 50000, initialTender: 'UPI'));
+    expect(tester.widget<FilledButton>(find.byKey(const ValueKey('show-upi-qr'))).onPressed, isNull);
+    expect(find.text('UPI QR requires an INR bill.'), findsOneWidget);
+  });
+
+  testWidgets('a rejected pending payment retains its reference and surfaces server recovery', (tester) async {
+    final app = _app()..rejection = 'Insufficient stock';
+    final entry = <String, dynamic>{'status': 'awaiting-payment', 'total': 100, 'transaction': {
+      'transactionId': 'tx', 'lines': [], 'tenders': [{'type': 'UPI','amount': 100,'reference': 'UTR-1','confirmed': false}]}};
+    app.pending = [entry];
+    await _pump(tester, app, Builder(builder: (context) =>
+      TextButton(onPressed: () => confirmPendingPayment(context, entry), child: const Text('Go'))));
+    await tester.tap(find.text('Go'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm and save invoice'));
+    await tester.pumpAndSettle();
+    expect(find.text('Invoice was rejected'), findsOneWidget);
+    expect(find.textContaining('Insufficient stock'), findsOneWidget);
+    expect(app.confirmedRefs, {'UPI': 'UTR-1'});
+    expect(app.pending, hasLength(1));
+    expect(find.text('Open invoice'), findsNothing);
+  });
+
+  testWidgets('closing a shift previews the server drawer total', (tester) async {
+    final app = _app();
+    await _pump(tester, app, Builder(builder: (context) =>
+      TextButton(onPressed: () => closeShift(context, {'id': 's1','openingCash': 100}), child: const Text('Go'))));
+    await tester.tap(find.text('Go'));
+    await tester.pumpAndSettle();
+    expect(find.descendant(of: find.byKey(const ValueKey('close-summary')), matching: find.text(app.money(88000))), findsOneWidget);
+  });
   testWidgets('#6: the Counter opens a shift inline and puts the cursor back in item search', (tester) async {
     final app = _app(role: 'cashier');
     final shell = ShellController();

@@ -134,6 +134,8 @@ class SaleDoneDialog extends StatelessWidget {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text(app.money(invoice['total'] as num?),
                 style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
+            if (invoice['exchange']?['refunds'] is List && (invoice['exchange']['refund'] ?? 0) > 0)
+              Text(refundInstructions(app, {...invoice['exchange'] as Map, 'currency': invoice['currency']})),
             if (change > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 6),

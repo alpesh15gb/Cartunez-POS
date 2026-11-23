@@ -30,6 +30,7 @@ class ReceiptView {
       ? (doc['voided'] == true ? 'CREDIT NOTE · INVOICE VOID' : 'CREDIT NOTE')
       : (doc['taxScheme'] == 'india-gst' ? 'TAX INVOICE' : noTax ? 'INVOICE' : 'SALES RECEIPT');
   String money(num? v) => app.money(v, currency: '${doc['currency'] ?? app.settings['currency'] ?? 'INR'}');
+  String get totalLabel => credit ? 'Credit note total' : 'Total';
   List<Json> get lines => (doc['lines'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   String lineName(Json l) => '${l['name'] ?? app.productName('${l['productId']}')}';
   int lineQty(Json l) => (l['qty'] ?? l['quantity'] ?? 0) as int;
@@ -51,6 +52,7 @@ class ReceiptView {
   List<(String, String)> get payments => [
         // WS-B: an exchange credit note is set against the new bill; only any excess is paid back.
         if (credit && doc['exchangeApplied'] != null) ('Set against new bill', money(doc['exchangeApplied'] as num?)),
+        if (credit) ('Amount refunded', money((doc['refundTotal'] ?? doc['total']) as num?)),
         // Paid back per method (refunds breakdown; older notes have one refundType).
         if (credit)
           for (final part in refundParts(doc))
@@ -58,6 +60,10 @@ class ReceiptView {
         if (doc['exchange'] is Map)
           ('Exchange · credit note ${doc['exchange']['creditNoteNumber']} (bill ${doc['exchange']['originalInvoiceNumber']})',
               '−${money(doc['exchange']['applied'] as num?)}'),
+        if (doc['exchange']?['refunds'] is List)
+          for (final part in doc['exchange']['refunds']) ('Exchange refund · ${part['type']}', money(part['amount'] as num?))
+        else if (doc['exchange'] is Map && (doc['exchange']['refund'] ?? 0) > 0)
+          ('Exchange refund · ${doc['exchange']['refundType']}', money(doc['exchange']['refund'] as num?)),
         if ((doc['advanceApplied'] ?? 0) != 0) ('From advance', money(doc['advanceApplied'] as num?)),
         for (final t in doc['tenders'] as List? ?? [])
           ('Paid · ${t['type']}${'${t['reference'] ?? ''}'.isNotEmpty ? ' · ${t['reference']}' : ''}', money(t['amount'] as num)),
@@ -128,7 +134,7 @@ Future<void> showReceipt(BuildContext context, Json doc) {
           const SizedBox(height: 6),
           for (final (label, value) in r.totals) _row(label, value),
           const SizedBox(height: 6),
-          _row(r.credit ? 'Total refunded' : 'Total', r.money(doc['total'] as num? ?? 0), big: true),
+          _row(r.totalLabel, r.money(doc['total'] as num? ?? 0), big: true),
           for (final (label, value) in r.payments) _row(label, value),
           if ('${doc['receiptFooter'] ?? ''}'.isNotEmpty)
             Padding(padding: const EdgeInsets.only(top: 12), child: Text('${doc['receiptFooter']}', style: Theme.of(context).textTheme.bodySmall)),
@@ -161,6 +167,24 @@ Future<void> showReceipt(BuildContext context, Json doc) {
       ],
     ),
   );
+}
+
+/// The issued note's allocations include account and website refunds as well as drawer payouts.
+String refundInstructions(AppState app, Map note, {bool includeCore = false}) {
+  final parts = includeCore && note['totalRefunds'] is List
+      ? refundParts({'refunds': note['totalRefunds']})
+      : refundParts(note);
+  return parts.map((part) {
+    final amount = app.money(part.amount, currency: note['currency'] as String?);
+    return switch (part.type) {
+      'Cash' => 'Give $amount from the drawer.',
+      'UPI' => 'Send $amount by UPI.',
+      'Card' => 'Reverse $amount on the card machine.',
+      'Credit' => '$amount credited to the customer account.',
+      'Online' => 'Process $amount through the website payment channel.',
+      _ => '${part.type}: $amount.',
+    };
+  }).join(' ');
 }
 
 Widget _row(String label, String value, {bool big = false}) => Padding(
@@ -203,7 +227,7 @@ String receiptSummary(AppState app, Json doc) {
     for (final l in r.lines) '${r.lineQty(l)} × ${r.lineName(l)} — ${r.money(l['total'] as num? ?? 0)}',
     '',
     if ((doc['discount'] ?? 0) != 0) 'Discount: −${r.money(doc['discount'] as num)}',
-    '${r.credit ? 'Total refunded' : 'Total'}: ${r.money(doc['total'] as num? ?? 0)}',
+    '${r.totalLabel}: ${r.money(doc['total'] as num? ?? 0)}',
     for (final (label, value) in r.payments) '$label: $value',
     if ('${doc['receiptFooter'] ?? ''}'.isNotEmpty) ...['', '${doc['receiptFooter']}'],
   ].join('\n').trim();
@@ -261,7 +285,7 @@ Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
       ],
       pw.Divider(thickness: 0.5),
       for (final (a, b) in r.totals) row(a, b),
-      row(r.credit ? 'TOTAL REFUNDED' : 'TOTAL', r.money(doc['total'] as num? ?? 0), strong: true),
+      row(r.totalLabel.toUpperCase(), r.money(doc['total'] as num? ?? 0), strong: true),
       for (final (a, b) in r.payments) row(a, b),
       // Integration: the bill's code, scanned at the return desk (WS-B).
       if (!r.credit && receiptInvoiceCode(doc).isNotEmpty) ...[

@@ -28,16 +28,28 @@ String pendingItemSummary(AppState app, Json entry) {
 /// The Sync & audit row actions for a sale awaiting card / UPI confirmation.
 Future<void> confirmPendingPayment(BuildContext context, Json entry) async {
   final app = context.appRead;
-  final transactionId = '${entry['transaction']['transactionId']}';
+  final session = app.session;
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (_) => AppScope(state: app, child: ConfirmPendingPaymentDialog(entry: entry)),
   );
-  if (confirmed != true || !context.mounted) return;
-  // The sale was sent by the confirm; find the invoice the server made from it.
-  final invoice = app.list('invoices').where((i) => i['transactionId'] == transactionId).firstOrNull;
+  if (confirmed != true || !context.mounted || !identical(session, app.session)) return;
+  await showPendingPaymentResult(context, entry);
+}
+
+Future<void> showPendingPaymentResult(BuildContext context, Json entry) async {
+  final app = context.appRead;
+  final transactionId = entry['transaction']['transactionId'];
+  final invoice = entry['postedInvoice'] as Json? ?? app.list('invoices').where((i) => i['transactionId'] == transactionId).firstOrNull;
   if (invoice == null) {
-    app.toast('Payment confirmed. The sale sends with the next sync.');
+    final queued = app.pending.where((item) => item['transaction']['transactionId'] == transactionId).firstOrNull;
+    if (queued?['error'] != null) {
+      await showDialog<void>(context: context, builder: (dialog) => AlertDialog(title: const Text('Invoice was rejected'),
+        content: Text("${queued!['error']}\n\nKeep the provider reference. Resolve the issue and retry posting from Sync & audit using the same payment, or reverse the payment before discarding the sale."),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Done'))]));
+    } else {
+      app.toast(queued == null ? 'Refresh invoices to verify this payment.' : 'Provider reference saved. Waiting for server confirmation. Check Sync & audit before taking another payment.');
+    }
     return;
   }
   final open = await showDialog<bool>(

@@ -1,5 +1,6 @@
 import 'package:cartunez_pos/core/label_layout.dart';
 import 'package:cartunez_pos/core/zpl.dart';
+import 'package:characters/characters.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const part = LabelData(
@@ -83,6 +84,53 @@ void main() {
     expect(bold[0].group(2), bold[1].group(2));
     // Switched off: no number at all.
     expect(zplJob(const [part], layout.copyWith(digits: false)), isNot(contains('_^FD4006381333931^FS')));
+  });
+
+  test('a second name line gives way to the barcode and the MRP note', () {
+    const design = LabelLayout(shopName: true, brand: true, price: 'both');
+    const item = LabelData(name: 'Baleno Rear AC pipes with Original fitting kit and clamps',
+        code: '4006381333931', shop: 'Shop', sku: 'AC-12', brand: 'OEM', price: 'Rs.650', mrp: 'Rs.750');
+    for (final dpi in [203, 300]) {
+      final plan = planLabel(design, item, dpi: dpi);
+      final name = plan.elements.singleWhere((e) => e.part == 'name');
+      final bar = plan.elements.singleWhere((e) => e.barcode);
+      final note = plan.elements.singleWhere((e) => e.part == 'note');
+      expect(name.text, endsWith('…'));
+      expect(plan.printProblem, isNull);
+      expect(bar.barHeight, greaterThanOrEqualTo(4));
+      expect(bar.y + bar.height, lessThan(note.y));
+      expect(zplJob([item], design, dpi: dpi), contains('^BEN,${(bar.barHeight * dpi / 25.4).round()},N,N'));
+      expect(planLabel(design.copyWith(heightMm: 15), item, dpi: dpi).printProblem, contains('may not scan'));
+    }
+  });
+
+  test('word fitting accounts for wide glyphs and never splits a grapheme', () {
+    const name = 'BMW WINDOW MOTOR WITH WIRING LOOM AND CLIPS';
+    final lines = wrapText(name, 47.6, 2.6);
+    expect(lines.join(' '), name);
+    expect(lines.last, contains('LOOM'));
+    for (final cluster in ['🚗', 'e\u0301', '👩‍🔧']) {
+      final word = '${'A' * 8}$cluster${'B' * 8}';
+      final pieces = wrapText(word, textWidth('A' * 8, 2.6) + 0.3, 2.6, maxLines: 6);
+      expect(pieces.join(), word);
+      expect(pieces.expand((line) => line.characters), orderedEquals(word.characters));
+      final shortened = fitText(word, textWidth('${'A' * 8}…', 2.6) + 0.3, 2.6);
+      expect(shortened, '${'A' * 8}…');
+    }
+  });
+
+  test('a literal backslash uses the native Code 128 caption and exact payload', () {
+    for (final dpi in [203, 300]) {
+      for (final suffix in ['&12', '7', r'\B']) {
+        final code = 'AC\\$suffix', data = code.replaceAll(r'\', '_5C');
+        final item = LabelData(name: 'Filter', code: code);
+        final on = zplJob([item], layout, dpi: dpi);
+        expect(on, matches(RegExp(r'\^BCN,\d+,Y,N,N,A')));
+        expect('^FD$data^FS'.allMatches(on).length, 1);
+        final off = zplJob([item], layout.copyWith(digits: false), dpi: dpi);
+        expect(off, matches(RegExp(r'\^BCN,\d+,N,N,N,A')));
+      }
+    }
   });
 
   test('only the chosen lines are printed', () {

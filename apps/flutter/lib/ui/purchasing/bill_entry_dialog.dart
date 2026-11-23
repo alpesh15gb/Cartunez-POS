@@ -22,8 +22,6 @@ import 'received.dart'; // WS-E
 /// Enter what a supplier delivered. [order] pre-fills the outstanding parts of a purchase order;
 /// [part] pre-fills one line for that part (QA #6: first stock of a part just created).
 Future<void> enterBill(BuildContext context, {Json? order, String? supplierId, Json? part}) async {
-  final app = context.appRead;
-  if (app.sellableBins.isEmpty) return app.toast('Add a sellable bin first (Inventory › Bins).');
   final saved = await showDialog<Json>(context: context, barrierDismissible: false,
       builder: (_) => _BillDialog(order: order, supplierId: supplierId, part: part));
   // WS-E: cost hikes, labels for the received quantities and the website update.
@@ -181,6 +179,9 @@ class _BillDialogState extends State<_BillDialog> {
     if (supplierId == null) return setState(() => error = 'Choose the supplier.');
     if (lines.isEmpty) return setState(() => error = 'Add the items on the bill.');
     if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(billDate.text.trim())) return setState(() => error = 'Enter the bill date as YYYY-MM-DD.');
+    if (lines.any((l) => !isOnlineOnly(app.productById('${l['productId']}')) && (l['binId'] ?? '') == '')) {
+      return setState(() => error = 'Choose a sellable bin for each shop-stock item. Add a bin in Inventory if needed.');
+    }
     final t = totals;
     if (t.total < 0) return setState(() => error = 'The discount is larger than the bill.');
     for (final (label, field) in [('Freight / other charges', freight), ('Discount', discount), ('Paid now', paidNow)]) {
@@ -210,7 +211,7 @@ class _BillDialogState extends State<_BillDialog> {
         'photoIds': [for (final p in photos) p['id']],
         'notes': notes.text.trim(),
         if (paid > 0) 'paidNow': {'amount': paid, 'mode': paidMode},
-      }, 'Bill saved. Stock and the supplier balance are updated.');
+      }, 'Supplier bill saved.');
       if (mounted) Navigator.pop(context, saved is Map ? Map<String, dynamic>.from(saved) : <String, dynamic>{});
     } catch (e) {
       if (mounted) setState(() => error = errorText(e));
@@ -369,7 +370,7 @@ class _BillDialogState extends State<_BillDialog> {
         ),
         actions: [
           TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: busy ? null : _save, child: Text(busy ? 'Saving…' : 'Save bill · add to stock')),
+          FilledButton(onPressed: busy ? null : _save, child: Text(busy ? 'Saving…' : lines.isNotEmpty && lines.every((l) => isOnlineOnly(app.productById('${l['productId']}'))) ? 'Save supplier bill' : 'Save bill · add to stock')),
         ],
       ),
     );
