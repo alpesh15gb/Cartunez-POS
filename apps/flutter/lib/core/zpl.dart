@@ -21,6 +21,18 @@ String _field(String text) {
   return '^FH_^FD$out^FS';
 }
 
+/// The barcode number in bold under the bars: the scalable font printed twice,
+/// one dot apart, centred across the barcode's width.
+String _boldDigits(String text, int x, int top, int width, int space, int dpi) {
+  final gap = (dpi / 203 * 2).round();
+  final h = (space - gap).clamp(10, 200);
+  final w = (h * 0.9).round();
+  final shift = (dpi / 203).round().clamp(1, 3);
+  final field = _field(text);
+  return '^FO$x,${top + gap}^A0N,$h,$w^FB$width,1,0,C$field'
+      '^FO${x + shift},${top + gap}^A0N,$h,$w^FB$width,1,0,C$field';
+}
+
 String _elements(LabelPlan plan, double offsetMm, int dpi) {
   int d(double mm) => (mm * dpi / 25.4).round();
   final b = StringBuffer();
@@ -33,7 +45,9 @@ String _elements(LabelPlan plan, double offsetMm, int dpi) {
       continue;
     }
     final bars = d(e.barHeight);
-    final hr = e.digits ? 'Y' : 'N';
+    // The printer's own number line uses a fixed thin font, so it is switched off
+    // ('N') and the number is printed below the bars in bold instead.
+    const hr = 'N';
     // EAN/UPC: the printer adds the check digit, so send the digits without it.
     final (command, data) = switch (e.format) {
       'EAN13' => ('^BEN,$bars,$hr,N', e.text.substring(0, 12)),
@@ -43,6 +57,7 @@ String _elements(LabelPlan plan, double offsetMm, int dpi) {
     };
     final quiet = e.module * (e.format == 'CODE128' ? 10 : 9);
     b.write('^BY${e.module},3,$bars^FO${x + quiet},$y$command${_field(data)}');
+    if (e.digits) b.write(_boldDigits(e.text, x, y + bars, d(e.width), d(e.height) - bars, dpi));
   }
   return b.toString();
 }

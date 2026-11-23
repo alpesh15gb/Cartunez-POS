@@ -87,7 +87,7 @@ pw.Widget _pdfElement(LabelElement e, double offset) {
       width: width * mm,
       height: e.height * mm,
       drawText: e.digits,
-      textStyle: pw.TextStyle(fontSize: ((e.height - e.barHeight) * 0.8).clamp(1.5, 6) * mm),
+      textStyle: pw.TextStyle(fontSize: ((e.height - e.barHeight) * 0.8).clamp(1.5, 6) * mm, fontWeight: pw.FontWeight.bold),
     ),
   );
 }
@@ -257,7 +257,7 @@ class _LabelPainter extends CustomPainter {
           canvas.drawRect(Rect.fromLTWH(left + part.left, top + part.top, part.width, part.height), ink);
         } else if (part is BarcodeText) {
           final tp = TextPainter(
-            text: TextSpan(text: part.text, style: TextStyle(color: const Color(0xFF111111), fontFamily: 'CartunezSans', fontSize: part.height, height: 1)),
+            text: TextSpan(text: part.text, style: TextStyle(color: const Color(0xFF111111), fontFamily: 'CartunezSans', fontSize: part.height, height: 1, fontWeight: FontWeight.w800)),
             textDirection: TextDirection.ltr,
             textAlign: TextAlign.center,
           )..layout(minWidth: part.width, maxWidth: part.width.clamp(part.width, 9999));

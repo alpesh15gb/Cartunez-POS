@@ -54,6 +54,18 @@ void main() {
     expect(zplJob(const [part], layout.copyWith(digits: false)), matches(RegExp(r'\^BEN,\d+,N,N')));
   });
 
+  test('the barcode number is printed in bold (the full code, twice one dot apart)', () {
+    final on = zplJob(const [part], layout);
+    // The printer's thin number line is off; the number is our own scalable-font text.
+    expect(on, matches(RegExp(r'\^BEN,\d+,N,N')));
+    final bold = RegExp(r'\^FO(\d+),(\d+)\^A0N,\d+,\d+\^FB\d+,1,0,C\^FH_\^FD4006381333931\^FS').allMatches(on).toList();
+    expect(bold, hasLength(2));
+    expect(int.parse(bold[1].group(1)!) - int.parse(bold[0].group(1)!), 1);
+    expect(bold[0].group(2), bold[1].group(2));
+    // Switched off: no number at all.
+    expect(zplJob(const [part], layout.copyWith(digits: false)), isNot(contains('_^FD4006381333931^FS')));
+  });
+
   test('only the chosen lines are printed', () {
     final plain = zplJob(const [part], layout);
     expect(plain, contains('Engine Air Filter'));
