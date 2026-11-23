@@ -299,6 +299,34 @@ String fitText(String text, double width, double height) {
   return text.length <= max ? text : '${text.substring(0, (max - 1).clamp(1, text.length))}…';
 }
 
+/// Splits [text] into at most [maxLines] lines of [width] mm at [height] mm,
+/// breaking between words; the last line ends with "…" if text is left over.
+List<String> wrapText(String text, double width, double height, {int maxLines = 2}) {
+  final max = (width / (height * 0.55)).floor().clamp(1, 1000);
+  final words = text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+  final lines = <String>[];
+  var current = '';
+  var i = 0;
+  while (i < words.length && lines.length < maxLines - 1) {
+    final word = words[i];
+    final next = current.isEmpty ? word : '$current $word';
+    if (next.length <= max) {
+      current = next;
+      i++;
+    } else if (current.isEmpty) {
+      // A single word longer than the line: break it.
+      lines.add(word.substring(0, max));
+      words[i] = word.substring(max);
+    } else {
+      lines.add(current);
+      current = '';
+    }
+  }
+  final rest = [if (current.isNotEmpty) current, ...words.skip(i)].join(' ');
+  if (rest.isNotEmpty) lines.add(fitText(rest, width, height));
+  return lines;
+}
+
 /// Estimated printed width of [text] at [height] mm.
 double textWidth(String text, double height) => text.length * height * 0.55 + 0.4;
 
@@ -316,6 +344,15 @@ LabelPlan planLabel(LabelLayout layout, LabelData data, {int dpi = 203}) {
   void line(String part, String text, {bool bold = false, LabelAlign align = LabelAlign.left}) {
     if (text.trim().isEmpty) return;
     final size = textHeight(layout, part);
+    // A long part name continues on a second line instead of being cut short
+    // (only in the automatic flow; a name the owner moved stays one line).
+    if (part == 'name' && !moved.containsKey(part) && textWidth(text.trim(), size) > inner) {
+      for (final piece in wrapText(text, inner, size)) {
+        out.add(LabelElement.text(part, piece, _margin, top, inner, size, bold: bold, align: align));
+        top += size + _rowGap;
+      }
+      return;
+    }
     out.add(LabelElement.text(part, fitText(text.trim(), inner, size), _margin, top, inner, size, bold: bold, align: align));
     if (!moved.containsKey(part)) top += size + _rowGap;
   }

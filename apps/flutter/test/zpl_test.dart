@@ -54,6 +54,25 @@ void main() {
     expect(zplJob(const [part], layout.copyWith(digits: false)), matches(RegExp(r'\^BEN,\d+,N,N')));
   });
 
+  test('a long part name continues on a second line instead of being cut short', () {
+    const long = LabelData(name: 'Baleno Rear AC pipes with Original fitting kit and clamps', code: 'CT-85475782', shop: 'Car Tunez');
+    final plan = planLabel(layout, long);
+    final names = plan.elements.where((e) => e.part == 'name').toList();
+    expect(names, hasLength(2));
+    expect(names[1].y, greaterThan(names[0].y));
+    // Words are kept whole and nothing is lost when it fits in two lines.
+    expect('${names[0].text} ${names[1].text}'.replaceAll('…', ''), startsWith('Baleno Rear AC pipes with'));
+    expect(names[0].text.endsWith('…'), isFalse);
+    final bar = plan.elements.singleWhere((e) => e.barcode);
+    expect(bar.y, greaterThan(names[1].y + names[1].height - 0.01));
+    // A short name stays on one line.
+    expect(planLabel(layout, const LabelData(name: 'Oil Filter', code: 'CT-1', shop: 'Car Tunez')).elements.where((e) => e.part == 'name'), hasLength(1));
+    // Very long names: two lines, the second ends with "…".
+    final lines = wrapText('word ' * 60, 46, 3);
+    expect(lines, hasLength(2));
+    expect(lines.last.endsWith('…'), isTrue);
+  });
+
   test('the barcode number is printed in bold (the full code, twice one dot apart)', () {
     final on = zplJob(const [part], layout);
     // The printer's thin number line is off; the number is our own scalable-font text.
