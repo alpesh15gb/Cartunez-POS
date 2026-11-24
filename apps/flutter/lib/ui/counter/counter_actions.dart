@@ -21,9 +21,15 @@ bool setLineQuantity(BuildContext context, int index, int qty, {bool quiet = fal
   if (qty > 9999) return false;
   final line = lines[index];
   final product = app.productById('${line['productId']}');
-  if (product?['salesStopped'] == true && qty > (line['qty'] as int)) {
-    if (!quiet) app.toast('Sales are stopped for this part.');
-    return false;
+  if (qty > (line['qty'] as int) && product != null) {
+    if (product['salesStopped'] == true) {
+      if (!quiet) app.toast('Sales are stopped for this part.');
+      return false;
+    }
+    if (isOnlineOnly(product)) {
+      if (!quiet) app.toast(onlineOnlyMessage(product));
+      return false;
+    }
   }
   if (line['binId'] != null && product?['type'] != 'service' && !beyondStock(app, product)) {
     final max = app.available('${line['productId']}', '${line['binId']}');
@@ -86,9 +92,11 @@ Future<void> addPart(BuildContext context, Json product) async {
             required: true, help: 'Ask a manager to approve fitment for ${app.cart['transactionId']}.'),
     ],
     onSubmit: (values) async {
-      if (app.productById('${product['id']}')?['salesStopped'] == true) {
+      final currentProduct = app.productById('${product['id']}');
+      if (currentProduct?['salesStopped'] == true) {
         throw FormProblem('Sales are stopped for this part.');
       }
+      if (currentProduct != null && isOnlineOnly(currentProduct)) throw FormProblem(onlineOnlyMessage(currentProduct));
       final qty = int.tryParse('${values['qty']}') ?? 0;
       if (qty < 1 || qty > 9999) throw FormProblem('Enter a quantity from 1 to 9999.');
       final binId = '${values['binId'] ?? ''}'.isEmpty ? null : '${values['binId']}';

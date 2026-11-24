@@ -4,6 +4,11 @@ source "$(dirname "$0")/common.sh"
 command="${1:-}"; directory="${2:-/etc/nginx/sites-enabled}"
 render() {
   local mode="$1"
+  local security_headers='add_header X-Content-Type-Options nosniff always;
+add_header Referrer-Policy same-origin always;
+add_header X-Frame-Options DENY always;'
+  local server_headers="    ${security_headers//$'\n'/$'\n    '}"
+  local location_headers="        ${security_headers//$'\n'/$'\n        '}"
   cat <<EOF
 # Managed exclusively by $CARTUNEZ_PROJECT; other vhosts are not modified.
 server {
@@ -30,9 +35,7 @@ server {
     gzip_vary on;
     access_log /var/log/nginx/$CARTUNEZ_PROJECT-access.log;
     error_log /var/log/nginx/$CARTUNEZ_PROJECT-error.log;
-    add_header X-Content-Type-Options nosniff always;
-    add_header Referrer-Policy same-origin always;
-    add_header X-Frame-Options DENY always;
+$server_headers
     if (-f $CARTUNEZ_ROOT/maintenance) { return 503; }
     location /api/ {
         proxy_pass http://127.0.0.1:$API_PORT;
@@ -44,10 +47,24 @@ server {
         proxy_connect_timeout 5s;
         proxy_read_timeout 60s;
     }
-    location = /sw.js { add_header Cache-Control "no-store"; }
-    location = /installation.json { add_header Cache-Control "no-store"; }
-    location /_next/static/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
-    location / { try_files \$uri \$uri.html \$uri/ /index.html; add_header Cache-Control "no-cache"; }
+    # A location that sets Cache-Control needs its own security headers on older Nginx versions.
+    location = /sw.js {
+$location_headers
+        add_header Cache-Control "no-store";
+    }
+    location = /installation.json {
+$location_headers
+        add_header Cache-Control "no-store";
+    }
+    location /_next/static/ {
+$location_headers
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+    location / {
+        try_files \$uri \$uri.html \$uri/ /index.html;
+$location_headers
+        add_header Cache-Control "no-cache";
+    }
     location ~ /\. { deny all; }
 }
 EOF

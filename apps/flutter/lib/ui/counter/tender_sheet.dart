@@ -113,9 +113,21 @@ class CheckoutDialogState extends State<CheckoutDialog> {
 
   static bool _external(String type) => type != 'Cash' && type != 'Credit' && type != 'Advance'; // WS-B: Advance
 
+  String? _paymentAllocationError(int? firstAmount, int? secondAmount) {
+    if (firstAmount == null || secondAmount == null) {
+      return 'Enter a valid amount for each payment, with up to two decimal places.';
+    }
+    if (split && (firstAmount == 0 || secondAmount == 0 || tender == secondTender)) {
+      return 'Choose two different payment methods and enter an amount for each.';
+    }
+    final nonCash = (tender == 'Cash' ? 0 : firstAmount) + (secondTender == 'Cash' ? 0 : secondAmount);
+    return nonCash > widget.total ? 'Non-cash payments cannot exceed the bill total.' : null;
+  }
+
   void resetConfirmation() {
     confirmed = false;
     viaQr = false;
+    error = null;
     for (final controller in references.values) { controller.clear(); }
   }
 
@@ -131,18 +143,14 @@ class CheckoutDialogState extends State<CheckoutDialog> {
   Future<void> _complete() async {
     if (busy) return;
     final app = context.appRead;
-    final paid = _minor(amount.text) + (split ? _minor(second.text) : 0);
-    final cash = (tender == 'Cash' ? _minor(amount.text) : 0) + (split && secondTender == 'Cash' ? _minor(second.text) : 0);
+    if (!app.online) return;
+    final firstAmount = parsePaymentAmount(amount.text);
+    final secondAmount = split ? parsePaymentAmount(second.text) : 0;
+    final allocationError = _paymentAllocationError(firstAmount, secondAmount);
     final nonCash = _external(tender) || (split && _external(secondTender));
     setState(() => error = null);
-    if (parsePaymentAmount(amount.text) == null || (split && (parsePaymentAmount(second.text) ?? 0) <= 0)) {
-      return setState(() => error = 'Enter a valid amount for each payment, with up to two decimal places.');
-    }
-    if (split && (_minor(amount.text) == 0 || tender == secondTender)) {
-      return setState(() => error = 'Choose two different payment methods and enter an amount for each.');
-    }
-    if (paid < widget.total) return setState(() => error = 'Payment must cover the total.');
-    if (paid - widget.total > cash) return setState(() => error = 'Change can only be given from cash.');
+    if (allocationError != null) return setState(() => error = allocationError);
+    if (firstAmount! + secondAmount! < widget.total) return setState(() => error = 'Payment must cover the total.');
     if (nonCash && confirmed) {
       for (final type in [tender, if (split) secondTender]) {
         if (_external(type) && references[type]!.text.trim().isEmpty) {
@@ -154,9 +162,9 @@ class CheckoutDialogState extends State<CheckoutDialog> {
       return setState(() => error = 'Enter the two-digit place-of-supply state code.');
     }
     final tenders = [
-      {'type': tender, 'amount': _minor(amount.text), 'confirmed': !_external(tender) || confirmed, 'reference': references[tender]?.text.trim() ?? ''},
-      if (split && _minor(second.text) > 0)
-        {'type': secondTender, 'amount': _minor(second.text), 'confirmed': !_external(secondTender) || confirmed, 'reference': references[secondTender]?.text.trim() ?? ''},
+      {'type': tender, 'amount': firstAmount, 'confirmed': !_external(tender) || confirmed, 'reference': references[tender]?.text.trim() ?? ''},
+      if (split)
+        {'type': secondTender, 'amount': secondAmount, 'confirmed': !_external(secondTender) || confirmed, 'reference': references[secondTender]?.text.trim() ?? ''},
     ];
     setState(() => busy = true);
     try {
@@ -223,13 +231,18 @@ class CheckoutDialogState extends State<CheckoutDialog> {
     final app = context.app;
     final total = widget.total;
     final phone = MediaQuery.sizeOf(context).width < 600;
-    final paid = _minor(amount.text) + (split ? _minor(second.text) : 0);
-    final due = total - paid;
-    final nonCash = _external(tender) || (split && _external(secondTender));
     final types = _types;
     if (secondTender == tender || !types.contains(secondTender)) {
       secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
     }
+    final firstAmount = parsePaymentAmount(amount.text);
+    final secondAmount = split ? parsePaymentAmount(second.text) : 0;
+    final due = total - (firstAmount ?? 0) - (secondAmount ?? 0);
+    final allocationError = _paymentAllocationError(firstAmount, secondAmount);
+    final canPay = allocationError == null && due <= 0;
+    final statusError = allocationError ?? error;
+    final nonCash = _external(tender) || (split && _external(secondTender));
+    final upiAmount = (tender == 'UPI' ? firstAmount : secondAmount) ?? 0;
     final customer = app.customerById('${app.cart['customerId']}');
     final quick = <int>{
       total,
@@ -263,6 +276,8 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                   amount.text = (min(held, total) / 100).toStringAsFixed(2);
                   if (held < total) split = true;
                   second.text = (max(0, total - held) / 100).toStringAsFixed(2);
+                } else if (!split && tender != 'Cash') {
+                  amount.text = (total / 100).toStringAsFixed(2);
                 }
                 if (secondTender == tender) secondTender = types.firstWhere((t) => t != tender, orElse: () => tender);
                 resetConfirmation();
@@ -285,7 +300,10 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 for (final v in quick)
                   ActionChip(
                     label: Text(v == total ? 'Exact' : app.money(v)),
-                    onPressed: () => setState(() => amount.text = (v / 100).toStringAsFixed(2)),
+                    onPressed: () => setState(() {
+                      amount.text = (v / 100).toStringAsFixed(2);
+                      resetConfirmation();
+                    }),
                   ),
               ]),
             ],
@@ -299,14 +317,17 @@ class CheckoutDialogState extends State<CheckoutDialog> {
               ),
             // WS-B: credit limit and advance notes.
             for (final t in {tender, if (split) secondTender})
-              AccountTenderNote(tender: t, amount: t == tender ? _minor(amount.text) : _minor(second.text), total: total),
+              AccountTenderNote(tender: t, amount: (t == tender ? firstAmount : secondAmount) ?? 0, total: total),
             if (types.length > 1)
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: () => setState(() {
                     split = !split;
-                     resetConfirmation();
+                    if (!split && tender != 'Cash' && tender != 'Advance') {
+                      amount.text = (total / 100).toStringAsFixed(2);
+                    }
+                    resetConfirmation();
                     second.text = split ? (max(0, total - _minor(amount.text)) / 100).toStringAsFixed(2) : '0.00';
                   }),
                   icon: Icon(split ? Icons.remove : Icons.call_split, size: 18),
@@ -343,10 +364,9 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                   FilledButton.tonalIcon(
                     key: const ValueKey('show-upi-qr'),
                     style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                    onPressed: busy || !upiQrAvailable(app) || (tender == 'UPI' ? _minor(amount.text) : _minor(second.text)) <= 0
+                    onPressed: busy || !app.online || !canPay || !upiQrAvailable(app) || upiAmount <= 0
                         ? null
                         : () async {
-                            final upiAmount = tender == 'UPI' ? _minor(amount.text) : _minor(second.text);
                             final ref = await showUpiQr(context, amount: upiAmount, note: 'Bill ${app.cart['transactionId']}'.substring(0, 13));
                             if (ref == null || !mounted) return;
                             setState(() {
@@ -357,7 +377,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                             });
                           },
                     icon: const Icon(Icons.qr_code_2),
-                    label: Text('UPI QR checkout · ${app.money(tender == 'UPI' ? _minor(amount.text) : _minor(second.text))}'),
+                    label: Text(canPay && upiAmount > 0 ? 'UPI QR checkout · ${app.money(upiAmount)}' : 'UPI QR checkout'),
                   ),
                   if (app.settings['currency'] != 'INR')
                     const Text('UPI QR requires an INR bill.')
@@ -392,7 +412,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: confirmed,
-                onChanged: (v) => setState(() {
+                onChanged: !canPay ? null : (v) => setState(() {
                   confirmed = v;
                   viaQr = false;
                 }),
@@ -419,7 +439,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
               ),
             ],
             const SizedBox(height: 16),
-            AnimatedContainer(
+            if (allocationError == null && due != 0) AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -435,17 +455,17 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: due > 0 ? Brand.danger : Brand.forest, fontFeatures: const [FontFeature.tabularFigures()])),
               ]),
             ),
-            if (error != null)
+            if (statusError != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600)),
+                child: Text(statusError, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600)),
               ),
           ]),
         ),
         actions: [
           TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton.icon(
-            onPressed: busy || !app.online ? null : _complete,
+            onPressed: busy || !app.online || !canPay ? null : _complete,
             icon: busy
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.check),

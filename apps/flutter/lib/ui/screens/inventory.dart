@@ -25,24 +25,25 @@ class PartsScreen extends StatefulWidget {
 
 class _PartsScreenState extends State<PartsScreen> {
   /// Online only filter: 'all', 'shop' (shop stock) or 'online' (website only).
-  String _kind = 'all';
+  String _kind = 'shop';
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final anyOnlineOnly = app.products.any(isOnlineOnly);
+    final kind = anyOnlineOnly ? _kind : 'shop';
     final shell = ShellScope.of(context);
     return ValueListenableBuilder(
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
         final exactIds = {for (final part in app.findByCode(search.text)) part['id']};
-        final rows = app.products
+        final matches = app.products
             .where((p) => exactIds.isNotEmpty ? exactIds.contains(p['id']) : q.isEmpty ||
                 [p['name'], p['sku'], p['partNumber'], p['brand'], p['category'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
                     .any((v) => normalize(v).contains(q)))
-            .where((p) => !anyOnlineOnly || _kind == 'all' || (_kind == 'online') == isOnlineOnly(p))
             .toList();
+        final rows = matches.where((p) => kind == 'all' || (kind == 'online') == isOnlineOnly(p)).toList();
         // Online-only parts have no shelf, so they need no labels.
         final labelRows = rows.where((p) => !isOnlineOnly(p)).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -52,7 +53,7 @@ class _PartsScreenState extends State<PartsScreen> {
               OutlinedButton.icon(onPressed: app.online ? () => importCatalog(context) : null, icon: const Icon(Icons.upload_file), label: const Text('Import parts')),
               if (app.isManager && app.list('removedProducts').isNotEmpty)
                 OutlinedButton(onPressed: () => restorePart(context), child: const Text('Restore part')),
-              OutlinedButton(onPressed: app.products.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
+              OutlinedButton(onPressed: app.stockParts.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
               OutlinedButton(onPressed: app.online && app.bins.isNotEmpty && app.stockParts.isNotEmpty
                   ? () => startPhysicalCount(context) : null, child: const Text('Stock count')),
               if (app.list('stockCounts').isNotEmpty)
@@ -68,17 +69,26 @@ class _PartsScreenState extends State<PartsScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Wrap(spacing: 8, runSpacing: 4, children: [
-                for (final (key, label) in const [('all', 'All parts'), ('shop', 'Shop stock'), ('online', 'Online only')])
-                  ChoiceChip(label: Text(label), selected: _kind == key, onSelected: (_) => setState(() => _kind = key)),
+                for (final (key, label) in const [('shop', 'Shop stock'), ('online', 'Online only'), ('all', 'All parts')])
+                  ChoiceChip(label: Text(label), selected: kind == key, onSelected: (_) => setState(() => _kind = key)),
               ]),
             ),
-          if (app.canStock && app.bins.isEmpty && app.products.isNotEmpty)
+          if (app.canStock && app.bins.isEmpty && app.stockParts.isNotEmpty)
             Align(alignment: Alignment.centerLeft, child: TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a bin to receive or adjust stock'))),
           LayoutBuilder(builder: (context, c) {
-            final empty = q.isEmpty ? 'No parts yet. Add your first part.' : 'No part matches.';
-            final emptyAction = q.isEmpty && app.canStock
-                ? FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part'))
-                : null;
+            final websiteMatch = kind == 'shop' && rows.isEmpty && q.isNotEmpty && matches.any(isOnlineOnly);
+            final empty = websiteMatch
+                ? 'This search matches website-only items.'
+                : q.isNotEmpty ? 'No part matches.' : switch (kind) {
+                    'online' => 'No website-only parts.',
+                    'shop' => 'No shop parts yet. Add your first part.',
+                    _ => 'No parts yet. Add your first part.',
+                  };
+            final emptyAction = websiteMatch
+                ? TextButton(onPressed: () => setState(() => _kind = 'online'), child: const Text('Show online-only items'))
+                : q.isEmpty && app.canStock && kind != 'online'
+                    ? FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part'))
+                    : null;
             // Phones: a compact two-line tile per part, the less common actions in a menu.
             if (c.maxWidth < 700) {
               if (rows.isEmpty) return EmptyState(message: empty, action: emptyAction);
@@ -365,7 +375,10 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
         'components': parseKitComponents(app, '${v['kitComponents'] ?? ''}', product['id'] as String?),
       }..remove('generateBarcode')..remove('kitComponents');
       if (body['salesAction'] == 'keep') body.remove('salesAction');
-      final saved = await app.mutate('/products', body, created == null ? 'Part saved.' : 'Part saved with barcode $created.');
+      final message = isOnlineOnly(body) && body['type'] != 'service'
+          ? 'Website-only part saved. Find it in the Online only view.'
+          : created == null ? 'Part saved.' : 'Part saved with barcode $created.';
+      final saved = await app.mutate('/products', body, message);
       if (saved is Map) {
         if (pendingPhotos.isNotEmpty) {
           try {
@@ -451,7 +464,7 @@ class BinsScreen extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Toolbar([
         FilledButton.icon(onPressed: () => editBin(context, const {}), icon: const Icon(Icons.add), label: const Text('Add bin')),
-        OutlinedButton(onPressed: () => stockOperation(context, 'move'), child: const Text('Move stock')),
+        OutlinedButton(onPressed: app.stockParts.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'move'), child: const Text('Move stock')),
         OutlinedButton.icon(
           onPressed: () => printLabels(context, [for (final b in app.bins) LabelItem(app.binName(b), '${b['id']}', sku: '${b['kind']}')]),
           icon: const Icon(Icons.qr_code_2, size: 18),

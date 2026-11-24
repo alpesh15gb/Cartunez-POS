@@ -6,9 +6,11 @@ import 'package:cartunez_pos/core/billing.dart';
 import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
 import 'package:cartunez_pos/ui/counter/counter_panes.dart';
+import 'package:cartunez_pos/ui/label_render.dart';
 import 'package:cartunez_pos/ui/online/pick_pack.dart';
 import 'package:cartunez_pos/ui/screens/billing.dart';
 import 'package:cartunez_pos/ui/screens/inventory.dart';
+import 'package:cartunez_pos/ui/screens/labels.dart';
 import 'package:cartunez_pos/ui/screens/purchasing.dart';
 import 'package:cartunez_pos/ui/purchasing/supplier_return.dart';
 import 'package:cartunez_pos/ui/shell.dart';
@@ -55,6 +57,60 @@ const _wheel = {
 const _filter = {'id': 'p', 'name': 'Oil filter', 'sku': 'OF1', 'barcodes': ['8901234567890'], 'retailPrice': 25000, 'wholesalePrice': 20000, 'category': 'Filters'};
 
 void main() {
+  for (final width in [390.0, 1280.0]) {
+    testWidgets('Parts at ${width.toInt()}px opens on shop stock and can deliberately show website items', (tester) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final app = _Shop()..snapshot = {
+        'products': [_wheel, _filter],
+        'locations': [{'id': 'bin', 'kind': 'sellable', 'bin': 'A1'}],
+      };
+      final shell = ShellController();
+      await tester.pumpWidget(AppScope(state: app, child: MaterialApp(
+        home: ShellScope(controller: shell, child: const Scaffold(body: SingleChildScrollView(child: PartsScreen()))),
+      )));
+      expect(tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Shop stock')).selected, isTrue);
+      expect(find.text('Oil filter'), findsOneWidget);
+      expect(find.text('Alloy Wheel Set'), findsNothing);
+
+      shell.search.text = '8900000000099';
+      await tester.pump();
+      expect(find.text('This search matches website-only items.'), findsOneWidget);
+      expect(find.text('Alloy Wheel Set'), findsNothing);
+      await tester.tap(find.text('Show online-only items'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Online only')).selected, isTrue);
+      expect(find.text('Alloy Wheel Set'), findsOneWidget);
+      expect(find.text('Oil filter'), findsNothing);
+      expect(find.byTooltip('Print label'), findsNothing);
+
+      shell.search.clear();
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'All parts'));
+      await tester.pumpAndSettle();
+      expect(find.text('Alloy Wheel Set'), findsOneWidget);
+      expect(find.text('Oil filter'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      app.dispose();
+    });
+  }
+
+  testWidgets('shop label design uses a stocked-catalogue example even if the first part is website only', (tester) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _Shop()..snapshot = {'products': [_wheel, _filter]};
+    await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (context) =>
+      Scaffold(body: TextButton(onPressed: () => editLabelDesign(context), child: const Text('Design label')))))));
+    await tester.tap(find.text('Design label'));
+    await tester.pumpAndSettle();
+    final plan = tester.widget<LabelPreview>(find.byType(LabelPreview)).plans.single;
+    expect(plan.elements.firstWhere((element) => element.barcode).text, '8901234567890');
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
   testWidgets('part editor: the Online only switch is saved and skips the first-stock offer', (tester) async {
     tester.view.physicalSize = const Size(1280, 1000);
     tester.view.devicePixelRatio = 1;
@@ -113,6 +169,7 @@ void main() {
     expect(find.text('Alloy Wheel Set'), findsNothing);
     expect(app.saleProducts.map((p) => p['id']), ['p']);
     expect(counterParts(app, '', 'All parts').map((p) => p['id']), ['p']);
+    expect(counterParts(app, 'Alloy Wheel Set', 'All parts'), isEmpty);
     expect(app.findByCode('8900000000099', forSale: true), isEmpty);
     expect(app.stockParts.map((p) => p['id']), ['p']);
     // Scanning its barcode at the counter adds nothing and explains why.
@@ -122,6 +179,32 @@ void main() {
     expect(app.toasts.last, contains('online only'));
     // A cart line for it is refused at checkout.
     expect(() => quote({'lines': [{'productId': 'wheel', 'qty': 1, 'binId': null}]}, app.products), throwsA(isA<BillingError>()));
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('a counter part that becomes website only cannot be added from an already open form', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _Shop()
+      ..online = true
+      ..session = Session(api: '', token: '', user: {'role': 'cashier', 'id': 'c', 'name': 'Asha'}, branchId: 'b', organizationId: 'o', expiresAt: '')
+      ..snapshot = {
+        'products': [_filter],
+        'locations': [{'id': 'bin', 'kind': 'sellable', 'bin': 'A1'}],
+        'stock': [{'productId': 'p', 'binId': 'bin', 'quantity': 5}],
+      };
+    final shell = ShellController()..section = 'billing';
+    await tester.pumpWidget(AppScope(state: app,
+      child: MaterialApp(home: ShellScope(controller: shell, child: const Scaffold(body: BillingScreen())))));
+    await tester.tap(find.byTooltip('Add Oil filter'));
+    await tester.pumpAndSettle();
+    app.snapshot = {...app.snapshot, 'products': [{..._filter, 'onlineOnly': true}]};
+    await tester.tap(find.text('Add to sale'));
+    await tester.pumpAndSettle();
+    expect(app.cart['lines'], isEmpty);
+    expect(find.textContaining('Oil filter is online only'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     app.dispose();
   });

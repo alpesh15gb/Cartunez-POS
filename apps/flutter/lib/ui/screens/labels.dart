@@ -273,7 +273,7 @@ const _sampleItem = LabelItem('Engine Air Filter', '4006381333931',
 
 /// A real part from the catalog for the preview, or a sample one.
 LabelItem _previewItem(AppState app) {
-  final part = app.products.where((p) => p['type'] != 'service' && (p['barcodes'] as List? ?? []).isNotEmpty).firstOrNull;
+  final part = app.stockParts.where((p) => (p['barcodes'] as List? ?? []).isNotEmpty).firstOrNull;
   return part == null ? _sampleItem : productLabel(app, part);
 }
 

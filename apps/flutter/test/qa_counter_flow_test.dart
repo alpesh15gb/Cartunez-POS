@@ -6,11 +6,13 @@ import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
 import 'package:cartunez_pos/ui/counter/fitment_bar.dart';
 import 'package:cartunez_pos/ui/counter/pending_payment.dart';
+import 'package:cartunez_pos/ui/counter/upi_qr.dart';
 import 'package:cartunez_pos/ui/screens/billing.dart';
 import 'package:cartunez_pos/ui/screens/sales.dart';
 import 'package:cartunez_pos/ui/shell.dart';
 import 'package:cartunez_pos/ui/shift/shift_dialogs.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class _Register extends AppState {
@@ -18,6 +20,14 @@ class _Register extends AppState {
   Json? sent;
   Json? confirmedRefs;
   String? rejection;
+  List<Json>? postedTenders;
+
+  @override
+  Future<Json?> checkout({required List<Json> tenders, required int expectedTotal, String placeOfSupply = ''}) async {
+    postedTenders = tenders;
+    return null;
+  }
+
   @override
   Future<dynamic> api(String path, {Object? body, String? method}) async =>
       {'expectedCash': 88000, 'closedAt': null};
@@ -71,6 +81,66 @@ Future<void> _pump(WidgetTester tester, AppState app, Widget child, {Size size =
 }
 
 void main() {
+  testWidgets('switching from cash with change to UPI resets the QR to the bill total', (tester) async {
+    final app = _app(settings: {'upiVpa': 'shop@upi'});
+    await _pump(tester, app, const CheckoutDialog(total: 10000));
+    await tester.tap(find.widgetWithText(ActionChip, app.money(20000)));
+    await tester.pumpAndSettle();
+    expect(find.text('Change to give'), findsOneWidget);
+    expect(find.text(app.money(10000)), findsNWidgets(2));
+
+    await tester.tap(find.text('UPI'));
+    await tester.pumpAndSettle();
+    final amount = find.widgetWithText(TextField, 'Amount received');
+    expect(tester.widget<TextField>(amount).controller!.text, '100.00');
+    expect(find.text('Change to give'), findsNothing);
+
+    final qr = find.byKey(const ValueKey('show-upi-qr'));
+    await tester.tap(qr);
+    await tester.pumpAndSettle();
+    final painter = tester.widget<CustomPaint>(find.byKey(const ValueKey('upi-qr'))).painter! as QrPainter;
+    expect(Uri.parse(painter.data).queryParameters['am'], '100.00');
+    await tester.ensureVisible(find.text('Back'));
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(amount, '200.00');
+    await tester.pumpAndSettle();
+    final submit = find.widgetWithText(FilledButton, 'Save pending payment');
+    expect(tester.widget<FilledButton>(qr).onPressed, isNull);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    expect(find.text('Change to give'), findsNothing);
+    expect(find.text('Non-cash payments cannot exceed the bill total.'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(app.postedTenders, isNull);
+  });
+
+  testWidgets('split checkout only allows change from the cash leg', (tester) async {
+    final app = _app(settings: {'upiVpa': 'shop@upi'});
+    await _pump(tester, app, const CheckoutDialog(total: 10000, initialTender: 'UPI', initialSplit: true));
+    final upi = find.widgetWithText(TextField, 'UPI amount');
+    final cash = find.widgetWithText(TextField, 'Amount');
+    final qr = find.byKey(const ValueKey('show-upi-qr'));
+    final submit = find.widgetWithText(FilledButton, 'Save pending payment');
+    await tester.enterText(upi, '40.00');
+    await tester.enterText(cash, '100.00');
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(qr).onPressed, isNotNull);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNotNull);
+    expect(find.text('Change to give'), findsOneWidget);
+    expect(find.text(app.money(4000)), findsOneWidget);
+
+    await tester.enterText(upi, '101.00');
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(qr).onPressed, isNull);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
+    expect(find.text('Change to give'), findsNothing);
+    expect(find.text('Non-cash payments cannot exceed the bill total.'), findsOneWidget);
+  });
+
   testWidgets('QR confirmation applies to the captured amount and requires an INR bill', (tester) async {
     final app = _app(settings: {'upiVpa': 'shop@upi'});
     await _pump(tester, app, const CheckoutDialog(total: 50000, initialTender: 'UPI'));
