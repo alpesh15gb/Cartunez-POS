@@ -51,7 +51,8 @@ typedef DetailOpener = Future<void>? Function(BuildContext context, String id);
 /// One sub-tab of a workspace, with its own address.
 class TabDef {
   const TabDef(this.id, this.label, this.roles, this.help, this.build,
-      {required this.path, this.feature, this.detail, this.takesArg = false, this.search = true, this.argIsRecord = true});
+      {required this.path, this.feature, this.detail, this.takesArg = false, this.search = true, this.argIsRecord = true,
+      this.navParent});
 
   /// Stable id used by [ShellController.open] (kept from the old navigation).
   final String id;
@@ -79,6 +80,9 @@ class TabDef {
   /// customer, a job card) that gets the compact back-arrow header on phones.
   /// False for arguments that only pick a view (for example /reports/:name).
   final bool argIsRecord;
+
+  /// ID of the visible tab for a tool opened from that tab's actions.
+  final String? navParent;
 
   /// [arg] opens a record page (not a list or a view of one).
   bool isRecordPage(String? arg) => arg != null && takesArg && argIsRecord;
@@ -138,7 +142,7 @@ DetailOpener _openLedger(String kind) => (context, id) {
 
 final workspaces = <Workspace>[
   Workspace('/counter', 'Counter', 'Counter', Icons.point_of_sale_outlined, [
-    TabDef('billing', 'Billing', _sellers, 'Scan or pick parts, then take payment.', (_, _) => const BillingScreen(),
+    TabDef('billing', 'Counter', _sellers, 'Scan or pick parts, then take payment.', (_, _) => const BillingScreen(),
         path: '/counter'),
   ]),
   Workspace('/orders', 'Orders & bills', 'Orders', Icons.receipt_long_outlined, [
@@ -147,7 +151,7 @@ final workspaces = <Workspace>[
         path: '/orders/invoices', detail: _openInvoice),
     // WS-B
     TabDef('sales-returns', 'Returns & exchange', _sellers,
-        'Find a bill by number, receipt barcode, phone or serial; refund, exchange or give store credit.',
+        'Find a bill by number, receipt barcode, phone or serial. Refund, exchange or give store credit on a customer account.',
         (_, _) => const ReturnsPage(),
         path: '/orders/returns', search: false),
     TabDef('online-orders', 'Online orders', _managers, 'Orders from your Magento store: reserved, sold, waiting for stock or cancelled.',
@@ -168,20 +172,21 @@ final workspaces = <Workspace>[
         path: '/catalog/fitment', search: false, feature: 'fitment'),
     TabDef('transfers', 'Transfers', _stock, 'Stock sent between branches.', (_, _) => const TransfersScreen(),
         path: '/catalog/transfers', search: false, feature: 'transfers'),
-    TabDef('warranty', 'Warranty & cores', _stock, 'Supplier warranty claims and core deposit refunds.',
+    TabDef('warranty', 'Claims & core refunds', _stock, 'Supplier warranty claims and core deposit refunds.',
         (_, _) => const WarrantyScreen(),
-        path: '/catalog/warranty', search: false, feature: 'warranty'),
+        path: '/catalog/warranty', search: false, feature: 'warranty', navParent: 'serials'),
     TabDef('counts', 'Stock counts', _stock, 'Count a bin and review the difference before stock changes.',
         (_, _) => const StockCountsPage(),
-        path: '/catalog/counts', search: false),
+        path: '/catalog/counts', search: false, navParent: 'parts'),
     TabDef('import', 'Import', _stock, 'Add or update many parts from a CSV file.', (_, _) => const CatalogImportPage(),
-        path: '/catalog/import', search: false),
-    TabDef('labels', 'Labels', _everyone, 'Barcode labels for parts and bins.', (_, _) => const LabelsPage(), path: '/catalog/labels', search: false),
+        path: '/catalog/import', search: false, navParent: 'parts'),
+    TabDef('labels', 'Labels', _everyone, 'Barcode labels for parts and bins.', (_, _) => const LabelsPage(),
+        path: '/catalog/labels', search: false, navParent: 'parts'),
     TabDef('online', 'Online products', _managers, 'Publish parts to your Magento store and set online prices and availability.',
         (_, _) => const OnlineStoreScreen(),
         path: '/catalog/online', feature: 'onlineStore'),
     // WS-C (workshop)
-    TabDef('serials', 'Serial & warranty', _everyone, 'Look up a serial or IMEI: who bought it, which vehicle, warranty until when.',
+    TabDef('serials', 'Warranty', _everyone, 'Look up a serial or IMEI, review warranty and find the original bill.',
         (_, _) => const SerialLookupScreen(),
         path: '/catalog/serials', search: false),
   ]),
@@ -192,7 +197,7 @@ final workspaces = <Workspace>[
         path: '/purchasing/bills', detail: _openBill),
     TabDef('orders', 'Purchase orders', _stock, 'Order from suppliers; enter the bill when the goods arrive.',
         (_, _) => const OrdersScreen(),
-        path: '/purchasing/orders', search: false),
+        path: '/purchasing/orders'),
     // WS-E: reorder alerts → draft POs; supplier cost rises found while receiving.
     TabDef('reorder', 'Reorder alerts', _stock, 'Parts at or below their reorder level. Make draft purchase orders per supplier in one click.',
         (_, _) => const ReorderScreen(),
@@ -212,18 +217,15 @@ final workspaces = <Workspace>[
     TabDef('collections', 'Collections', _sellers, 'Customers who owe you: collect payments and send WhatsApp reminders.',
         (_, _) => const CollectionsPage(),
         path: '/people/collections'),
-    TabDef('people-suppliers', 'Suppliers', _stock, 'Suppliers, what you owe each one, payments and returns.',
-        (_, _) => const ContactsScreen(kind: 'suppliers'),
-        path: '/people/suppliers', detail: _openLedger('suppliers')),
     TabDef('staff', 'Staff', _managers /* WS-D: managers set counter PINs */, 'Staff accounts, roles, PINs and who can sign in.', (_, _) => const StaffScreen(),
         path: '/people/staff', search: false),
     // WS-C (workshop)
     TabDef('vehicles', 'Vehicles', _everyone, 'Customer vehicles by registration number, with their jobs and invoices.',
         (_, id) => VehiclesScreen(id: id),
-        path: '/people/vehicles', search: false, takesArg: true),
+        path: '/people/vehicles', takesArg: true),
   ]),
   Workspace('/shift', 'Shift, reports & settings', 'Shift', Icons.insights_outlined, [
-    TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', (_, _) => const ShiftsScreen(), path: '/shift', search: false),
+    TabDef('shifts', 'Shifts', _sellers, 'Open and close the cash drawer.', (_, _) => const ShiftsScreen(), path: '/shift'),
     TabDef('tender', 'Tender check', _managers, 'Compare card and UPI takings with your statement.',
         (_, _) => const TenderComparisonPage(),
         path: '/shift/tender', search: false),
@@ -240,7 +242,10 @@ final workspaces = <Workspace>[
 ];
 
 /// Old section ids that are not a tab id any more.
-const _aliases = {'credit-notes': 'invoices', 'returns': 'invoices', 'products': 'parts', 'tender-comparison': 'tender'};
+const _aliases = {
+  'credit-notes': 'invoices', 'returns': 'invoices', 'products': 'parts',
+  'tender-comparison': 'tender', 'people-suppliers': 'suppliers',
+};
 
 TabDef? tabById(String id) {
   final key = _aliases[id] ?? id;
@@ -421,7 +426,7 @@ class _ShellState extends State<Shell> {
       return true;
     }
     // WS-A: on the counter, CounterKeyboard owns the keys (F1 search, F2
-    // customer/vehicle, F6 pay, ...) and the scanner guard. Elsewhere F2 still
+    // customer/vehicle, F6 UPI, ...) and the scanner guard. Elsewhere F2 still
     // focuses the search box.
     if (controller.section == 'billing' && CounterKeyboard.active > 0) {
       _buffer.clear();
@@ -434,12 +439,16 @@ class _ShellState extends State<Shell> {
       return false;
     }
     if (event.logicalKey == LogicalKeyboardKey.f2) {
+      final match = matchPath(widget.location);
+      if (match == null || !match.tab.search || match.tab.isRecordPage(match.arg)) return false;
       controller.searchFocus.requestFocus();
       return true;
     }
     if (event.logicalKey == LogicalKeyboardKey.f6 && controller.section == 'billing') {
       final context = billingKey.currentContext;
-      if (context != null && ModalRoute.of(context)?.isCurrent == true) startCheckout(context);
+      if (context != null && ModalRoute.of(context)?.isCurrent == true) {
+        startCheckout(context, tender: context.appRead.tenderTypes.contains('UPI') ? 'UPI' : null);
+      }
       return true;
     }
     if (_typingInField() || !{'billing', 'parts', 'bins'}.contains(controller.section)) {
@@ -480,6 +489,7 @@ class _ShellState extends State<Shell> {
     final match = matchPath(widget.location);
     final tab = match?.tab;
     final active = tab == null ? null : workspaceOf(tab);
+    final onManagerDashboard = tab?.id == 'dashboard' && app.isManager;
     // UI polish: the search box only where the screen reads it, never on record pages.
     final searchable = tab == null || (tab.search && !tab.isRecordPage(match?.arg));
     if (tab != null && controller.section.isEmpty) controller.section = tab.id;
@@ -500,7 +510,7 @@ class _ShellState extends State<Shell> {
           ),
           bottomNavigationBar: _PhoneNav(
             visible: visible,
-            active: active,
+            active: onManagerDashboard ? null : active,
             onOpen: (ws) => _openWorkspace(ws, app),
             onScan: () async {
               final code = await requestBarcode(context);
@@ -523,10 +533,12 @@ class _ShellState extends State<Shell> {
         body: Row(children: [
           _Rail(
             workspaces: visible,
-            active: active,
+            active: onManagerDashboard ? null : active,
             expanded: expanded,
             onToggle: desktop || prefs == null ? null : prefs.toggleRail,
             onOpen: (ws) => _openWorkspace(ws, app),
+            onDashboard: app.isManager ? () => _go('/dashboard') : null,
+            dashboardSelected: onManagerDashboard,
           ),
           Expanded(
             child: Column(children: [
@@ -629,18 +641,28 @@ class _PhoneNav extends StatelessWidget {
 }
 
 class _Rail extends StatelessWidget {
-  const _Rail({required this.workspaces, required this.active, required this.expanded, required this.onToggle, required this.onOpen});
+  const _Rail({required this.workspaces, required this.active, required this.expanded, required this.onToggle,
+    required this.onOpen, required this.onDashboard, required this.dashboardSelected});
   final List<Workspace> workspaces;
   final Workspace? active;
   final bool expanded;
   final VoidCallback? onToggle;
   final void Function(Workspace) onOpen;
+  final VoidCallback? onDashboard;
+  final bool dashboardSelected;
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final attention = app.pending.isNotEmpty || app.list('conflicts').any((c) => c['status'] == 'pending');
     final compact = !expanded;
+    final destinations = <(String, IconData, bool, bool, VoidCallback)>[
+      for (final ws in workspaces) ...[
+        (ws.label, ws.icon, ws == active, ws.root == '/shift' && attention, () => onOpen(ws)),
+        if (ws.root == '/counter' && onDashboard != null)
+          ('Dashboard', Icons.dashboard_outlined, dashboardSelected, false, onDashboard!),
+      ],
+    ];
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       width: compact ? 76 : 228,
@@ -669,19 +691,19 @@ class _Rail extends StatelessWidget {
           ),
           Expanded(
             child: ListView(padding: EdgeInsets.zero, children: [
-              for (final ws in workspaces)
+              for (final (label, icon, selected, showBadge, open) in destinations)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                   child: Tooltip(
-                    message: compact ? ws.label : '',
+                    message: compact ? label : '',
                     waitDuration: const Duration(milliseconds: 400),
                     child: Material(
-                      color: ws == active ? const Color(0xFF2A3D32) : Colors.transparent,
+                      color: selected ? const Color(0xFF2A3D32) : Colors.transparent,
                       borderRadius: BorderRadius.circular(10),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(10),
                         hoverColor: const Color(0xFF23342E),
-                        onTap: () => onOpen(ws),
+                        onTap: open,
                         child: SizedBox(
                           height: 44,
                           child: Row(
@@ -689,19 +711,19 @@ class _Rail extends StatelessWidget {
                             children: [
                               if (!compact) const SizedBox(width: 12),
                               Badge(
-                                isLabelVisible: ws.root == '/shift' && attention,
+                                isLabelVisible: showBadge,
                                 backgroundColor: const Color(0xFFF0A43A),
                                 smallSize: 8,
-                                child: Icon(ws.icon, size: 20, color: ws == active ? Brand.lime : const Color(0xFFC6D0CA)),
+                                child: Icon(icon, size: 20, color: selected ? Brand.lime : const Color(0xFFC6D0CA)),
                               ),
                               if (!compact) ...[
                                 const SizedBox(width: 13),
                                 Expanded(
-                                  child: Text(ws.label,
+                                  child: Text(label,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: ws == active ? const Color(0xFFD8F6AE) : const Color(0xFFC6D0CA),
-                                        fontWeight: ws == active ? FontWeight.w700 : FontWeight.w500,
+                                        color: selected ? const Color(0xFFD8F6AE) : const Color(0xFFC6D0CA),
+                                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                                       )),
                                 ),
                               ],
@@ -724,7 +746,8 @@ class _Rail extends StatelessWidget {
           Padding(
             padding: EdgeInsets.all(compact ? 12 : 16),
             child: compact
-                ? const Icon(Icons.storefront_outlined, color: Color(0xFFA7B6AC))
+                ? Tooltip(message: app.branchName(app.session?.branchId),
+                    child: const Icon(Icons.storefront_outlined, color: Color(0xFFA7B6AC)))
                 : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${app.snapshot['branch']?['name'] ?? app.session?.branchId ?? ''}',
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
@@ -798,7 +821,11 @@ class _WorkspacePageState extends State<WorkspacePage> {
     final body = tab.build(context, tab.takesArg ? widget.arg : null);
     if (tab.id == 'billing') return body;
     final ws = workspaceOf(tab);
-    final tabs = ws.visibleTabs(app);
+    final managerDashboard = tab.id == 'dashboard' && app.isManager;
+    final tabs = [
+      for (final destination in ws.visibleTabs(app))
+        if (destination.navParent == null && !(destination.id == 'dashboard' && app.isManager)) destination,
+    ];
     final layout = DeviceLayout.of(context);
     final pad = switch (layout) { DeviceLayout.phone => 16.0, DeviceLayout.tablet => 28.0, DeviceLayout.desktop => 24.0 };
     final textTheme = Theme.of(context).textTheme;
@@ -830,12 +857,13 @@ class _WorkspacePageState extends State<WorkspacePage> {
     return ListView(
       padding: EdgeInsets.fromLTRB(pad, layout == DeviceLayout.desktop ? 18 : 24, pad, 40),
       children: [
-        Text(ws.label, style: layout == DeviceLayout.desktop ? textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800) : textTheme.headlineMedium),
+        Text(managerDashboard ? tab.label : ws.label,
+            style: layout == DeviceLayout.desktop ? textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800) : textTheme.headlineMedium),
         const SizedBox(height: 4),
         Text(tab.help, style: textTheme.bodySmall),
         const SizedBox(height: 14),
-        if (tabs.length > 1) ...[
-          WorkspaceTabStrip(tabs: tabs, selected: tab, onSelect: (t) => context.go(t.path)),
+        if (!managerDashboard && tabs.length > 1) ...[
+          WorkspaceTabStrip(tabs: tabs, selected: tab.navParent ?? tab.id, onSelect: (t) => context.go(t.path)),
           SizedBox(height: layout == DeviceLayout.desktop ? 14 : 18),
         ],
         body,
@@ -844,153 +872,33 @@ class _WorkspacePageState extends State<WorkspacePage> {
   }
 }
 
-/// QA #5: a workspace's sub-tab strip. When the tabs do not fit, it shows
-/// scroll arrows at both ends and a "More" menu listing every tab, so no
-/// destination is hidden past the edge. The selected tab is always scrolled
-/// fully into view (on first build and after every switch). Segments, arrows
-/// and the menu are all focusable buttons: mouse, touch and keyboard work.
-class WorkspaceTabStrip extends StatefulWidget {
+/// Wrap the primary destinations so labels remain readable at narrow widths.
+class WorkspaceTabStrip extends StatelessWidget {
   const WorkspaceTabStrip({super.key, required this.tabs, required this.selected, required this.onSelect});
   final List<TabDef> tabs;
-  final TabDef selected;
+  final String selected;
   final ValueChanged<TabDef> onSelect;
 
   @override
-  State<WorkspaceTabStrip> createState() => _WorkspaceTabStripState();
-}
-
-class _WorkspaceTabStripState extends State<WorkspaceTabStrip> {
-  final _strip = ScrollController();
-  final _view = GlobalKey();
-  final _selectedKey = GlobalKey();
-  bool _canLeft = false;
-  bool _canRight = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _strip.addListener(_updateArrows);
-    _afterLayout();
-  }
-
-  @override
-  void didUpdateWidget(WorkspaceTabStrip old) {
-    super.didUpdateWidget(old);
-    if (old.selected != widget.selected || old.tabs.length != widget.tabs.length) _afterLayout();
-  }
-
-  @override
-  void dispose() {
-    _strip.dispose();
-    super.dispose();
-  }
-
-  void _afterLayout() => WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _updateArrows();
-        // Arrows may have appeared and narrowed the strip: reveal next frame.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _reveal();
-        });
-      });
-
-  void _updateArrows() {
-    if (!mounted || !_strip.hasClients) return;
-    final p = _strip.position;
-    final left = p.pixels > 0.5;
-    final right = p.pixels < p.maxScrollExtent - 0.5;
-    if (left != _canLeft || right != _canRight) {
-      setState(() {
-        _canLeft = left;
-        _canRight = right;
-      });
-    }
-  }
-
-  /// Scrolls the strip (only it, not the page) so the selected tab is fully
-  /// visible, segment padding included.
-  void _reveal() {
-    if (!_strip.hasClients) return;
-    final tab = _selectedKey.currentContext?.findRenderObject() as RenderBox?;
-    final view = _view.currentContext?.findRenderObject() as RenderBox?;
-    if (tab == null || view == null || !tab.attached || !view.attached) return;
-    // The key wraps the label; widen by the segment's own padding.
-    const pad = 28.0;
-    final left = tab.localToGlobal(Offset.zero, ancestor: view).dx - pad;
-    final right = left + tab.size.width + pad * 2;
-    if (left >= 0 && right <= view.size.width) return;
-    final target = left < 0 ? _strip.offset + left : _strip.offset + right - view.size.width;
-    _strip.jumpTo(target.clamp(0.0, _strip.position.maxScrollExtent));
-  }
-
-  void _page(int direction) {
-    if (!_strip.hasClients) return;
-    final width = _strip.position.viewportDimension;
-    final target = (_strip.offset + direction * width * 0.7).clamp(0.0, _strip.position.maxScrollExtent);
-    _strip.animateTo(target, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final overflow = _canLeft || _canRight;
-    final strip = SingleChildScrollView(
-      key: _view,
-      controller: _strip,
-      scrollDirection: Axis.horizontal,
-      child: SegmentedButton<String>(
-        showSelectedIcon: false,
-        segments: [
-          for (final t in widget.tabs)
-            ButtonSegment(
-              value: t.path,
-              label: t == widget.selected ? KeyedSubtree(key: _selectedKey, child: Text(t.label)) : Text(t.label),
-            ),
-        ],
-        selected: {widget.selected.path},
-        onSelectionChanged: (value) => widget.onSelect(widget.tabs.firstWhere((t) => t.path == value.first)),
-      ),
-    );
-    return NotificationListener<ScrollMetricsNotification>(
-      onNotification: (_) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
-        return false;
-      },
-      child: Row(children: [
-        if (overflow)
-          IconButton(
-            key: const ValueKey('tab-strip-left'),
-            tooltip: 'Scroll tabs left',
-            visualDensity: VisualDensity.compact,
-            onPressed: _canLeft ? () => _page(-1) : null,
-            icon: const Icon(Icons.chevron_left),
+    final reorderCount = tabs.any((tab) => tab.id == 'reorder') ? reorderAlerts(context.app).length : 0;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      children: [
+        for (final tab in tabs)
+          ChoiceChip(
+            key: ValueKey('workspace-tab-${tab.id}'),
+            label: Text(tab.id == 'reorder' && reorderCount > 0 ? '${tab.label} ($reorderCount)' : tab.label),
+            selected: tab.id == selected,
+            showCheckmark: false,
+            onSelected: (_) => onSelect(tab),
           ),
-        Expanded(child: Align(alignment: Alignment.centerLeft, child: strip)),
-        if (overflow) ...[
-          IconButton(
-            key: const ValueKey('tab-strip-right'),
-            tooltip: 'Scroll tabs right',
-            visualDensity: VisualDensity.compact,
-            onPressed: _canRight ? () => _page(1) : null,
-            icon: const Icon(Icons.chevron_right),
-          ),
-          PopupMenuButton<TabDef>(
-            key: const ValueKey('tab-strip-more'),
-            tooltip: 'All tabs',
-            onSelected: widget.onSelect,
-            itemBuilder: (_) => [
-              for (final t in widget.tabs)
-                CheckedPopupMenuItem<TabDef>(value: t, checked: t == widget.selected, child: Text(t.label)),
-            ],
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [Text('More'), Icon(Icons.arrow_drop_down)]),
-            ),
-          ),
-        ],
-      ]),
+      ],
     );
   }
 }
+
 
 class _TopBar extends StatelessWidget {
   const _TopBar({required this.controller, required this.layout, this.searchable = true});
@@ -1044,19 +952,24 @@ class _TopBar extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 460),
             child: TextField(
+              key: controller.section == 'vehicles' ? const ValueKey('vehicle-list-search') : null,
               controller: controller.search,
               focusNode: controller.searchFocus,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: controller.section == 'billing'
-                    ? (narrow ? 'Find a part' : showKeyHints(context) ? 'Search or scan parts  (F1)' /* WS-A: F1 on the counter */ : 'Search or scan parts')
-                    : (tiny ? 'Search' : 'Search this list'),
+                hintText: switch (controller.section) {
+                  'billing' => narrow ? 'Find a part' : showKeyHints(context) ? 'Search or scan parts  (F1)' : 'Search or scan parts',
+                  'vehicles' => tiny ? 'Find a vehicle' : 'Registration, VIN or owner',
+                  'orders' => tiny ? 'Find an order' : 'Find purchase orders',
+                  'shifts' => tiny ? 'Find a shift' : 'Find shifts',
+                  _ => tiny ? 'Search' : 'Search this list',
+                },
                 prefixIcon: const Icon(Icons.search, size: 20),
                 suffixIcon: ValueListenableBuilder(
                   valueListenable: controller.search,
                   builder: (_, value, _) => value.text.isEmpty
                       ? const SizedBox.shrink()
-                      : IconButton(icon: const Icon(Icons.close, size: 18), onPressed: controller.search.clear),
+                      : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close, size: 18), onPressed: controller.search.clear),
                 ),
               ),
               onSubmitted: (value) {
@@ -1097,7 +1010,7 @@ class _TopBar extends StatelessWidget {
             isLabelVisible: counterHolds(app).isNotEmpty, // Integration: job reservations are not counter bills
             label: Text('${counterHolds(app).length}'),
             child: IconButton(
-              tooltip: 'Parked sales',
+              tooltip: 'Held bills',
               visualDensity: tiny ? VisualDensity.compact : null,
               onPressed: () => showParked(context, controller),
               icon: const Icon(Icons.pause_circle_outline),

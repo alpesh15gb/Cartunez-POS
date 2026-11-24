@@ -27,7 +27,7 @@ class CounterCatalog extends StatelessWidget {
         final q = normalize(search.text);
         final exactIds = {for (final part in app.findByCode(search.text, forSale: true)) part['id']};
         final vehicle = app.cart['vehicle'] as Map?;
-        final saleProducts = app.saleProducts;
+        final saleProducts = app.saleProducts.where((p) => p['type'] != 'service');
         final categories = {'All parts', ...saleProducts.map((p) => '${p['category']}')}.toList();
         final currentCategory = categories.contains(category.value) ? category.value : 'All parts';
         final parts = saleProducts.where((p) {
@@ -106,7 +106,9 @@ class PartCard extends StatelessWidget {
               Positioned(
                 left: 8,
                 top: 8,
-                child: StatusChip(service ? 'Service' : stock > 0 ? '$stock in stock' : 'Out of stock'),
+                child: !service && stock <= 0 && beyondStock(app, product)
+                    ? const StockCaution('Out of stock')
+                    : StatusChip(service ? 'Service' : stock > 0 ? '$stock in stock' : 'Out of stock'),
               ),
               if (low && stock > 0) const Positioned(right: 8, top: 8, child: StatusChip('Low')),
             ]),
@@ -115,7 +117,7 @@ class PartCard extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${product['brand']} · ${product['sku']}',
+                Text([product['brand'], product['sku']].where((v) => '${v ?? ''}'.trim().isNotEmpty).join(' · '),
                     maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 3),
                 Text('${product['name']}',
@@ -139,7 +141,7 @@ class PartCard extends StatelessWidget {
                   ),
                   IconButton.filledTonal(
                     tooltip: 'Add ${product['name']}',
-                    onPressed: () => addPart(context, product),
+                    onPressed: () => addPart(context, product, quick: true),
                     icon: const Icon(Icons.add),
                   ),
                 ]),

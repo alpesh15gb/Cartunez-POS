@@ -63,12 +63,11 @@ void main() {
     expect(find.text('People & vehicles'), findsWidgets);
   });
 
-  testWidgets('the selected sub-tab is scrolled into view on a phone', (tester) async {
+  testWidgets('the selected sub-tab stays visible on a phone', (tester) async {
     await _open(tester, _signedIn(), '/settings');
-    final strip = find.byType(SegmentedButton<String>);
-    final label = find.descendant(of: strip, matching: find.text('Settings'));
-    expect(label, findsOneWidget);
-    final rect = tester.getRect(label);
+    final tab = find.byKey(const ValueKey('workspace-tab-settings'));
+    expect(tester.widget<ChoiceChip>(tab).selected, isTrue);
+    final rect = tester.getRect(tab);
     expect(rect.left, greaterThanOrEqualTo(0));
     expect(rect.right, lessThanOrEqualTo(390));
     // Settings does not read the shared search box, so it is hidden.

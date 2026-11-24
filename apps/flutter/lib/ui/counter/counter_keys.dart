@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../../main.dart';
 import '../shell.dart';
@@ -15,13 +16,13 @@ import 'tender_sheet.dart';
 const counterKeyMap = <(String, String)>[
   ('F1', 'Search or scan a part'),
   ('F2', 'Customer and vehicle'),
-  ('F4', 'Hold (park) this bill'),
+  ('F4', 'Hold this bill'),
   ('F5', 'Recall a held bill'),
-  ('F6', 'Take payment'),
+  ('F6', 'Take UPI payment'),
   ('F8', 'Discount'),
-  ('F9', 'Exact cash: completes the sale'),
+  ('F9', 'Review exact cash'),
   ('F10', 'Split payment'),
-  ('F12', 'Pay, save and print'),
+  (payPrintShortcut, 'Pay & print'),
   ('↑  ↓', 'Choose a cart line'),
   ('+  −', 'Change the chosen line\'s quantity'),
   ('Del', 'Remove the chosen line'),
@@ -29,11 +30,13 @@ const counterKeyMap = <(String, String)>[
   ('?', 'Show these keys'),
 ];
 
-/// Shared state of one counter screen: the cart line chosen with ↑/↓ and the
-/// left pane (parts list, photo grid or service tiles).
+const payPrintShortcut = kIsWeb ? 'Ctrl+Shift+Enter' : 'F12';
+
+/// Shared counter state for cart selection, item type and part display.
 class CounterController extends ChangeNotifier {
   int? selected;
-  String pane = 'list';
+  bool services = false;
+  bool photos = false;
 
   void select(int? index) {
     if (selected == index) return;
@@ -41,9 +44,14 @@ class CounterController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setPane(String value) {
-    if (pane == value) return;
-    pane = value;
+  void showServices(bool value) {
+    if (services == value) return;
+    services = value;
+    notifyListeners();
+  }
+
+  void togglePhotos() {
+    photos = !photos;
     notifyListeners();
   }
 }
@@ -178,11 +186,21 @@ class _CounterKeyboardState extends State<CounterKeyboard> {
   bool _onKey(KeyEvent event) {
     if (event is KeyUpEvent || !mounted) return false;
     final keyboard = HardwareKeyboard.instance;
-    if (_covered || keyboard.isControlPressed || keyboard.isAltPressed || keyboard.isMetaPressed) {
+    if (_covered) {
       _burst.reset();
       return false;
     }
     final key = event.logicalKey;
+    if (event is KeyDownEvent && key == LogicalKeyboardKey.enter && keyboard.isControlPressed &&
+        keyboard.isShiftPressed && !keyboard.isAltPressed && !keyboard.isMetaPressed) {
+      _burst.reset();
+      startCheckout(context, print: true);
+      return true;
+    }
+    if (keyboard.isControlPressed || keyboard.isAltPressed || keyboard.isMetaPressed) {
+      _burst.reset();
+      return false;
+    }
     final now = CounterKeyboard.clock();
     if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
       final code = _burst.enter(now);
@@ -269,13 +287,20 @@ class _CounterKeyboardState extends State<CounterKeyboard> {
       final shell = _shell;
       if (shell != null) showParked(context, shell);
     },
-    LogicalKeyboardKey.f6: () => startCheckout(context),
+    LogicalKeyboardKey.f6: () {
+      final app = context.appRead;
+      if (app.tenderTypes.contains('UPI')) {
+        startCheckout(context, tender: 'UPI');
+      } else {
+        app.toast('UPI is switched off in Register settings.');
+      }
+    },
     LogicalKeyboardKey.f8: () {
       if ((context.appRead.cart['lines'] as List).isNotEmpty) editDiscount(context);
     },
     LogicalKeyboardKey.f9: () => expressCash(context),
     LogicalKeyboardKey.f10: () => startCheckout(context, split: true),
-    LogicalKeyboardKey.f12: () => startCheckout(context, print: true),
+    if (!kIsWeb) LogicalKeyboardKey.f12: () => startCheckout(context, print: true),
   };
 
   @override
@@ -300,8 +325,8 @@ Future<void> showCounterKeys(BuildContext context) => showDialog<void>(
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
-                  SizedBox(
-                    width: 64,
+                    SizedBox(
+                      width: 124,
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Container(

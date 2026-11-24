@@ -10,14 +10,6 @@ import '../../main.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
-/// "2026-11-21" (or a timestamp) as the app's dd/mm/yyyy.
-String formatIsoDay(Object? value) {
-  final text = '${value ?? ''}';
-  final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(text);
-  if (m == null) return text.isEmpty ? '—' : text;
-  return '${m[3]}/${m[2]}/${m[1]}';
-}
-
 /// "1 bill", "3 bills".
 String plural(Object? count, String one, [String? many]) {
   final n = count is num ? count : num.tryParse('${count ?? 0}') ?? 0;
@@ -107,7 +99,7 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       Expanded(child: Text(
         d == null
             ? (problem == null ? 'Loading today…' : 'Could not load the dashboard.')
-            : 'Today ${formatIsoDay(d['day'])} · updated ${loadedAt == null ? '' : TimeOfDay.fromDateTime(loadedAt!).format(context)} · '
+            : 'Today ${formatDate(d['day'])} · updated ${loadedAt == null ? '' : TimeOfDay.fromDateTime(app.businessTime(loadedAt!)).format(context)} · '
                 'refreshes every ${widget.refreshEvery.inSeconds} s',
         style: text.bodySmall)),
       if (loading) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -127,6 +119,12 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
     Json part(String key) => Map<String, dynamic>.from(d[key] as Map? ?? const {});
     final today = part('today');
     final tills = rows(d['tills']);
+    final now = DateTime.now();
+    bool overdue(Json till) {
+      final openedAt = DateTime.tryParse('${till['openedAt'] ?? ''}');
+      return openedAt != null && now.difference(openedAt) >= const Duration(days: 1);
+    }
+    final overdueCount = tills.where(overdue).length;
     final low = part('lowStock');
     final dead = part('deadStock');
     final online = part('onlineOrders');
@@ -146,13 +144,20 @@ class CommandCenterState extends State<CommandCenter> with WidgetsBindingObserve
       _Tile(
         key: const ValueKey('tile-tills'),
         title: 'Till watch',
-        value: tills.isEmpty ? 'No till open' : '${tills.length} open · ${app.money(tills.fold<num>(0, (s, t) => s + n(t['cashOnHand'])))} in drawers',
+        value: tills.isEmpty ? 'No till open' : [
+          '${tills.length} open',
+          '${app.money(tills.fold<num>(0, (sum, till) => sum + n(till['cashOnHand'])))} in drawers',
+          if (overdueCount > 0) '$overdueCount overdue',
+        ].join(' · '),
         icon: Icons.point_of_sale_outlined,
+        tone: overdueCount > 0 ? _Tone.warn : _Tone.ok,
         onTap: () => open('/shift'),
         children: [
           for (final t in tills)
             _Line('${t['counter']}${t['counter'] == t['userName'] ? '' : ' · ${t['userName']}'}', app.money(n(t['cashOnHand'])),
-                sub: 'Open since ${time(t['openedAt'])} · ${plural(t['sales'], 'sale')} · last ${time(t['lastSaleAt'])}'),
+                sub: '${overdue(t) ? 'Overdue (24 h or more) · ' : ''}'
+                    'Open since ${formatDate(t['openedAt'], inTimeZone: app.businessTime)}'
+                    ' · ${plural(t['sales'], 'sale')} · last ${time(t['lastSaleAt'])}', maxSubLines: 3),
           if (tills.isEmpty) const _Line('Open a shift on the counter to start selling.', ''),
         ],
       ),
@@ -337,9 +342,10 @@ class _Tile extends StatelessWidget {
 }
 
 class _Line extends StatelessWidget {
-  const _Line(this.label, this.value, {this.sub});
+  const _Line(this.label, this.value, {this.sub, this.maxSubLines = 1});
   final String label, value;
   final String? sub;
+  final int maxSubLines;
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -348,7 +354,7 @@ class _Line extends StatelessWidget {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodyMedium),
-          if (sub != null) Text(sub!, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall),
+          if (sub != null) Text(sub!, maxLines: maxSubLines, overflow: TextOverflow.ellipsis, style: text.bodySmall),
         ])),
         if (value.isNotEmpty)
           Padding(padding: const EdgeInsets.only(left: 8), child: Text(value, style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700))),

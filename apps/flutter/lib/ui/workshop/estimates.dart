@@ -240,7 +240,7 @@ class _EstimateEditorState extends State<EstimateEditor> {
         Text(id == null ? 'New estimate' : 'Estimate ${widget.estimate['number']}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
         if (id != null) StatusChip(estimateStatusLabels[status] ?? status),
       ]),
-      if (widget.estimate['validUntil'] != null) Text('Valid until ${widget.estimate['validUntil']}'),
+      if (widget.estimate['validUntil'] != null) Text('Valid until ${formatDate(widget.estimate['validUntil'])}'),
       if (widget.estimate['jobId'] != null)
         TextButton(onPressed: () => context.go('/orders/jobs/${widget.estimate['jobId']}'), child: Text('Open job card ${widget.estimate['jobNumber'] ?? ''}')),
       const SizedBox(height: 10),
@@ -276,7 +276,12 @@ class _EstimateEditorState extends State<EstimateEditor> {
       ],
       const SizedBox(height: 16),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        if (!locked) FilledButton.icon(onPressed: busy ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Save')),
+        if (!locked)
+          FilledButton.icon(
+            onPressed: busy || lines.isEmpty ? null : _save,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save'),
+          ),
         if (id != null) ...[
           OutlinedButton.icon(
             onPressed: () async {
@@ -288,7 +293,7 @@ class _EstimateEditorState extends State<EstimateEditor> {
           ),
           OutlinedButton.icon(onPressed: () => shareDocumentPdf(context, doc, title: 'Estimate'), icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Share PDF')),
           if (!locked) ...[
-            FilledButton.icon(onPressed: busy ? null : _toJob, icon: const Icon(Icons.build_outlined), label: const Text('Approve → job card')),
+            FilledButton.icon(onPressed: busy || lines.isEmpty ? null : _toJob, icon: const Icon(Icons.build_outlined), label: const Text('Approve → job card')),
             TextButton(onPressed: () => _status('rejected'), child: const Text('Customer declined')),
           ],
         ],

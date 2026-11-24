@@ -11,6 +11,7 @@ import '../screens/people.dart';
 import '../shell.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import '../workshop/vehicles.dart' show editVehicle;
 import 'account_actions.dart';
 
 /// Loads the customer's summary from the server and shows [Customer360View].
@@ -98,14 +99,16 @@ class Customer360View extends StatelessWidget {
       if ('${customer['address'] ?? ''}'.isNotEmpty) Text('${customer['address']}', style: Theme.of(context).textTheme.bodySmall),
       const SizedBox(height: 12),
       Toolbar([
-        if (app.canSell)
+        if (app.canSell && balance > 0)
           FilledButton.icon(
             onPressed: () => then(recordPayment(context, 'customers', customer).then((_) => true)),
             icon: const Icon(Icons.payments_outlined),
             label: const Text('Collect payment'),
           ),
-        if (app.canSell)
+        if (app.canSell && balance > 0)
           OutlinedButton.icon(onPressed: () => then(takeAdvance(context, customer)), icon: const Icon(Icons.savings_outlined), label: const Text('Take advance')),
+        if (app.canSell && balance <= 0)
+          FilledButton.icon(onPressed: () => then(takeAdvance(context, customer)), icon: const Icon(Icons.savings_outlined), label: const Text('Take advance')),
         if (app.canSell && advance > 0)
           OutlinedButton.icon(onPressed: () => then(refundAdvance(context, customer, advance)), icon: const Icon(Icons.undo), label: const Text('Give back advance')),
         if (balance > 0)
@@ -139,7 +142,13 @@ class Customer360View extends StatelessWidget {
         final width = (c.maxWidth - 12 * (across - 1)) / across;
         return Wrap(spacing: 12, runSpacing: 12, children: [for (final f in figures) SizedBox(width: width, child: f)]);
       }),
-      SectionTitle('Vehicles'),
+      SectionTitle('Vehicles', trailing: app.canSell
+          ? TextButton.icon(
+              onPressed: () => then(editVehicle(context, {'customerId': customer['id']}).then((vehicle) => vehicle != null)),
+              icon: const Icon(Icons.add),
+              label: const Text('Add vehicle'),
+            )
+          : null),
       // Integration: the customer's vehicles from the vehicle registry (WS-C), each
       // opening its page; the legacy saved vehicle shows only when none is registered.
       if (registered.isNotEmpty)
@@ -154,7 +163,7 @@ class Customer360View extends StatelessWidget {
             ),
         ])
       else if (vehicles.isEmpty)
-        const Text('No vehicle saved. Add one when editing the customer or at the counter.')
+        const Text('No vehicle saved.')
       else
         Wrap(spacing: 8, runSpacing: 8, children: [
           for (final v in vehicles)

@@ -57,17 +57,37 @@ final Json _invoice = {
   ],
 };
 
-Future<void> _openReturn(WidgetTester tester, AppState app) async {
+Future<void> _openReturn(WidgetTester tester, AppState app, {Json? invoice}) async {
   tester.view.physicalSize = const Size(1000, 1400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (context) =>
-      Scaffold(body: TextButton(onPressed: () => startReturn(context, _invoice), child: const Text('Open')))))));
+      Scaffold(body: TextButton(onPressed: () => startReturn(context, invoice ?? _invoice), child: const Text('Open')))))));
   await tester.tap(find.text('Open'));
   await tester.pumpAndSettle();
 }
 
 void main() {
+  testWidgets('Walk-in explains store credit and a named invoice can use a store credit preview', (tester) async {
+    final app = _app('manager')..reply = {'currency': 'INR', 'refunds': [{'type': 'Credit', 'amount': 11800}]};
+    await _openReturn(tester, app, invoice: {..._invoice, 'customerId': null, 'customer': null});
+    expect(find.text('Store credit'), findsNothing);
+    expect(find.textContaining('Store credit requires an invoice billed to a named customer'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    await _openReturn(tester, app);
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpAndSettle();
+    final storeCredit = find.text('Store credit');
+    await tester.ensureVisible(storeCredit);
+    await tester.tap(storeCredit);
+    await tester.pumpAndSettle();
+    expect(find.text('Customer account · ${app.money(11800)}'), findsOneWidget);
+    expect(app.path, '/returns/preview');
+    expect(tester.takeException(), isNull);
+  });
+
   test('exchange receipt separates the credit, the amount applied and each actual payout', () {
     final app = _app('manager');
     final note = {'invoiceId': 'i', 'total': 10000, 'exchangeApplied': 8000, 'refundTotal': 2000,
@@ -124,9 +144,10 @@ void main() {
     await tester.tap(find.text('Supplier warranty (RMA)').last);
     await tester.pumpAndSettle();
     expect(find.text('Claim from supplier'), findsOneWidget);
-    // QA #7: nothing is committed until Refund or Exchange is chosen.
-    expect(find.text('Choose Refund or Exchange'), findsOneWidget);
-    expect(tester.widget<FilledButton>(find.ancestor(of: find.text('Choose Refund or Exchange'), matching: find.byWidgetPredicate((w) => w is FilledButton))).onPressed, isNull);
+    // QA #7: nothing is committed until settlement is chosen.
+    const choose = 'Choose a settlement method';
+    expect(find.text(choose), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.ancestor(of: find.text(choose), matching: find.byWidgetPredicate((w) => w is FilledButton))).onPressed, isNull);
     await tester.tap(find.text('Exchange'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add to counter'));
@@ -247,6 +268,38 @@ void main() {
   });
 
   // Integration: registered vehicles (WS-C) replace the legacy vehicle field and link to their page.
+  testWidgets('settled customer offers an advance and can add a linked vehicle', (tester) async {
+    tester.view.physicalSize = const Size(390, 1100);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _app('manager');
+    await tester.pumpWidget(AppScope(
+      state: app,
+      child: MaterialApp(
+        home: ShellScope(
+          controller: ShellController(),
+          child: const Scaffold(
+            body: SingleChildScrollView(
+              child: Customer360View(summary: {
+                'customer': {'id': 'c1', 'name': 'Arjun'},
+                'balance': 0,
+              }),
+            ),
+          ),
+        ),
+      ),
+    ));
+    expect(find.text('Collect payment'), findsNothing);
+    expect(find.ancestor(of: find.text('Take advance'), matching: find.byWidgetPredicate((w) => w is FilledButton)), findsOneWidget);
+    final addVehicle = find.text('Add vehicle');
+    await tester.ensureVisible(addVehicle);
+    await tester.tap(addVehicle);
+    await tester.pumpAndSettle();
+    expect(find.text('Registration number'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
   testWidgets('customer 360 lists registered vehicles with links', (tester) async {
     tester.view.physicalSize = const Size(390, 2400);
     tester.view.devicePixelRatio = 1;

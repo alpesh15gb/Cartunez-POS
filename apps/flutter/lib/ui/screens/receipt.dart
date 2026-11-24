@@ -30,6 +30,12 @@ class ReceiptView {
       ? (doc['voided'] == true ? 'CREDIT NOTE · INVOICE VOID' : 'CREDIT NOTE')
       : (doc['taxScheme'] == 'india-gst' ? 'TAX INVOICE' : noTax ? 'INVOICE' : 'SALES RECEIPT');
   String money(num? v) => app.money(v, currency: '${doc['currency'] ?? app.settings['currency'] ?? 'INR'}');
+  String get cashierLabel => credit ? 'Processed by' : 'Cashier';
+  String? get cashier {
+    final id = doc['cashierId'] ?? doc['userId'];
+    return id == null || '$id'.isEmpty ? null : app.userName('$id');
+  }
+
   String get totalLabel => credit ? 'Credit note total' : 'Total';
   List<Json> get lines => (doc['lines'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
   String lineName(Json l) => '${l['name'] ?? app.productName('${l['productId']}')}';
@@ -105,8 +111,9 @@ Future<void> showReceipt(BuildContext context, Json doc) {
           if (doc['customer'] is Map)
             Text('Customer: ${doc['customer']['name']}${customerTaxId.isNotEmpty ? ' · $customerTaxId' : ''}'),
           if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) Text('Place of supply: ${doc['placeOfSupply']}'),
-          Text('${formatDate(doc['createdAt'])} · ${app.userName('${doc['cashierId'] ?? doc['userId']}')}',
-              style: Theme.of(context).textTheme.bodySmall),
+          Text(formatDate(doc['createdAt']), style: Theme.of(context).textTheme.bodySmall),
+          if (r.cashier case final name?)
+            Text('${r.cashierLabel}: $name', style: Theme.of(context).textTheme.bodySmall),
           if (!r.credit && doc['id'] != null && app.invoiceStatus(doc) != 'Finalized')
             Padding(padding: const EdgeInsets.only(top: 6), child: StatusChip(app.invoiceStatus(doc))),
           const SizedBox(height: 14),
@@ -261,6 +268,7 @@ Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
       pw.Center(child: pw.Text(r.kind, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
       row('No.', '${doc['number'] ?? 'Pending'}'),
       row('Date', formatDate(doc['createdAt'])),
+      if (r.cashier case final name?) row(r.cashierLabel, name),
       if (r.credit) ...[
         row('Against', '${doc['invoiceNumber']}'),
         if (doc['invoiceDate'] != null) row('Invoice date', formatDate(doc['invoiceDate'])),

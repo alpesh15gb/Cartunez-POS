@@ -14,20 +14,6 @@ import '../widgets.dart';
 List<Json> reorderAlerts(AppState app) =>
     app.list('reorderSuggestions').where((s) => ((s['suggestedQuantity'] as num?) ?? 0) > 0).toList();
 
-/// A "Reorder alerts" button with a count badge, for purchasing screens.
-class ReorderAlertsButton extends StatelessWidget {
-  const ReorderAlertsButton({super.key});
-  @override
-  Widget build(BuildContext context) {
-    final count = reorderAlerts(context.app).length;
-    return OutlinedButton.icon(
-      onPressed: () => ShellScope.of(context).open('reorder'),
-      icon: Badge(isLabelVisible: count > 0, label: Text('$count'), child: const Icon(Icons.notifications_active_outlined)),
-      label: Text(count == 0 ? 'Reorder alerts' : 'Reorder alerts · $count'),
-    );
-  }
-}
-
 class ReorderScreen extends StatefulWidget {
   const ReorderScreen({super.key});
   @override
@@ -89,7 +75,6 @@ class _ReorderScreenState extends State<ReorderScreen> {
           icon: const Icon(Icons.playlist_add),
           label: const Text('Create draft purchase orders'),
         ),
-        TextButton(onPressed: () => ShellScope.of(context).open('orders'), child: const Text('Go to purchase orders')),
       ]),
       if (rows.isEmpty)
         EmptyState(

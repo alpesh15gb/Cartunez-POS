@@ -8,6 +8,7 @@ import 'package:cartunez_pos/ui/prefs.dart';
 import 'package:cartunez_pos/ui/router.dart';
 import 'package:cartunez_pos/ui/shell.dart';
 import 'package:cartunez_pos/ui/workshop/common.dart';
+import 'package:cartunez_pos/ui/workshop/estimates.dart';
 import 'package:cartunez_pos/ui/workshop/jobs.dart';
 import 'package:cartunez_pos/ui/workshop/kits.dart';
 import 'package:cartunez_pos/ui/workshop/vehicles.dart';
@@ -86,8 +87,8 @@ _Register _workshop({String role = 'manager'}) => _Register()
     'estimates': [],
   };
 
-Future<void> _open(WidgetTester tester, AppState app, String location) async {
-  tester.view.physicalSize = _phone;
+Future<void> _open(WidgetTester tester, AppState app, String location, {Size size = _phone}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(CartunezApp(state: app, prefs: UiPrefs(), initialLocation: location));
@@ -180,7 +181,7 @@ void main() {
     expect(find.text('MH 12 AB 1234 · JOB-MAIN-1'), findsOneWidget);
     expect(find.text('KA 05 MN 7788 · JOB-MAIN-2'), findsOneWidget);
 
-    // Status chips sit in one sideways-scrolling row on phones.
+    // Status chips wrap to fit the phone.
     await tester.ensureVisible(find.text('Ready (1)'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Ready (1)'));
@@ -209,6 +210,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(JobBoard), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Delivered lane fits a narrow desktop and stays reachable on a phone', (tester) async {
+    final app = _workshop();
+    app.snapshot = {
+      ...app.snapshot,
+      'jobs': [
+        ...app.list('jobs'),
+        {'id': 'j3', 'number': 'JOB-MAIN-3', 'status': 'delivered', 'vehicleId': 'v1', 'customerId': 'c1',
+          'bay': 'Workshop service dispatch', 'deliveredAt': DateTime.now().toUtc().toIso8601String(), 'total': 35000},
+      ],
+    };
+    await _open(tester, app, '/orders/jobs', size: const Size(1050, 844));
+
+    final board = tester.getRect(find.byType(JobBoard));
+    final delivered = tester.getRect(find.byKey(const ValueKey('job-lane-delivered')));
+    expect(delivered.right, lessThanOrEqualTo(board.right + 0.1));
+    expect(find.text('JOB-MAIN-3').hitTestable(), findsOneWidget);
+    final detail = tester.widget<Text>(find.text('Maruti Suzuki Swift · Arjun Mehta · Bay Workshop service dispatch'));
+    expect(detail.maxLines, isNull);
+    expect(detail.overflow, isNot(TextOverflow.ellipsis));
+    expect(tester.takeException(), isNull);
+
+    tester.view.physicalSize = _phone;
+    await tester.pumpAndSettle();
+    final deliveredFilter = find.widgetWithText(ChoiceChip, 'Delivered (1)');
+    expect(deliveredFilter, findsOneWidget);
+    await tester.ensureVisible(deliveredFilter);
+    await tester.pumpAndSettle();
+    await tester.tap(deliveredFilter);
+    await tester.pumpAndSettle();
+    expect(find.text('MH 12 AB 1234 · JOB-MAIN-3'), findsOneWidget);
+  });
+
+  testWidgets('estimate Save follows the presence of a line in both new and edited drafts', (tester) async {
+    final app = _workshop();
+    app.snapshot = {
+      ...app.snapshot,
+      'estimates': [
+        {'id': 'est-1', 'number': 'EST-1', 'status': 'draft',
+          'lines': [{'productId': 'filter', 'qty': 1, 'unitPrice': 28500, 'name': 'Oil Filter'}]},
+      ],
+    };
+    await _open(tester, app, '/orders/estimates/new');
+    expect(find.byType(EstimateEditor), findsOneWidget);
+    final save = find.ancestor(of: find.text('Save'), matching: find.byWidgetPredicate((w) => w is FilledButton));
+    expect(tester.widget<FilledButton>(save).onPressed, isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _open(tester, app, '/orders/estimates/est-1', size: const Size(390, 1000));
+    expect(find.text('Estimate EST-1'), findsOneWidget);
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull);
+    final remove = find.byTooltip('Remove');
+    await tester.ensureVisible(remove);
+    await tester.tap(remove);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(save).onPressed, isNull);
   });
 
   testWidgets('job card: advance on the job, bill offers the held advance, disabled bill says why', (tester) async {

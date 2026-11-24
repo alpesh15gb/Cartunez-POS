@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../core/api.dart';
 import '../core/billing.dart';
@@ -13,13 +14,18 @@ String humanize(String key) => key
     .replaceAll(RegExp(r'[-_]'), ' ')
     .replaceFirstMapped(RegExp(r'^.'), (m) => m[0]!.toUpperCase());
 
-String formatDate(Object? value) {
-  final date = DateTime.tryParse('${value ?? ''}');
+final _regionalDay = DateFormat('dd MMM yyyy', 'en_US');
+final _regionalTime = DateFormat('hh:mm a', 'en_US');
+
+String formatDay(DateTime date) => _regionalDay.format(date);
+
+String formatDate(Object? value, {DateTime Function(DateTime)? inTimeZone}) {
+  final raw = '${value ?? ''}';
+  final date = DateTime.tryParse(raw);
   if (date == null) return '—';
-  final local = date.toLocal();
-  String two(int n) => n.toString().padLeft(2, '0');
-  final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-  return '${two(local.day)}/${two(local.month)}/${local.year}, $hour:${two(local.minute)} ${local.hour < 12 ? 'am' : 'pm'}';
+  if (raw.length == 10) return formatDay(date);
+  final local = inTimeZone == null ? date.toLocal() : inTimeZone(date);
+  return '${formatDay(local)}, ${_regionalTime.format(local).toLowerCase()}';
 }
 
 List<String> splitList(Object? value) =>

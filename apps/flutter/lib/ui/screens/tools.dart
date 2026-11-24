@@ -81,7 +81,7 @@ class StockCountsPage extends StatelessWidget {
           '${open == 0 ? '' : ' $open count${open == 1 ? '' : 's'} open.'}',
       actions: [
         FilledButton.icon(
-          onPressed: app.online ? () => startPhysicalCount(context) : null,
+          onPressed: app.online && app.stockParts.isNotEmpty && app.bins.isNotEmpty ? () => startPhysicalCount(context) : null,
           icon: const Icon(Icons.add),
           label: const Text('Start a count'),
         ),

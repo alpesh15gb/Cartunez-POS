@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../counter/catalog_grid.dart';
 import '../counter/counter_keys.dart';
 import '../counter/counter_panes.dart';
 
@@ -65,7 +64,7 @@ class _BillingScreenState extends State<BillingScreen> {
       // Touch tablets open on the photo grid (the switcher still offers the list).
       if (!_tabletPaneSet) {
         _tabletPaneSet = true;
-        counter.pane = 'grid';
+        counter.photos = true;
       }
       // UI polish: tablets keep the cart on screen as a side pane (no bottom sheet).
       final scheme = Theme.of(context).colorScheme;
@@ -81,7 +80,7 @@ class _BillingScreenState extends State<BillingScreen> {
       ]);
     } else {
       body = Stack(children: [
-        if (width < 600) CounterLeftPane(category: category, compact: true) else CounterCatalog(category: category, wide: false),
+        ListenableBuilder(listenable: counter, builder: (_, _) => CounterLeftPane(category: category, compact: true)),
         const Positioned(left: 0, right: 0, bottom: 0, child: CartPill()),
       ]);
     }

@@ -8,7 +8,6 @@ import '../widgets.dart';
 import 'bills.dart';
 import 'labels.dart';
 import '../purchasing/received.dart'; // WS-E
-import '../purchasing/reorder.dart';
 
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
@@ -26,37 +25,52 @@ class OrdersScreen extends StatelessWidget {
         if (!hasParts) TextButton(onPressed: () => shell.open('parts'), child: const Text('Add a part')),
         if (app.sellableBins.isEmpty && app.stockParts.isNotEmpty && app.list('purchaseOrders').isNotEmpty)
           TextButton(onPressed: () => shell.open('bins'), child: const Text('Add a sellable bin to receive stock')),
-        // WS-E: reorder alerts (badge) and supplier cost rises.
-        const ReorderAlertsButton(),
-        OutlinedButton.icon(onPressed: () => shell.open('cost-changes'), icon: const Icon(Icons.trending_up), label: const Text('Cost changes')),
       ]),
-      DataList(
-        rows: app.list('purchaseOrders').reversed.toList(),
-        empty: 'No purchase orders yet.',
-        actionWidth: 230,
-        columns: [
-          Col('Created', (o) => Text(formatDate(o['createdAt']))),
-          Col('Supplier', (o) => Text('${app.list('suppliers').where((s) => s['id'] == o['supplierId']).firstOrNull?['name'] ?? '—'}',
-              style: const TextStyle(fontWeight: FontWeight.w700))),
-          Col('Parts', (o) => Text([for (final l in o['lines'] as List) '${app.productName('${l['productId']}')} ${l['received']}/${l['quantity']}'].join(', ')), flex: 2),
-          Col('Value', (o) => Text(app.money((o['lines'] as List).fold<int>(0, (n, l) => n + (l['quantity'] as int) * (l['cost'] as int)))), numeric: true),
-          Col('Status', (o) => StatusChip(titleCase('${o['status']}'))),
-        ],
-        actions: (o) => [
-          // WS-E: drafts from reorder alerts are placed (or cancelled) first.
-          if (o['status'] == 'draft')
-            FilledButton.tonal(onPressed: () => _place(context, o), child: const Text('Place order')),
-          if (o['status'] != 'received' && o['status'] != 'cancelled' && o['status'] != 'draft')
-            FilledButton.tonal(onPressed: () => enterBill(context, order: o), child: const Text('Enter bill')),
-          if (o['status'] == 'open' || o['status'] == 'partial')
-            IconButton(tooltip: 'Receive goods without a bill', icon: const Icon(Icons.move_to_inbox_outlined),
-                onPressed: () => receiveOrder(context, o)),
-          if ((o['status'] == 'draft' || o['status'] == 'open') && (o['lines'] as List).every((l) => (l['received'] ?? 0) == 0))
-            IconButton(tooltip: 'Cancel order', icon: const Icon(Icons.close), onPressed: () => _cancel(context, o)),
-          if ((o['lines'] as List).any((line) => (line['received'] ?? 0) > 0))
-            IconButton(tooltip: 'Print receipt labels', icon: const Icon(Icons.print_outlined),
-                onPressed: () => _receiptLabels(context, o)),
-        ],
+      ValueListenableBuilder(
+        valueListenable: shell.search,
+        builder: (context, search, _) {
+          final query = normalize(search.text);
+          final rows = app.list('purchaseOrders').reversed.where((order) {
+            if (query.isEmpty) return true;
+            final terms = [
+              order['id'], order['status'], formatDate(order['createdAt']),
+              app.supplierById(order['supplierId'])?['name'],
+              for (final line in order['lines'] as List) ...[
+                app.productName('${line['productId']}'),
+                app.productById('${line['productId']}')?['sku'],
+              ],
+            ];
+            return terms.any((term) => normalize(term).contains(query));
+          }).toList();
+          return DataList(
+            rows: rows,
+            empty: query.isEmpty ? 'No purchase orders yet.' : 'No purchase orders match your search.',
+            actionWidth: 230,
+            columns: [
+              Col('Created', (o) => Text(formatDate(o['createdAt']))),
+              Col('Supplier', (o) => Text('${app.supplierById(o['supplierId'])?['name'] ?? '—'}',
+                  style: const TextStyle(fontWeight: FontWeight.w700))),
+              Col('Parts', (o) => Text([for (final l in o['lines'] as List) '${app.productName('${l['productId']}')} ${l['received']}/${l['quantity']}'].join(', ')), flex: 2),
+              Col('Value', (o) => Text(app.money((o['lines'] as List).fold<int>(0, (n, l) => n + (l['quantity'] as int) * (l['cost'] as int)))), numeric: true),
+              Col('Status', (o) => StatusChip(titleCase('${o['status']}'))),
+            ],
+            actions: (o) => [
+              // WS-E: drafts from reorder alerts are placed (or cancelled) first.
+              if (o['status'] == 'draft')
+                FilledButton.tonal(onPressed: () => _place(context, o), child: const Text('Place order')),
+              if (o['status'] != 'received' && o['status'] != 'cancelled' && o['status'] != 'draft')
+                FilledButton.tonal(onPressed: () => enterBill(context, order: o), child: const Text('Enter bill')),
+              if (o['status'] == 'open' || o['status'] == 'partial')
+                IconButton(tooltip: 'Receive goods without a bill', icon: const Icon(Icons.move_to_inbox_outlined),
+                    onPressed: () => receiveOrder(context, o)),
+              if ((o['status'] == 'draft' || o['status'] == 'open') && (o['lines'] as List).every((l) => (l['received'] ?? 0) == 0))
+                IconButton(tooltip: 'Cancel order', icon: const Icon(Icons.close), onPressed: () => _cancel(context, o)),
+              if ((o['lines'] as List).any((line) => (line['received'] ?? 0) > 0))
+                IconButton(tooltip: 'Print receipt labels', icon: const Icon(Icons.print_outlined),
+                    onPressed: () => _receiptLabels(context, o)),
+            ],
+          );
+        },
       ),
     ]);
   }

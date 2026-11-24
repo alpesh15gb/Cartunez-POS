@@ -42,47 +42,15 @@ String? checkoutBlocker(AppState app) {
   return null;
 }
 
-/// F9: the customer pays the exact total in cash. No dialog unless something
-/// is missing (shift, place of supply).
+/// F9 prepares the exact cash amount for review before posting the sale.
 Future<void> expressCash(BuildContext context) async {
   final app = context.appRead;
   if (!app.canSell) return;
-  final blocker = checkoutBlocker(app);
-  if (blocker != null) {
-    app.toast(blocker);
-    return;
-  }
   if (!app.tenderTypes.contains('Cash')) {
     app.toast('Cash is switched off in Register settings.');
     return;
   }
-  if (!app.online) {
-    app.toast('Reconnect before taking payment. Your cart is saved on this counter.');
-    return;
-  }
-  if (app.openShift == null) {
-    final opened = await openShiftDialog(context, forCheckout: true);
-    if (!opened || !context.mounted) return;
-  }
-  final place = '${app.customerById('${app.cart['customerId']}')?['stateCode'] ?? app.business['stateCode'] ?? ''}'.trim();
-  if (app.gst && !RegExp(r'^\d{2}$').hasMatch(place)) {
-    // The dialog asks for the place of supply.
-    await startCheckout(context, tender: 'Cash');
-    return;
-  }
-  final total = app.currentQuote().total;
-  Json? invoice;
-  try {
-    invoice = await app.checkout(
-      tenders: [{'type': 'Cash', 'amount': total, 'confirmed': true, 'reference': ''}],
-      expectedTotal: total,
-      placeOfSupply: place,
-    );
-  } catch (error) {
-    app.toast(errorText(error));
-    return;
-  }
-  if (invoice != null && context.mounted) await afterSale(context, invoice);
+  await startCheckout(context, tender: 'Cash');
 }
 
 /// After a completed sale: print (silently on Windows) when asked or when this

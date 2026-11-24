@@ -25,7 +25,7 @@ Future<void> showBill(BuildContext context, Json bill) async {
         width: 720,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Wrap(spacing: 8, children: [
-            Text('Date ${bill['billDate']}'),
+            Text('Date ${formatDate(bill['billDate'])}'),
             if (bill['gst'] == true) StatusChip(bill['interState'] == true ? 'GST · IGST' : 'GST'),
             if (bill['voided'] == true) const StatusChip('Cancelled'),
           ]),

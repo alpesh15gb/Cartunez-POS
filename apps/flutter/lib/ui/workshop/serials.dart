@@ -1,4 +1,4 @@
-// WS-C (workshop): serial / IMEI warranty lookup (Catalog & stock › Serial & warranty).
+// WS-C (workshop): serial / IMEI warranty lookup (Catalog & stock › Warranty).
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -51,8 +51,12 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
   Widget build(BuildContext context) {
     final app = context.app;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Text('Find who bought a serial-tracked part and whether it is still under warranty.', style: Theme.of(context).textTheme.bodySmall),
-      const SizedBox(height: 10),
+      if (app.canStock && app.feature('warranty'))
+        Toolbar([OutlinedButton.icon(
+          onPressed: () => context.go('/catalog/warranty'),
+          icon: const Icon(Icons.assignment_return_outlined),
+          label: const Text('Claims & core refunds'),
+        )]),
       Row(children: [
         Expanded(
           child: TextField(
@@ -90,7 +94,7 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
               const SizedBox(height: 6),
               Text('Stock status: ${titleCase('${r['status']}')}'),
               if (r['soldAt'] != null) Text('Sold ${formatDate(r['soldAt'])}${r['invoice'] == null ? '' : ' on ${r['invoice']['number']}'}'),
-              if (r['warrantyUntil'] != null) Text('Warranty until ${r['warrantyUntil']} (${r['product']?['warrantyMonths'] ?? 0} months)'),
+              if (r['warrantyUntil'] != null) Text('Warranty until ${formatDate(r['warrantyUntil'])} (${r['product']?['warrantyMonths'] ?? 0} months)'),
               if (r['customer'] != null) Text('Customer: ${r['customer']['name']} ${r['customer']['phone'] ?? ''}'),
               if (r['vehicle'] != null) Text('Vehicle: ${r['vehicle']['regNo']} ${r['vehicle']['make'] ?? ''} ${r['vehicle']['model'] ?? ''}'),
               const SizedBox(height: 8),

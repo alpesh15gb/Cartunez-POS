@@ -100,57 +100,60 @@ void main() {
     });
   });
 
-  group('QA #5 workspace tab strip', () {
-    for (final width in [924.0, 1163.0]) {
-      testWidgets('Catalog at ${width.toInt()} px: overflow controls, More menu lists every tab', (tester) async {
-        final app = _signedIn();
-        await _open(tester, app, '/catalog/parts', Size(width, 900));
-        expect(find.byKey(const ValueKey('tab-strip-more')), findsOneWidget);
-        expect(find.byKey(const ValueKey('tab-strip-right')), findsOneWidget);
-        const hidden = ['Import', 'Labels', 'Online products', 'Serial & warranty'];
-        final before = {for (final l in hidden) l: find.text(l).evaluate().length};
-        await tester.tap(find.byKey(const ValueKey('tab-strip-more')));
-        await tester.pumpAndSettle();
-        for (final label in hidden) {
-          expect(find.text(label).evaluate().length, before[label]! + 1, reason: '$label not in the More menu');
+  group('Catalog navigation', () {
+    for (final width in [390.0, 924.0, 1163.0]) {
+      testWidgets('at ${width.toInt()} px six primary tabs fit and secondary tools stay reachable', (tester) async {
+        await _open(tester, _signedIn(), '/catalog/parts', Size(width, 900));
+
+        final parts = find.byKey(const ValueKey('workspace-tab-parts'));
+        final warranty = find.byKey(const ValueKey('workspace-tab-serials'));
+        final tabs = find.byWidgetPredicate((widget) =>
+          widget is ChoiceChip && widget.key.toString().contains('workspace-tab-'));
+        expect(tabs, findsNWidgets(6));
+        for (final tab in tabs.evaluate()) {
+          final box = tab.renderObject! as RenderBox;
+          expect(box.localToGlobal(Offset.zero).dx, greaterThanOrEqualTo(0));
+          expect(box.localToGlobal(box.size.bottomRight(Offset.zero)).dx, lessThanOrEqualTo(width));
         }
-        await tester.tap(find.text('Serial & warranty').last, warnIfMissed: false); // the menu item takes the tap
+        expect(find.byTooltip('Scroll tabs right'), findsNothing);
+
+        for (final (action, path) in [
+          ('Import parts', '/catalog/import'),
+          ('Stock counts', '/catalog/counts'),
+          ('Labels', '/catalog/labels'),
+        ]) {
+          await tester.tap(find.text(action));
+          await tester.pumpAndSettle();
+          expect(_location(tester), path);
+          expect(tester.widget<ChoiceChip>(parts).selected, isTrue);
+          await tester.tap(parts);
+          await tester.pumpAndSettle();
+        }
+
+        await tester.tap(warranty);
         await tester.pumpAndSettle();
         expect(_location(tester), '/catalog/serials');
-        // The selected tab is fully inside the strip (not under the arrows).
-        final strip = tester.getRect(find.byType(SingleChildScrollView).first);
-        final selected = tester.getRect(find.descendant(of: find.byType(SegmentedButton<String>), matching: find.text('Serial & warranty')));
-        expect(selected.left, greaterThanOrEqualTo(strip.left));
-        expect(selected.right, lessThanOrEqualTo(strip.right));
-        // Back to the first tab: it is fully visible again.
-        await tester.tap(find.byKey(const ValueKey('tab-strip-left')));
+        await tester.tap(find.text('Claims & core refunds'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('tab-strip-more')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Parts').last, warnIfMissed: false);
-        await tester.pumpAndSettle();
-        final parts = tester.getRect(find.descendant(of: find.byType(SegmentedButton<String>), matching: find.text('Parts')));
-        final strip2 = tester.getRect(find.byType(SingleChildScrollView).first);
-        expect(parts.left, greaterThanOrEqualTo(strip2.left));
+        expect(_location(tester), '/catalog/warranty');
+        expect(tester.widget<ChoiceChip>(warranty).selected, isTrue);
       });
     }
 
-    testWidgets('the arrows scroll the strip and are keyboard focusable buttons', (tester) async {
-      await _open(tester, _signedIn(), '/catalog/parts', const Size(924, 900));
-      final before = tester.getRect(find.descendant(of: find.byType(SegmentedButton<String>), matching: find.text('Parts'))).left;
-      await tester.tap(find.byKey(const ValueKey('tab-strip-right')));
+    testWidgets('cashiers can open Labels and Warranty lookup without stock tools', (tester) async {
+      final app = _signedIn();
+      app.session!.user['role'] = 'cashier';
+      await _open(tester, app, '/catalog/parts', const Size(390, 844));
+      expect(find.text('Labels'), findsOneWidget);
+      expect(find.text('Import parts'), findsNothing);
+      expect(find.text('Stock counts'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('workspace-tab-serials')));
       await tester.pumpAndSettle();
-      final after = tester.getRect(find.descendant(of: find.byType(SegmentedButton<String>), matching: find.text('Parts'))).left;
-      expect(after, lessThan(before));
-      expect(find.descendant(of: find.byKey(const ValueKey('tab-strip-right')), matching: find.byType(IconButton)).evaluate().isNotEmpty ||
-          tester.widget(find.byKey(const ValueKey('tab-strip-right'))) is IconButton, isTrue);
-    });
-
-    testWidgets('a strip that fits shows no overflow controls', (tester) async {
-      await _open(tester, _signedIn(), '/settings', const Size(1600, 900));
-      expect(find.byKey(const ValueKey('tab-strip-more')), findsNothing);
+      expect(_location(tester), '/catalog/serials');
+      expect(find.text('Claims & core refunds'), findsNothing);
     });
   });
+
 
   group('QA #12 reports', () {
     testWidgets('opens on daily sales for today, already run, with the report name as heading', (tester) async {
@@ -176,6 +179,15 @@ void main() {
       // Run and Export sit in the same group as the report picker.
       final group = find.byKey(const ValueKey('report-primary'));
       expect(find.descendant(of: group, matching: find.text('Run report')), findsOneWidget);
+      final runLabel = find.text('Run report');
+      final runButton = tester.widget<FilledButton>(
+        find.ancestor(of: runLabel, matching: find.byWidgetPredicate((widget) => widget is FilledButton)),
+      );
+      final foreground = DefaultTextStyle.of(tester.element(runLabel)).style.color!;
+      final background = runButton.style!.backgroundColor!.resolve(const <WidgetState>{})!;
+      expect(foreground, Colors.white);
+      expect((foreground.computeLuminance() + 0.05) / (background.computeLuminance() + 0.05), greaterThanOrEqualTo(7));
+      expect(find.text('Parts import'), findsNothing);
       expect(find.descendant(of: group, matching: find.text('Export')), findsOneWidget);
     });
 

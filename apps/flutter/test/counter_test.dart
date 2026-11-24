@@ -126,7 +126,7 @@ void main() {
     app.dispose();
   });
 
-  testWidgets('F9 completes an exact-cash sale and the counter resets for the next customer', (tester) async {
+  testWidgets('F9 reviews exact cash before posting and resets the counter after confirmation', (tester) async {
     final app = await _ready(tester);
     await _mount(tester, app, const Size(1400, 900));
     expect(find.byType(PartRow), findsOneWidget); // desktop: dense parts list
@@ -134,12 +134,117 @@ void main() {
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.f9);
     await tester.pumpAndSettle();
+    expect(app.tenders, isNull);
+    expect(find.text('Take payment'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(app.cart['lines'], _oneFilter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.f9);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Complete sale'));
+    await tester.pumpAndSettle();
     expect(app.tenders, [{'type': 'Cash', 'amount': 25000, 'confirmed': true, 'reference': ''}]);
     expect(find.textContaining('Sale complete'), findsOneWidget);
     expect((app.cart['lines'] as List), isEmpty);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.textContaining('Sale complete'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('one-tap add chooses the only stocked bin and review is required when stock runs out', (tester) async {
+    final app = await _ready(tester);
+    app.snapshot = {...app.snapshot, 'stock': [{'productId': 'p', 'binId': 'bin', 'quantity': 1}]};
+    await _mount(tester, app, const Size(924, 800));
+    final add = find.byTooltip('Add Oil filter');
+    await tester.tap(add);
+    await tester.pumpAndSettle();
+    expect(find.text('Picked from bin'), findsNothing);
+    expect(app.cart['lines'], _oneFilter);
+
+    await tester.tap(add);
+    await tester.pumpAndSettle();
+    expect(find.text('Picked from bin'), findsOneWidget);
+    expect(find.text('No stock available. Adding this part can make stock negative.'), findsOneWidget);
+    expect(app.cart['lines'], _oneFilter);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('F6 prepares UPI and Ctrl+Shift+Enter opens checkout without posting a sale', (tester) async {
+    final app = await _ready(tester);
+    await _mount(tester, app, const Size(1400, 900));
+    app.updateCart({'lines': _oneFilter});
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.f6);
+    await tester.pumpAndSettle();
+    expect(find.text('No UPI ID set, so no QR.'), findsOneWidget);
+    expect(app.tenders, isNull);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(find.text('Take payment'), findsOneWidget);
+    expect(app.tenders, isNull);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('a long cart item keeps its full name and quantity times rate at 924px', (tester) async {
+    final app = await _ready(tester);
+    const name = 'Oil filter heavy duty deep housing with extended filter element';
+    app.snapshot = {
+      ...app.snapshot,
+      'products': [{...app.productById('p')!, 'name': name}],
+    };
+    await _mount(tester, app, const Size(924, 900));
+    app.updateCart({'lines': _oneFilter});
+    await tester.pumpAndSettle();
+    final title = find.descendant(of: find.byType(CartTable), matching: find.text(name));
+    expect(title, findsOneWidget);
+    expect(tester.widget<Text>(title).maxLines, isNull);
+    expect(tester.getSize(title).width, greaterThan(240));
+    expect(find.text('1 × ${app.money(25000)}'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('percentage discount becomes paise under the existing cashier approval limit', (tester) async {
+    final app = await _ready(tester);
+    app.snapshot = {
+      ...app.snapshot,
+      'settings': {...app.settings, 'cashierDiscountLimit': 2500},
+    };
+    await _mount(tester, app, const Size(1400, 900));
+    app.updateCart({'lines': _oneFilter});
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f8);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Percentage (%)').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Discount value'), '12.5');
+    await tester.enterText(find.widgetWithText(TextField, 'Reason'), 'Counter promotion');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('A manager approval is needed'), findsOneWidget);
+    expect(app.cart['discount'], 0);
+
+    await tester.enterText(find.widgetWithText(TextField, 'Discount value'), '10');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(app.cart['discount'], 2500);
+    expect(app.currentQuote().total, 22500);
     await tester.pumpWidget(const SizedBox());
     app.dispose();
   });
@@ -266,6 +371,9 @@ void main() {
     expect(find.text('Exact cash'), findsOneWidget);
     expect(find.text('Staff'), findsOneWidget);
     await tester.tap(find.text('Exact cash'));
+    await tester.pumpAndSettle();
+    expect(app.tenders, isNull);
+    await tester.tap(find.text('Complete sale'));
     await tester.pumpAndSettle();
     expect(app.tenders!.single['amount'], 25000);
     expect(find.textContaining('Sale complete'), findsOneWidget);

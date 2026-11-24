@@ -111,70 +111,70 @@ class _JobBoardState extends State<JobBoard> {
     final app = context.app;
     final jobs = app.list('jobs').where((j) => j['status'] != 'cancelled').toList().reversed.toList();
     // Delivered jobs: only the last week on the board.
-    final weekAgo = DateTime.now().subtract(const Duration(days: 7)).toIso8601String();
-    final visible = jobs.where((j) => j['status'] != 'delivered' || '${j['deliveredAt'] ?? j['updatedAt']}'.compareTo(weekAgo) > 0).toList();
+    final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+    final lanes = {for (final status in jobStatuses) status: <Json>[]};
+    for (final job in jobs) {
+      if (job['status'] == 'delivered' &&
+          DateTime.tryParse('${job['deliveredAt'] ?? job['updatedAt']}')?.isAfter(weekAgo) != true) continue;
+      lanes[job['status']]?.add(job);
+    }
     final toolbar = Toolbar([
       FilledButton.icon(onPressed: () => newJob(context), icon: const Icon(Icons.add), label: const Text('New job card')),
       OutlinedButton.icon(onPressed: () => context.go('/orders/estimates/new'), icon: const Icon(Icons.request_quote_outlined), label: const Text('New estimate')),
     ]);
     return LayoutBuilder(builder: (context, c) {
       if (c.maxWidth >= 900) {
-        // Lanes stay at least [minLane] wide; narrower windows scroll sideways.
-        const minLane = 220.0, gap = 10.0;
-        final lane = ((c.maxWidth - gap * (jobStatuses.length - 1)) / jobStatuses.length).clamp(minLane, double.infinity);
         final scheme = Theme.of(context).colorScheme;
-        final lanes = Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          for (final (i, status) in jobStatuses.indexed) ...[
-            if (i > 0) const SizedBox(width: gap),
-            Container(
-              width: lane,
-              constraints: const BoxConstraints(minHeight: 220),
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: scheme.primary.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: scheme.outlineVariant),
-              ),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
-                  child: Text('${jobStatusLabel(status)} (${visible.where((j) => j['status'] == status).length})',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-                ),
-                for (final job in visible.where((j) => j['status'] == status))
-                  Padding(padding: const EdgeInsets.only(bottom: 8), child: JobTile(job: job, compact: true)),
-                if (!visible.any((j) => j['status'] == status))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
-                    child: Text('No jobs', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
-                  ),
-              ]),
-            ),
-          ],
-        ]);
+        // A lane flexes to the workspace, so the Delivered column is always in view.
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           toolbar,
-          SingleChildScrollView(scrollDirection: Axis.horizontal, child: lanes),
+          Row(
+            spacing: 10,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final entry in lanes.entries)
+                Expanded(
+                  child: Container(
+                    key: ValueKey('job-lane-${entry.key}'),
+                    constraints: const BoxConstraints(minHeight: 220),
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: scheme.outlineVariant),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+                        child: Text('${jobStatusLabel(entry.key)} (${entry.value.length})',
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                      ),
+                      for (final job in entry.value)
+                        Padding(padding: const EdgeInsets.only(bottom: 8), child: JobTile(job: job, compact: true)),
+                      if (entry.value.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          child: Text('No jobs', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall),
+                        ),
+                    ]),
+                  ),
+                ),
+            ],
+          ),
         ]);
       }
-      final shown = visible.where((j) => filter == 'open' ? j['status'] != 'delivered' : j['status'] == filter).toList();
+      final open = jobs.where((j) => j['status'] != 'delivered').toList();
+      final shown = filter == 'open' ? open : lanes[filter] ?? const [];
       return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         toolbar,
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(children: [
-            for (final s in ['open', ...jobStatuses])
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ChoiceChip(
-                  label: Text('${s == 'open' ? 'Open' : jobStatusLabel(s)} '
-                      '(${visible.where((j) => s == 'open' ? j['status'] != 'delivered' : j['status'] == s).length})'),
-                  selected: filter == s,
-                  onSelected: (_) => setState(() => filter = s),
-                ),
-              ),
-          ]),
-        ),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final s in ['open', ...jobStatuses])
+            ChoiceChip(
+              label: Text(s == 'open' ? 'Open (${open.length})' : '${jobStatusLabel(s)} (${lanes[s]!.length})'),
+              selected: filter == s,
+              onSelected: (_) => setState(() => filter = s),
+            ),
+        ]),
         const SizedBox(height: 8),
         if (shown.isEmpty)
           EmptyState(
@@ -220,11 +220,10 @@ class JobTile extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${vehicle?['regNo'] ?? 'No vehicle'}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text('${vehicle?['regNo'] ?? 'No vehicle'}', style: const TextStyle(fontWeight: FontWeight.w700)),
               Text('${job['number']}', style: small),
               const SizedBox(height: 4),
-              Text(details, maxLines: 2, overflow: TextOverflow.ellipsis, style: small),
+              Text(details, style: small),
               const SizedBox(height: 4),
               Text(app.money(job['total'] as num?), style: const TextStyle(fontWeight: FontWeight.w700)),
             ]),
@@ -477,10 +476,13 @@ class _JobCardState extends State<JobCard> {
       ].join(' · ')),
       if ('${job['complaint'] ?? ''}'.isNotEmpty) Text('Reported: ${job['complaint']}'),
       if ('${job['notes'] ?? ''}'.isNotEmpty) Text('Notes: ${job['notes']}'),
-      if (job['estimateId'] != null)
-        TextButton(onPressed: () => context.go('/orders/estimates/${job['estimateId']}'), child: const Text('Open the estimate')),
-      if (job['invoiceId'] != null && app.canSell)
-        TextButton(onPressed: () => context.go('/orders/invoices/${job['invoiceId']}'), child: Text('Invoice ${job['invoiceNumber'] ?? ''}')),
+      if (job['estimateId'] != null || (job['invoiceId'] != null && app.canSell))
+        Wrap(spacing: 8, runSpacing: 4, children: [
+          if (job['estimateId'] != null)
+            TextButton(onPressed: () => context.go('/orders/estimates/${job['estimateId']}'), child: const Text('Open the estimate')),
+          if (job['invoiceId'] != null && app.canSell)
+            TextButton(onPressed: () => context.go('/orders/invoices/${job['invoiceId']}'), child: Text('Invoice ${job['invoiceNumber'] ?? ''}')),
+        ]),
       const SizedBox(height: 10),
       if (open)
         Wrap(spacing: 8, runSpacing: 8, children: [
@@ -507,7 +509,7 @@ class _JobCardState extends State<JobCard> {
               : null),
       DocumentLines(lines: lines, job: true, onChanged: open && !busy ? (next) => _saveLines(next, revision) : null),
       if (open && lines.isNotEmpty)
-        const Padding(padding: EdgeInsets.only(top: 4), child: Text('Parts on an open job are reserved (they show under Parked sales at the counter).')),
+        const Padding(padding: EdgeInsets.only(top: 4), child: Text('Parts on an open job are reserved and appear under Held bills at the counter.')),
       const SizedBox(height: 10),
       DocumentTotals(job),
       const SizedBox(height: 10),

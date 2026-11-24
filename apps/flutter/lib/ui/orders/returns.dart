@@ -200,7 +200,7 @@ class ReturnDialogState extends State<ReturnDialog> {
         for (final l in widget.invoice['lines'] as List)
           if (((l['returnableQty'] ?? 0) as int) > 0) Map<String, dynamic>.from(l as Map),
       ];
-  bool get hasCustomer => widget.invoice['customerId'] != null;
+  bool get hasCustomer => '${widget.invoice['customerId'] ?? ''}'.isNotEmpty;
   bool get onlyAccount => funding.isNotEmpty && funding.every((t) => t == 'Credit' || t == 'Advance');
   Set<String> get funding => {
     ...paidBy.keys,
@@ -242,7 +242,7 @@ class ReturnDialogState extends State<ReturnDialog> {
             : methods.contains('Cash') || methods.isEmpty
                 ? 'Cash'
                 : methods.first;
-    if (onlyAccount) settle = 'credit';
+    if (onlyAccount && hasCustomer) settle = 'credit';
     final all = lines;
     for (final l in all) {
       disposition['${l['lineId']}'] = 'restock';
@@ -284,7 +284,7 @@ class ReturnDialogState extends State<ReturnDialog> {
     final chosen = _chosen();
     setState(() => error = null);
     if (chosen.isEmpty) return setState(() => error = 'Choose at least one item coming back.');
-    if (settle == null) return setState(() => error = 'Choose Refund or Exchange first.');
+    if (settle == null) return setState(() => error = 'Choose how to settle the return.');
     for (final c in chosen) {
       if (c['disposition'] == 'rma' && c['supplierId'] == null) {
         return setState(() => error = 'Choose the supplier to claim the warranty on ${c['name']} from.');
@@ -440,24 +440,27 @@ class ReturnDialogState extends State<ReturnDialog> {
           for (final l in lines) _line(context, app, l),
           Text('Credit for these items: ${app.money(credit)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
           const SizedBox(height: 12),
-          SegmentedButton<String>(
-            showSelectedIcon: false,
-            segments: [
-              const ButtonSegment(value: 'exchange', label: Text('Exchange'), icon: Icon(Icons.swap_horiz)),
-              const ButtonSegment(value: 'refund', label: Text('Refund'), icon: Icon(Icons.payments_outlined)),
-              if (hasCustomer) const ButtonSegment(value: 'credit', label: Text('Store credit'), icon: Icon(Icons.menu_book_outlined)),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final (value, label) in [('exchange', 'Exchange'), ('refund', 'Refund'), if (hasCustomer) ('credit', 'Store credit')])
+                ChoiceChip(
+                  label: Text(label),
+                  selected: settle == value,
+                  onSelected: busy ? null : (_) => setState(() {
+                    settle = value;
+                    error = null;
+                  }),
+                ),
             ],
-            selected: {?settle},
-            emptySelectionAllowed: true,
-            onSelectionChanged: (v) => setState(() {
-              settle = v.isEmpty ? settle : v.first;
-              error = null;
-            }),
           ),
           const SizedBox(height: 8),
           Text(
             switch (settle) {
-              null => 'Choose how to settle: Refund pays the money back, Exchange puts the items on the counter bill.',
+              null => hasCustomer
+                  ? 'Choose a refund, an exchange at the counter, or store credit on the customer account.'
+                  : 'Choose a refund or an exchange at the counter. Store credit requires an invoice billed to a named customer.',
               'exchange' => 'The items go on the counter bill as a credit. Add the replacement; the customer pays or gets back the difference.',
               'credit' => 'Eligible amounts go on ${customer?['name'] ?? 'the customer'}\'s account.',
               _ => refundInstruction(app),
@@ -466,8 +469,8 @@ class ReturnDialogState extends State<ReturnDialog> {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: settle == 'refund' && refundType == 'Cash' && paidBy.isNotEmpty && !paidBy.containsKey('Cash') ? Brand.warning : null),
           ),
-          if ((settle == 'refund' || settle == 'credit') && credit > 0 &&
-              (funding.length > 1 || funding.any((t) => !_refundMethods.contains(t))))
+          if (credit > 0 && (settle == 'credit' ||
+              (settle == 'refund' && (funding.length > 1 || funding.any((t) => !_refundMethods.contains(t))))))
             _RefundPreview(invoice: widget.invoice, method: settle == 'credit' ? 'Credit' : refundType,
               lines: [for (final l in lines) if (_qty(l) > 0) {'lineId': l['lineId'], 'quantity': _qty(l)}]),
           if (settle == 'refund') ...[
@@ -517,7 +520,7 @@ class ReturnDialogState extends State<ReturnDialog> {
           onPressed: busy || settle == null || (!app.online && settle != 'exchange') ? null : _submit,
           icon: Icon(settle == 'exchange' ? Icons.point_of_sale_outlined : Icons.check),
           label: Text(switch (settle) {
-            null => 'Choose Refund or Exchange',
+            null => 'Choose a settlement method',
             'exchange' => 'Add to counter',
             _ => 'Record return',
           }),

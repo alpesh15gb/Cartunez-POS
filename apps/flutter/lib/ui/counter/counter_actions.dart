@@ -5,6 +5,7 @@ import '../../core/billing.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
 import '../shell.dart';
+import '../theme.dart';
 import '../widgets.dart';
 
 // ---------------- actions ----------------
@@ -43,7 +44,7 @@ bool setLineQuantity(BuildContext context, int index, int qty, {bool quiet = fal
   return true;
 }
 
-Future<void> addPart(BuildContext context, Json product) async {
+Future<void> addPart(BuildContext context, Json product, {bool quick = false}) async {
   final app = context.appRead;
   if (!app.canSell) {
     app.toast('Your role cannot create sales.');
@@ -57,21 +58,41 @@ Future<void> addPart(BuildContext context, Json product) async {
     app.toast(onlineOnlyMessage(product));
     return;
   }
+  final productId = '${product['id']}';
   final service = product['type'] == 'service';
   final beyond = beyondStock(app, product);
-  final stocked = app.sellableBins.where((b) => app.available('${product['id']}', '${b['id']}') > 0).toList();
-  // No stock showing: still sellable (stock goes negative until the purchase is entered).
+  final stocked = app.sellableBins.where((b) => app.available(productId, '${b['id']}') > 0).toList();
   final choices = stocked.isNotEmpty || !beyond ? stocked : usualBins(app, product);
   if (!service && choices.isEmpty) {
-    app.toast(beyond ? 'Add a sellable bin first (Inventory › Bins).' : '${product['name']} is out of stock.');
+    app.toast(beyond ? 'Add a sellable bin first (Catalog & stock › Bins).' : '${product['name']} is out of stock.');
     return;
   }
   final vehicle = app.cart['vehicle'] as Map?;
   final fit = vehicle == null ? const FitResult('unchecked') : fitment(product, Map<String, dynamic>.from(vehicle));
+  final binId = service ? null : '${choices.first['id']}';
+  final lines = (app.cart['lines'] as List).cast<Json>();
+  int remaining(Json bin) => app.available(productId, '${bin['id']}') - lines
+      .where((line) => line['productId'] == product['id'] && line['binId'] == bin['id'])
+      .fold<int>(0, (qty, line) => qty + (line['qty'] as int));
+  if (quick && product['serialTracked'] != true && !fit.needsOverride && (service || stocked.length == 1)) {
+    final index = lines.indexWhere((line) => line['productId'] == product['id'] && line['binId'] == binId);
+    final qty = index < 0 ? 1 : (lines[index]['qty'] as int) + 1;
+    if (qty <= 9999 && (service || qty <= app.available(productId, binId))) {
+      if (index >= 0) {
+        setLineQuantity(context, index, qty);
+      } else {
+        app.updateCart({'lines': [...lines, {'productId': product['id'], 'qty': 1, 'binId': binId, 'serials': <String>[]}]});
+      }
+      return;
+    }
+  }
   await showFormDialog<void>(
     context,
     title: 'Add ${product['name']}',
     submit: 'Add to sale',
+    header: !service && beyond && !choices.any((bin) => remaining(bin) > 0)
+        ? const StockCaution('No stock available. Adding this part can make stock negative.')
+        : null,
     fields: [
       const FieldSpec('qty', 'Quantity', kind: FieldKind.number, value: 1, required: true),
       if (!service)
@@ -79,8 +100,8 @@ Future<void> addPart(BuildContext context, Json product) async {
             kind: FieldKind.select,
             required: true,
             barcodeChoice: app.binIdForCode,
-            value: choices.first['id'],
-            options: [for (final b in choices) ('${b['id']}', '${app.binName(b)} · ${app.available('${product['id']}', '${b['id']}')} available')]),
+            value: binId,
+            options: [for (final bin in choices) ('${bin['id']}', '${app.binName(bin)} · ${remaining(bin)} available')]),
       if (product['serialTracked'] == true)
         const FieldSpec('serials', 'Serial numbers', required: true, help: 'One per unit, separated by commas.'),
       if (fit.needsOverride)
@@ -104,8 +125,8 @@ Future<void> addPart(BuildContext context, Json product) async {
       final existing = lines.indexWhere((l) => l['productId'] == product['id'] && l['binId'] == binId);
       final already = existing >= 0 ? lines[existing]['qty'] as int : 0;
       if (qty + already > 9999) throw FormProblem('A sale line can contain at most 9999 units.');
-      if (binId != null && !beyond && qty + already > app.available('${product['id']}', binId)) {
-        throw FormProblem('Only ${app.available('${product['id']}', binId)} available in that bin.');
+      if (binId != null && !beyondStock(app, currentProduct ?? product) && qty + already > app.available(productId, binId)) {
+        throw FormProblem('Only ${app.available(productId, binId)} available in that bin.');
       }
       final serials = splitList(values['serials']);
       final existingSerials = lines.where((l) => l['productId'] == product['id'])
@@ -124,6 +145,7 @@ Future<void> addPart(BuildContext context, Json product) async {
         approvalId = approval['id'];
       }
       final line = {
+        if (existing >= 0) ...lines[existing],
         'productId': product['id'],
         'qty': qty + already,
         'binId': binId,
@@ -171,36 +193,7 @@ void handleScan(BuildContext context, ShellController shell, String raw) {
   final product = matches.first;
   shell.search.clear();
   HapticFeedback.selectionClick();
-  if (product['serialTracked'] != true) {
-    final lines = (app.cart['lines'] as List).cast<Json>();
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i]['productId'] != product['id']) continue;
-      if (setLineQuantity(context, i, (lines[i]['qty'] as int) + 1, quiet: true)) {
-        return;
-      }
-    }
-    final vehicle = app.cart['vehicle'] as Map?;
-    final needsOverride = vehicle != null && fitment(product, Map<String, dynamic>.from(vehicle)).needsOverride;
-    final service = product['type'] == 'service';
-    var binChoices = app.sellableBins.where((bin) =>
-        app.available('${product['id']}', '${bin['id']}') > 0 &&
-        !lines.any((line) => line['productId'] == product['id'] && line['binId'] == bin['id'])).toList();
-    if (binChoices.isEmpty && !service && beyondStock(app, product) &&
-        !lines.any((line) => line['productId'] == product['id'])) {
-      binChoices = usualBins(app, product).take(1).toList();
-    }
-    if (!needsOverride && (service || binChoices.length == 1)) {
-      if (service && lines.any((line) => line['productId'] == product['id'])) {
-        app.toast('A sale line can contain at most 9999 units.');
-        return;
-      }
-      app.updateCart({'lines': [...lines, {
-        'productId': product['id'], 'qty': 1, 'binId': service ? null : binChoices.single['id'], 'serials': <String>[],
-      }]});
-      return;
-    }
-  }
-  addPart(context, product);
+  addPart(context, product, quick: true);
 }
 
 Future<void> chooseVehicle(BuildContext context) async {
@@ -271,8 +264,11 @@ Future<void> editDiscount(BuildContext context) async {
     context,
     title: 'Discount',
     fields: [
-      FieldSpec('discount', 'Amount off (subtotal ${app.money(bill.subtotal)})',
-          kind: FieldKind.money, value: ((app.cart['discount'] ?? 0) as int) / 100, required: true, help: 'Enter 0 to remove.'),
+      const FieldSpec('mode', 'Discount type', kind: FieldKind.select, value: 'amount',
+          options: [('amount', 'Fixed amount'), ('percent', 'Percentage (%)')], required: true),
+      FieldSpec('discount', 'Discount value', kind: FieldKind.money,
+          value: ((app.cart['discount'] ?? 0) as int) / 100, required: true,
+          help: 'Subtotal ${app.money(bill.subtotal)}. Enter an amount or percentage. Enter 0 to remove.'),
       FieldSpec('reason', 'Reason', value: app.cart['discountReason']),
       if (!app.isManager)
         FieldSpec('approvalId', 'Manager approval ID',
@@ -280,9 +276,15 @@ Future<void> editDiscount(BuildContext context) async {
                 'The approval must cover at least this discount.'),
     ],
     onSubmit: (values) async {
-      final amount = ((double.tryParse('${values['discount']}') ?? -1) * 100).round();
-      if (amount < 0) throw FormProblem('Enter a valid amount.');
-      if (amount > bill.subtotal) throw FormProblem('Discount cannot be more than ${app.money(bill.subtotal)}.');
+      final value = parsePaymentAmount('${values['discount']}');
+      if (value == null) throw FormProblem('Enter a valid discount with up to two decimal places.');
+      final subtotal = app.currentQuote().subtotal;
+      final percent = values['mode'] == 'percent';
+      if (percent && value > 10000) throw FormProblem('Enter a percentage from 0 to 100.');
+      final amount = percent
+          ? ((BigInt.from(subtotal) * BigInt.from(value) + BigInt.from(5000)) ~/ BigInt.from(10000)).toInt()
+          : value;
+      if (amount > subtotal) throw FormProblem('Discount cannot be more than ${app.money(subtotal)}.');
       if (amount == 0) {
         app.updateCart({'discount': 0, 'discountReason': '', 'discountApprovalId': null});
         return;
@@ -319,6 +321,19 @@ Future<void> holdSale(BuildContext context) async {
 
 /// Whether this part may be sold with no stock showing (Settings › Modules; never for serial-tracked parts).
 bool beyondStock(AppState app, Json? product) => app.feature('negativeStock') && product?['serialTracked'] != true;
+
+/// Warn at the point of adding out-of-stock items or reviewing an overdrawn cart line.
+class StockCaution extends StatelessWidget {
+  const StockCaution(this.message, {super.key});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(color: const Color(0xFFFDF3DF), borderRadius: BorderRadius.circular(6)),
+        child: Text(message, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Brand.warning)),
+      );
+}
 
 /// Bins for a sale with no stock showing: where the part is usually kept, then the other sellable bins.
 List<Json> usualBins(AppState app, Json product) {

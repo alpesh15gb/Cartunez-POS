@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
+import '../screens/inventory.dart' show editProduct;
 import '../screens/people.dart';
 import '../shell.dart';
 import '../widgets.dart';
@@ -45,44 +46,49 @@ class CounterLeftPane extends StatelessWidget {
   const CounterLeftPane({super.key, required this.category, required this.compact});
   final ValueNotifier<String> category;
 
-  /// Phone: compact rows only, no pane switcher.
+  /// Use phone spacing when the counter has a cart sheet.
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final counter = CounterScope.maybeOf(context) ?? CounterController();
-    final pane = compact ? 'list' : counter.pane;
-    final switcher = compact
-        ? null
-        : Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            child: Row(children: [
-              SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'list', icon: Icon(Icons.view_list, size: 18), label: Text('Parts')),
-                  ButtonSegment(value: 'grid', icon: Icon(Icons.grid_view, size: 18), label: Text('Photos')),
-                  ButtonSegment(value: 'services', icon: Icon(Icons.build_outlined, size: 18), label: Text('Services')),
-                ],
-                selected: {pane},
-                onSelectionChanged: (v) => counter.setPane(v.first),
-              ),
-              const Spacer(),
-              if (showKeyHints(context))
-                TextButton.icon(
-                onPressed: () => showCounterKeys(context),
-                icon: const Icon(Icons.keyboard_outlined, size: 18),
-                label: const Row(mainAxisSize: MainAxisSize.min, children: [Text('Keys'), KeyCap('?')]),
-              ),
-            ]),
-          );
-    final body = switch (pane) {
-      'grid' => CounterCatalog(category: category, wide: true),
-      'services' => const ServiceTiles(),
-      _ => PartsList(category: category, compact: compact),
-    };
-    if (switcher == null) return body;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [switcher, Expanded(child: body)]);
+    final counter = CounterScope.maybeOf(context)!;
+    final inset = compact ? 12.0 : 20.0;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: EdgeInsets.fromLTRB(inset, compact ? 6 : 12, inset, 0),
+        child: Row(children: [
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment(value: false, label: Text('Parts')),
+              ButtonSegment(value: true, label: Text('Services')),
+            ],
+            selected: {counter.services},
+            onSelectionChanged: (v) => counter.showServices(v.first),
+          ),
+          if (!counter.services) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: counter.photos ? 'Show parts list' : 'Show parts photos',
+              onPressed: counter.togglePhotos,
+              icon: Icon(counter.photos ? Icons.view_list_outlined : Icons.grid_view_outlined),
+            ),
+          ],
+          const Spacer(),
+          if (showKeyHints(context))
+            TextButton.icon(
+              onPressed: () => showCounterKeys(context),
+              icon: const Icon(Icons.keyboard_outlined, size: 18),
+              label: const Row(mainAxisSize: MainAxisSize.min, children: [Text('Keys'), KeyCap('?')]),
+            ),
+        ]),
+      ),
+      Expanded(
+        child: counter.services ? const ServiceTiles()
+            : counter.photos ? CounterCatalog(category: category, wide: !compact)
+            : PartsList(category: category, compact: compact),
+      ),
+    ]);
   }
 }
 
@@ -157,14 +163,16 @@ class PartRow extends StatelessWidget {
           ),
           SizedBox(
             width: 64,
-            child: Text(stock > 0 ? '$stock' : 'Out', textAlign: TextAlign.right,
-                style: TextStyle(fontFeatures: _figures, color: stock > 0 ? null : Theme.of(context).colorScheme.error)),
+            child: stock <= 0 && beyondStock(app, product)
+                ? const Align(alignment: Alignment.centerRight, child: Tooltip(message: 'Out of stock', child: StockCaution('Out')))
+                : Text(stock > 0 ? '$stock' : 'Out', textAlign: TextAlign.right,
+                    style: TextStyle(fontFeatures: _figures, color: stock > 0 ? null : Theme.of(context).colorScheme.error)),
           ),
           SizedBox(
             width: 96,
             child: Text(app.money(price as num?), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: _figures)),
           ),
-          IconButton(tooltip: 'Add ${product['name']}', onPressed: () => addPart(context, product), icon: const Icon(Icons.add_circle_outline)),
+          IconButton(tooltip: 'Add ${product['name']}', onPressed: () => addPart(context, product, quick: true), icon: const Icon(Icons.add_circle_outline)),
         ]),
       ),
     );
@@ -184,7 +192,18 @@ class ServiceTiles extends StatelessWidget {
       builder: (context, _) {
         final services = counterParts(app, shell.search.text, 'All parts', services: true);
         if (services.isEmpty) {
-          return const EmptyState(message: 'No services yet. Add a product of type Service (for example "Seat cover fitting").', icon: Icons.build_outlined);
+          final empty = !app.saleProducts.any((p) => p['type'] == 'service');
+          return EmptyState(
+            message: empty ? 'No services yet.' : 'No service matches "${shell.search.text}".',
+            icon: Icons.build_outlined,
+            action: empty && app.canStock
+                ? FilledButton.icon(
+                    onPressed: () => editProduct(context, const {'type': 'service'}),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Create service'),
+                  )
+                : null,
+          );
         }
         return GridView.builder(
           padding: const EdgeInsets.all(20),
@@ -196,7 +215,7 @@ class ServiceTiles extends StatelessWidget {
             return Card(
               clipBehavior: Clip.antiAlias,
               child: InkWell(
-                onTap: () => handleScan(context, shell, '${s['sku']}'),
+                onTap: () => addPart(context, s, quick: true),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -241,8 +260,7 @@ class CustomerVehicleChip extends StatelessWidget {
   }
 }
 
-/// The cart as a table: #, item (with staff tag), qty, rate, amount.
-/// Listens to the cart only.
+/// A wide table or a stacked list, depending on the cart's own available width.
 class CartTable extends StatelessWidget {
   const CartTable({super.key, this.padding = const EdgeInsets.symmetric(horizontal: 16)});
   final EdgeInsets padding;
@@ -252,50 +270,58 @@ class CartTable extends StatelessWidget {
     final app = context.appRead;
     final counter = CounterScope.maybeOf(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([app.cartState, ?counter]),
+      listenable: Listenable.merge([app.cartState, app.catalogState, ?counter]),
       builder: (context, _) {
         final lines = (app.cart['lines'] as List).cast<Map>();
         final bill = app.bill;
         if (lines.isEmpty) return const EmptyState(message: 'No items yet.\nScan a barcode or tap a part.', icon: Icons.qr_code_2);
         final head = Theme.of(context).textTheme.labelSmall;
-        return Column(children: [
-          Padding(
-            padding: padding.add(const EdgeInsets.symmetric(vertical: 6)),
-            child: Row(children: [
-              SizedBox(width: 24, child: Text('#', style: head)),
-              Expanded(child: Text('Item', style: head)),
-              SizedBox(width: 104, child: Text('Qty', textAlign: TextAlign.center, style: head)),
-              SizedBox(width: 78, child: Text('Rate', textAlign: TextAlign.right, style: head)),
-              SizedBox(width: 88, child: Text('Amount', textAlign: TextAlign.right, style: head)),
-              const SizedBox(width: 32),
-            ]),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView.builder(
-              itemCount: lines.length,
-              itemBuilder: (context, i) => _TableLine(
-                index: i,
-                raw: Map<String, dynamic>.from(lines[i]),
-                line: bill?.lines.elementAtOrNull(i),
-                selected: counter?.selected == i,
-                padding: padding,
+        return LayoutBuilder(builder: (context, constraints) {
+          final compact = constraints.maxWidth < 540;
+          return Column(children: [
+            if (!compact) ...[
+              Padding(
+                padding: padding.add(const EdgeInsets.symmetric(vertical: 6)),
+                child: Row(children: [
+                  SizedBox(width: 24, child: Text('#', style: head)),
+                  Expanded(child: Text('Item', style: head)),
+                  SizedBox(width: 104, child: Text('Qty', textAlign: TextAlign.center, style: head)),
+                  SizedBox(width: 78, child: Text('Rate', textAlign: TextAlign.right, style: head)),
+                  SizedBox(width: 88, child: Text('Amount', textAlign: TextAlign.right, style: head)),
+                  const SizedBox(width: 32),
+                ]),
+              ),
+              const Divider(height: 1),
+            ],
+            Expanded(
+              child: ListView.separated(
+                itemCount: lines.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, i) => _TableLine(
+                  index: i,
+                  raw: Map<String, dynamic>.from(lines[i]),
+                  line: bill?.lines.elementAtOrNull(i),
+                  selected: counter?.selected == i,
+                  padding: padding,
+                  compact: compact,
+                ),
               ),
             ),
-          ),
-        ]);
+          ]);
+        });
       },
     );
   }
 }
 
 class _TableLine extends StatelessWidget {
-  const _TableLine({required this.index, required this.raw, required this.line, required this.selected, required this.padding});
+  const _TableLine({required this.index, required this.raw, required this.line, required this.selected, required this.padding, required this.compact});
   final int index;
   final Json raw;
   final QuoteLine? line;
   final bool selected;
   final EdgeInsets padding;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -305,55 +331,67 @@ class _TableLine extends StatelessWidget {
     final qty = raw['qty'] as int;
     final scheme = Theme.of(context).colorScheme;
     final staff = '${raw['staffId'] ?? ''}';
+    final title = Text('${product?['name'] ?? raw['productId']}', style: const TextStyle(fontWeight: FontWeight.w700));
+    final staffAction = InkWell(
+      onTap: () => tagLineStaff(context, index),
+      child: Text(staff.isEmpty ? '+ staff' : app.userName(staff), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.primary)),
+    );
+    final amounts = Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: 'Decrease quantity',
+        onPressed: serial || qty <= 1 ? null : () => setLineQuantity(context, index, qty - 1),
+        icon: const Icon(Icons.remove, size: 16),
+      ),
+      Text('$qty', style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: _figures)),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: 'Increase quantity',
+        onPressed: serial || product?['salesStopped'] == true || (product != null && isOnlineOnly(product))
+            ? null : () => setLineQuantity(context, index, qty + 1),
+        icon: const Icon(Icons.add, size: 16),
+      ),
+    ]);
+    final remove = IconButton(
+      visualDensity: VisualDensity.compact,
+      tooltip: 'Remove',
+      onPressed: () => setLineQuantity(context, index, 0),
+      icon: const Icon(Icons.close, size: 16),
+    );
+    final total = Text(app.money(line?.total ?? 0), textAlign: TextAlign.right,
+        style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: _figures));
+    final stockWarning = raw['binId'] != null && beyondStock(app, product) &&
+        qty > app.available('${raw['productId']}', '${raw['binId']}');
     return Material(
       color: selected ? scheme.primaryContainer.withValues(alpha: 0.6) : Colors.transparent,
       child: InkWell(
         onTap: () => CounterScope.read(context)?.select(index),
         child: Padding(
           padding: padding.add(const EdgeInsets.symmetric(vertical: 4)),
-          child: Row(children: [
+          child: compact
+              ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Row(children: [Expanded(child: title), remove]),
+                  Text('$qty × ${app.money(line?.unitPrice ?? 0)}', style: Theme.of(context).textTheme.bodySmall),
+                  if (stockWarning) const StockCaution('This sale exceeds available stock.'),
+                  Row(children: [
+                    Expanded(child: staffAction),
+                    amounts,
+                    Flexible(child: Align(alignment: Alignment.centerRight, child: total)),
+                  ]),
+                ])
+              : Row(children: [
             SizedBox(width: 24, child: Text('${index + 1}', style: const TextStyle(fontFeatures: _figures))),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${product?['name'] ?? raw['productId']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                InkWell(
-                  onTap: () => tagLineStaff(context, index),
-                  child: Text(staff.isEmpty ? '+ staff' : app.userName(staff), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.primary)),
-                ),
+                title,
+                staffAction,
+                if (stockWarning) const StockCaution('Exceeds available stock'),
               ]),
             ),
-            SizedBox(
-              width: 104,
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: 'Decrease quantity',
-                  onPressed: serial || qty <= 1 ? null : () => setLineQuantity(context, index, qty - 1),
-                  icon: const Icon(Icons.remove, size: 16),
-                ),
-                Text('$qty', style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: _figures)),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: 'Increase quantity',
-                  onPressed: serial || product?['salesStopped'] == true ? null : () => setLineQuantity(context, index, qty + 1),
-                  icon: const Icon(Icons.add, size: 16),
-                ),
-              ]),
-            ),
+            SizedBox(width: 104, child: amounts),
             SizedBox(width: 78, child: Text(app.money(line?.unitPrice ?? 0), textAlign: TextAlign.right, style: const TextStyle(fontFeatures: _figures))),
-            SizedBox(
-              width: 88,
-              child: Text(app.money(line?.total ?? 0), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: _figures)),
-            ),
-            SizedBox(
-              width: 32,
-              child: IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: 'Remove',
-                onPressed: () => setLineQuantity(context, index, 0),
-                icon: const Icon(Icons.close, size: 16),
-              ),
-            ),
+            SizedBox(width: 88, child: total),
+            SizedBox(width: 32, child: remove),
           ]),
         ),
       ),
@@ -388,17 +426,27 @@ class PaymentDock extends StatelessWidget {
 
         Widget pay(String label, String key, IconData icon, Future<void> Function() action, {bool primary = false}) =>
             LayoutBuilder(builder: (context, constraints) {
-              final child = Row(mainAxisSize: MainAxisSize.min, children: [
-                if (constraints.maxWidth >= 150) ...[Icon(icon, size: 18), const SizedBox(width: 6)],
-                Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (constraints.maxWidth >= 118) KeyCap(key, onDark: primary),
-              ]);
+              final stackHint = primary && key.length > 4;
+              final hasHint = showKeyHints(context) && constraints.maxWidth >= (stackHint ? 90 : 118);
+              final text = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
+              final child = hasHint && stackHint
+                  ? Column(mainAxisSize: MainAxisSize.min, children: [
+                      text,
+                      const SizedBox(height: 2),
+                      FittedBox(child: KeyCap(key, onDark: true)),
+                    ])
+                  : Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (constraints.maxWidth >= 150) ...[Icon(icon, size: 18), const SizedBox(width: 6)],
+                      Flexible(child: text),
+                      if (hasHint) KeyCap(key, onDark: primary),
+                    ]);
               const size = Size(0, 50);
               const inset = EdgeInsets.symmetric(horizontal: 10);
               final onPressed = can ? () => run(action) : null;
-              return primary
+              final button = primary
                   ? FilledButton(style: FilledButton.styleFrom(minimumSize: size, padding: inset), onPressed: onPressed, child: child)
                   : OutlinedButton(style: OutlinedButton.styleFrom(minimumSize: size, padding: inset), onPressed: onPressed, child: child);
+              return primary && !hasHint ? Tooltip(message: 'Pay & print ($key)', child: button) : button;
             });
 
         return Container(
@@ -456,14 +504,17 @@ class PaymentDock extends StatelessWidget {
               Badge(
                 isLabelVisible: counterHolds(app).isNotEmpty,
                 label: Text('${counterHolds(app).length}'),
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
-                  onPressed: shell == null ? null : () => showParked(context, shell),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.history, size: 18), SizedBox(width: 4), Text('Recall'), KeyCap('F5')]),
+                child: Tooltip(
+                  message: 'Recall a held bill',
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
+                    onPressed: shell == null ? null : () => showParked(context, shell),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.history, size: 18), SizedBox(width: 4), Text('Recall'), KeyCap('F5')]),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              Expanded(child: pay('Pay & print', 'F12', Icons.print_outlined, () => startCheckout(context, print: true), primary: true)),
+              Expanded(child: pay('Pay & print', payPrintShortcut, Icons.print_outlined, () => startCheckout(context, print: true), primary: true)),
             ]),
           ]),
         );
@@ -569,22 +620,7 @@ class TabletCartPane extends StatelessWidget {
         ),
       ),
       const Divider(height: 1),
-      Expanded(
-        child: ListenableBuilder(
-          listenable: app.cartState,
-          builder: (context, _) {
-            final lines = (app.cart['lines'] as List).cast<Map>();
-            final bill = app.bill;
-            if (lines.isEmpty) return const EmptyState(message: 'No items yet.\nScan a barcode or tap a part.', icon: Icons.qr_code_2);
-            return ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-              itemCount: lines.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, i) => _PhoneLine(index: i, raw: Map<String, dynamic>.from(lines[i]), line: bill?.lines.elementAtOrNull(i)),
-            );
-          },
-        ),
-      ),
+      const Expanded(child: CartTable(padding: EdgeInsets.symmetric(horizontal: 14))),
       const PaymentDock(),
     ]);
   }
@@ -705,6 +741,8 @@ class _PhoneLine extends StatelessWidget {
     final qty = raw['qty'] as int;
     final serial = product?['serialTracked'] == true;
     final staff = '${raw['staffId'] ?? ''}';
+    final stockWarning = raw['binId'] != null && beyondStock(app, product) &&
+        qty > app.available('${raw['productId']}', '${raw['binId']}');
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
@@ -712,6 +750,7 @@ class _PhoneLine extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${product?['name'] ?? raw['productId']}', style: const TextStyle(fontWeight: FontWeight.w700)),
             Text('${app.money(line?.unitPrice ?? 0)} each', style: Theme.of(context).textTheme.bodySmall?.copyWith(fontFeatures: _figures)),
+            if (stockWarning) const StockCaution('Exceeds available stock'),
             ActionChip(
               visualDensity: VisualDensity.compact,
               avatar: const Icon(Icons.badge_outlined, size: 16),
@@ -728,7 +767,8 @@ class _PhoneLine extends StatelessWidget {
         Text('$qty', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, fontFeatures: _figures)),
         IconButton(
           tooltip: 'Increase quantity',
-          onPressed: serial ? null : () => setLineQuantity(context, index, qty + 1),
+          onPressed: serial || product?['salesStopped'] == true || (product != null && isOnlineOnly(product))
+              ? null : () => setLineQuantity(context, index, qty + 1),
           icon: const Icon(Icons.add),
         ),
         SizedBox(

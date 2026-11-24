@@ -148,8 +148,8 @@ class _HeldBillsPanelState extends State<HeldBillsPanel> {
           child: holds.isEmpty
               ? EmptyState(message: all.isEmpty
                   ? (showKeyHints(context)
-                      ? 'No held bills. Press Hold (F4) to park a sale and reserve its stock.'
-                      : 'No held bills. Tap Hold to park a sale and reserve its stock.')
+                      ? 'Press Hold (F4) to keep a bill and reserve its stock.'
+                      : 'Tap Hold to keep a bill and reserve its stock.')
                   : 'No held bill matches "${search.text}".')
               : ListView.builder(itemCount: holds.length, itemBuilder: (context, i) => _HoldTile(hold: holds[i], onResume: () => _resume(holds[i]))),
         ),

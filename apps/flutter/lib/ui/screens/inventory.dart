@@ -11,8 +11,6 @@ import '../purchasing/bill_entry_dialog.dart'; // QA #6: receive a new part agai
 import '../widgets.dart';
 import '../workshop/kits.dart'; // WS-C
 import 'receipt.dart';
-import 'catalog_import.dart';
-import 'physical_count.dart';
 
 int _minor(Object? value) => ((double.tryParse('$value') ?? 0) * 100).round();
 
@@ -45,26 +43,26 @@ class _PartsScreenState extends State<PartsScreen> {
             .toList();
         final rows = matches.where((p) => kind == 'all' || (kind == 'online') == isOnlineOnly(p)).toList();
         // Online-only parts have no shelf, so they need no labels.
-        final labelRows = rows.where((p) => !isOnlineOnly(p)).toList();
+        final labelRows = rows.where((p) => p['type'] != 'service' && !isOnlineOnly(p)).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          if (app.canStock)
-            Toolbar([
+          Toolbar([
+            if (app.canStock) ...[
               FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part')),
-              OutlinedButton.icon(onPressed: app.online ? () => importCatalog(context) : null, icon: const Icon(Icons.upload_file), label: const Text('Import parts')),
+              OutlinedButton.icon(onPressed: () => shell.open('import'), icon: const Icon(Icons.upload_file), label: const Text('Import parts')),
               if (app.isManager && app.list('removedProducts').isNotEmpty)
                 OutlinedButton(onPressed: () => restorePart(context), child: const Text('Restore part')),
               OutlinedButton(onPressed: app.stockParts.isEmpty || app.bins.isEmpty ? null : () => stockOperation(context, 'adjust'), child: const Text('Adjust stock')),
-              OutlinedButton(onPressed: app.online && app.bins.isNotEmpty && app.stockParts.isNotEmpty
-                  ? () => startPhysicalCount(context) : null, child: const Text('Stock count')),
-              if (app.list('stockCounts').isNotEmpty)
-                OutlinedButton(onPressed: app.online ? () => openPhysicalCounts(context) : null,
-                  child: Text("Open counts (${app.list('stockCounts').length})")),
-              OutlinedButton.icon(
-                onPressed: labelRows.isEmpty ? null : () => printLabels(context, [for (final p in labelRows) productLabel(context.appRead, p)]),
-                icon: const Icon(Icons.qr_code_2, size: 18),
-                label: Text(q.isEmpty ? 'Print all labels' : 'Print ${labelRows.length} ${labelRows.length == 1 ? 'label' : 'labels'}'),
-              ),
-            ]),
+              OutlinedButton(onPressed: () => shell.open('counts'),
+                  child: Text(app.list('stockCounts').isEmpty ? 'Stock counts' : 'Stock counts (${app.list('stockCounts').length} open)')),
+              if (q.isNotEmpty && labelRows.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: () => printLabels(context, [for (final p in labelRows) productLabel(context.appRead, p)]),
+                  icon: const Icon(Icons.print_outlined, size: 18),
+                  label: Text('Print ${labelRows.length} ${labelRows.length == 1 ? 'label' : 'labels'}'),
+                ),
+            ],
+            OutlinedButton.icon(onPressed: () => shell.open('labels'), icon: const Icon(Icons.qr_code_2, size: 18), label: const Text('Labels')),
+          ]),
           if (anyOnlineOnly)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -178,7 +176,7 @@ class _PartMenu extends StatelessWidget {
             await printLabels(context, [productLabel(context.appRead, part)]);
           case 'remove':
             if (!await confirm(context, 'Remove ${part['sku']}?',
-                'This removes an unused part from Billing and Inventory. You can restore it from Inventory.', action: 'Remove')) {
+                'This removes an unused part from Counter and Catalog. You can restore it from Catalog.', action: 'Remove')) {
               return;
             }
             try {
@@ -285,7 +283,7 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
           value: product['onlineOnly'] == true,
           help: 'For parts you do not keep in the shop: listed only on shop.cartunez.in and ordered from the supplier '
               'when a customer buys one. The website always shows it as available. It never counts as shop stock '
-              'and is hidden from Billing, stock counts and reorder alerts.'),
+              'and is hidden from Counter, stock counts and reorder alerts.'),
       FieldSpec('sku', product['id'] == null ? 'SKU / item code (optional)' : 'SKU / item code', value: product['sku'], required: product['id'] != null,
           help: product['id'] == null ? 'Leave blank to create one automatically.' : null),
       if (product['id'] != null && app.isManager)
@@ -687,6 +685,7 @@ class WarrantyScreen extends StatelessWidget {
           label: const Text('New claim'),
         ),
         if (app.isManager) OutlinedButton(onPressed: () => coreReturn(context), child: const Text('Core deposit refund')),
+        TextButton(onPressed: () => ShellScope.of(context).open('serials'), child: const Text('Look up a serial or IMEI')),
       ]),
       // QA #15: New claim needs a warranty return; link straight to it.
       if (claimable.isEmpty)

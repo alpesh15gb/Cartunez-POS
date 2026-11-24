@@ -125,6 +125,9 @@ void main() {
     final cash = find.widgetWithText(TextField, 'Amount');
     final qr = find.byKey(const ValueKey('show-upi-qr'));
     final submit = find.widgetWithText(FilledButton, 'Save pending payment');
+    expect(find.text('Enter an amount for each payment method.'), findsOneWidget);
+    expect(find.text('Choose two different payment methods and enter an amount for each.'), findsNothing);
+    expect(tester.widget<FilledButton>(submit).onPressed, isNull);
     await tester.enterText(upi, '40.00');
     await tester.enterText(cash, '100.00');
     await tester.pumpAndSettle();

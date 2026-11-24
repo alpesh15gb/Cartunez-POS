@@ -80,8 +80,11 @@ class ContactsScreen extends StatelessWidget {
             onTap: (row) => kind == 'customers' ? shell.open('/people/customers/${row['id']}') : showLedger(context, kind, row),
             columns: [
               Col('Name', (r) => Text('${r['name']}'), flex: 2),
-              Col('Phone', (r) => Text('${r['phone'] ?? '—'}')),
-              Col('GSTIN', (r) => Text('${(r['taxRegistrationId'] ?? '').toString().isEmpty ? '—' : r['taxRegistrationId']}')),
+              for (final (title, key) in const [('Phone', 'phone'), ('GSTIN', 'taxRegistrationId')])
+                Col(title, (r) {
+                  final value = '${r[key] ?? ''}'.trim();
+                  return Text(value.isEmpty ? '—' : value);
+                }),
               Col('Balance', (r) {
                 final balance = app.partyBalance(kind, '${r['id']}');
                 return Text(balanceText(app, kind, balance), style: TextStyle(color: balanceColor(balance), fontWeight: FontWeight.w700));

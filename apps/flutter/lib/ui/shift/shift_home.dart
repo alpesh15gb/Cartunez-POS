@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../shell.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'shift_dialogs.dart';
@@ -90,30 +91,43 @@ class ShiftsScreen extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       current,
       SectionTitle('Shift history'),
-      DataList(
-        onTap: (shift) => app.online ? showShiftSummary(context, shift) : showDrawerActivity(context, shift),
-        rows: app.list('shifts').reversed.toList(),
-        empty: 'No shifts yet.',
-        columns: [
-          Col('Cashier', (s) => Text(app.userName('${s['userId']}'), style: const TextStyle(fontWeight: FontWeight.w700))),
-          Col('Opened', (s) => Text(formatDate(s['openedAt'])), flex: 2),
-          Col('Closed', (s) => Text(s['closedAt'] == null ? '—' : formatDate(s['closedAt'])), flex: 2),
-          Col('Expected', (s) => Text(app.money((s['closedAt'] != null ? s['expectedCash'] : app.expectedCash(s)) as num?)), numeric: true),
-          Col('Counted', (s) => Text(s['closedAt'] == null ? '—' : app.money(s['countedCash'] as num?)), numeric: true),
-          Col('Difference', (s) => s['closedAt'] == null
-              ? const Text('—')
-              : Text(app.money(s['variance'] as num?),
-                  style: TextStyle(color: (s['variance'] ?? 0) == 0 ? Brand.forest : Brand.danger, fontWeight: FontWeight.w700)),
-              numeric: true),
-          Col('Status', (s) => StatusChip(s['closedAt'] == null ? 'Open' : 'Closed')),
-        ],
-        actionWidth: 90,
-        actions: !app.isManager
-            ? null
-            : (Json s) => [
-                  if (s['closedAt'] == null && s['userId'] != app.session?.userId)
-                    OutlinedButton(onPressed: () => closeShift(context, s), child: const Text('Close')),
-                ],
+      ValueListenableBuilder(
+        valueListenable: ShellScope.of(context).search,
+        builder: (context, search, _) {
+          final query = normalize(search.text);
+          final shifts = app.list('shifts').reversed.where((shift) {
+            if (query.isEmpty) return true;
+            final cashier = app.userName('${shift['userId']}');
+            final status = shift['closedAt'] == null ? 'Open' : 'Closed';
+            return [cashier, status, formatDate(shift['openedAt']), formatDate(shift['closedAt'])]
+                .any((field) => normalize(field).contains(query));
+          }).toList();
+          return DataList(
+            onTap: (shift) => app.online ? showShiftSummary(context, shift) : showDrawerActivity(context, shift),
+            rows: shifts,
+            empty: query.isEmpty ? 'No shifts yet.' : 'No shifts match this search.',
+            columns: [
+              Col('Cashier', (s) => Text(app.userName('${s['userId']}'), style: const TextStyle(fontWeight: FontWeight.w700))),
+              Col('Opened', (s) => Text(formatDate(s['openedAt'])), flex: 2),
+              Col('Closed', (s) => Text(formatDate(s['closedAt'])), flex: 2),
+              Col('Expected', (s) => Text(app.money((s['closedAt'] != null ? s['expectedCash'] : app.expectedCash(s)) as num?)), numeric: true),
+              Col('Counted', (s) => Text(s['closedAt'] == null ? '—' : app.money(s['countedCash'] as num?)), numeric: true),
+              Col('Difference', (s) => s['closedAt'] == null
+                  ? const Text('—')
+                  : Text(app.money(s['variance'] as num?),
+                      style: TextStyle(color: (s['variance'] ?? 0) == 0 ? Brand.forest : Brand.danger, fontWeight: FontWeight.w700)),
+                  numeric: true),
+              Col('Status', (s) => StatusChip(s['closedAt'] == null ? 'Open' : 'Closed')),
+            ],
+            actionWidth: 90,
+            actions: !app.isManager
+                ? null
+                : (Json s) => [
+                      if (s['closedAt'] == null && s['userId'] != app.session?.userId)
+                        OutlinedButton(onPressed: () => closeShift(context, s), child: const Text('Close')),
+                    ],
+          );
+        },
       ),
     ]);
   }

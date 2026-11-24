@@ -41,6 +41,8 @@ String? _safeFrom(String? from) {
   return from;
 }
 
+String _purchasingSupplierPath(Uri uri) => uri.replace(path: uri.path.replaceFirst('/people/', '/purchasing/')).toString();
+
 /// Where [uri] should go instead, or null to stay.
 String? redirectFor(AppState app, Uri uri) {
   if (!app.ready || app.startupProblem != null) return null;
@@ -51,6 +53,9 @@ String? redirectFor(AppState app, Uri uri) {
     return Uri(path: '/login', queryParameters: from == null ? null : {'from': from}).toString();
   }
   if (path == '/login') return _safeFrom(uri.queryParameters['from']) ?? homePath(app);
+  if (path == '/people/suppliers' || path.startsWith('/people/suppliers/')) {
+    return _purchasingSupplierPath(uri);
+  }
   final match = matchPath(path);
   if (match != null) {
     if (match.tab.visibleTo(app)) return null;
@@ -87,6 +92,9 @@ GoRouter buildRouter(AppState app, {required Listenable refresh, String initialL
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) => AppGate(child: Shell(location: state.uri.path, child: child)),
         routes: [
+          // Bookmarks from People now open the single supplier workspace.
+          for (final path in ['/people/suppliers', '/people/suppliers/:arg'])
+            GoRoute(path: path, redirect: (_, state) => _purchasingSupplierPath(state.uri)),
           for (final ws in workspaces)
             for (final tab in ws.tabs) ...[
               GoRoute(path: tab.path, pageBuilder: (_, state) => page(tab, state)),

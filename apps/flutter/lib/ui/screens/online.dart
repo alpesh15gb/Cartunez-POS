@@ -328,7 +328,7 @@ class _ListingTable extends StatelessWidget {
         final state = saleState(l);
         if (state == null) return const SizedBox.shrink();
         final until = '${l?['saleUntil'] ?? ''}';
-        final label = state == 'ended' ? 'Sale ended' : until.isEmpty ? 'On sale' : 'On sale to ${until.substring(8)}/${until.substring(5, 7)}/${until.substring(0, 4)}';
+        final label = state == 'ended' ? 'Sale ended' : until.isEmpty ? 'On sale' : 'On sale to ${formatDate(until)}';
         return Container(
           key: ValueKey('sale-chip-${l?['productId']}'),
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),

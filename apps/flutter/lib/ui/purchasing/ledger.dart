@@ -101,7 +101,8 @@ class _LedgerDialogState extends State<_LedgerDialog> {
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             title: Text('${e['reference']}'),
-                            subtitle: Text('${e['date'] == '0000-00-00' ? 'Before the POS' : e['date']}${'${e['note']}'.isEmpty ? '' : ' · ${e['note']}'}'),
+                            subtitle: Text('${e['date'] == '0000-00-00' ? 'Before the POS' : formatDate(e['date'])}'
+                                '${'${e['note'] ?? ''}'.isEmpty ? '' : ' · ${e['note']}'}'),
                             onTap: e['type'] == 'bill'
                                 ? () {
                                     final bill = app.list('purchaseBills').where((b) => b['id'] == e['id']).firstOrNull;

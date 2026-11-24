@@ -72,7 +72,7 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    expect(find.text('On sale to 31/12/2099'), findsOneWidget);
+    expect(find.text('On sale to 31 Dec 2099'), findsOneWidget);
     expect(find.text('Sale ended'), findsOneWidget);
 
     // The On sale filter keeps only parts marked on sale.

@@ -9,6 +9,7 @@ import '../../main.dart';
 import '../../state/app_state.dart';
 import '../photos.dart';
 import '../purchasing/file_thumbs.dart';
+import '../shell.dart';
 import '../widgets.dart';
 import 'common.dart';
 
@@ -158,27 +159,15 @@ Json counterVehicle(Json vehicle) => {
     };
 
 /// People & vehicles › Vehicles: search, add, and open one (with its history).
-class VehiclesScreen extends StatefulWidget {
+class VehiclesScreen extends StatelessWidget {
   const VehiclesScreen({super.key, this.id});
   final String? id;
-  @override
-  State<VehiclesScreen> createState() => _VehiclesScreenState();
-}
-
-class _VehiclesScreenState extends State<VehiclesScreen> {
-  final query = TextEditingController();
-
-  @override
-  void dispose() {
-    query.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    if (widget.id != null) {
-      final vehicle = vehicleById(app, widget.id);
+    if (id != null) {
+      final vehicle = vehicleById(app, id);
       if (vehicle == null) {
         return Column(children: [
           const EmptyState(message: 'This vehicle is not on this device. Refresh, or go back to the list.'),
@@ -187,40 +176,35 @@ class _VehiclesScreenState extends State<VehiclesScreen> {
       }
       return VehicleDetail(key: ValueKey(vehicle['id']), vehicle: vehicle);
     }
-    final rows = searchVehicles(app, query.text);
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Toolbar([
-        FilledButton.icon(
+    return ValueListenableBuilder(
+      valueListenable: ShellScope.of(context).search,
+      builder: (context, query, _) {
+        final rows = searchVehicles(app, query.text);
+        final addVehicle = FilledButton.icon(
           onPressed: () async {
             final saved = await editVehicle(context, {'regNo': query.text.trim().toUpperCase()});
             if (saved != null && context.mounted) context.go('/people/vehicles/${saved['id']}');
           },
           icon: const Icon(Icons.add),
           label: const Text('Add vehicle'),
-        ),
-        SizedBox(
-          width: 320,
-          child: TextField(
-            key: const ValueKey('vehicle-list-search'),
-            controller: query,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(labelText: 'Registration, last digits, phone', prefixIcon: Icon(Icons.search), isDense: true),
-            onChanged: (_) => setState(() {}),
+        );
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (rows.isNotEmpty) Toolbar([addVehicle]),
+          DataList(
+            rows: rows,
+            empty: query.text.isEmpty ? 'No vehicles yet.' : 'No vehicle matches your search.',
+            emptyAction: addVehicle,
+            onTap: (row) => context.go('/people/vehicles/${row['id']}'),
+            columns: [
+              Col('Registration', (r) => Text('${r['regNo']}'), flex: 2),
+              Col('Vehicle', (r) => Text([r['make'], r['model'], r['variant'], r['year']].where((e) => e != null && '$e'.isNotEmpty).join(' ')), flex: 2),
+              Col('Owner', (r) => Text(customerLabel(app, r['customerId']))),
+              Col('Odometer', (r) => Text(r['odo'] == null ? '—' : '${r['odo']} km'), numeric: true),
+            ],
           ),
-        ),
-      ]),
-      DataList(
-        rows: rows,
-        empty: query.text.isEmpty ? 'No vehicles yet. Add one, or they are added from estimates and job cards.' : 'No vehicle matches. Add it.',
-        onTap: (row) => context.go('/people/vehicles/${row['id']}'),
-        columns: [
-          Col('Registration', (r) => Text('${r['regNo']}'), flex: 2),
-          Col('Vehicle', (r) => Text([r['make'], r['model'], r['variant'], r['year']].where((e) => e != null && '$e'.isNotEmpty).join(' ')), flex: 2),
-          Col('Owner', (r) => Text(customerLabel(app, r['customerId']))),
-          Col('Odometer', (r) => Text(r['odo'] == null ? '—' : '${r['odo']} km'), numeric: true),
-        ],
-      ),
-    ]);
+        ]);
+      },
+    );
   }
 }
 

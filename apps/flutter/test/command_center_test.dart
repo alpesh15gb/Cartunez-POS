@@ -52,6 +52,8 @@ void main() {
     expect(app.paths.single, '/dashboard?deadDays=90');
     expect(find.text('Till watch'), findsOneWidget);
     expect(find.textContaining('Front counter'), findsOneWidget);
+    expect(find.textContaining('1 overdue'), findsOneWidget);
+    expect(find.textContaining('Open since 21 Nov 2026, 09:00 am'), findsOneWidget);
     expect(find.text('Shift cash differences (7 days)'), findsOneWidget);
     expect(find.textContaining('Short'), findsOneWidget);
     expect(find.byType(HourlyChart), findsOneWidget);

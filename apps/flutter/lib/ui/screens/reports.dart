@@ -1,17 +1,15 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../core/files.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../theme.dart';
 import '../widgets.dart';
 import '../widgets/data_grid.dart';
 import 'accounting_exports.dart';
-import 'command_center.dart' show formatIsoDay;
 import 'receipt.dart';
 import 'tender_comparison.dart';
 
@@ -225,13 +223,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (value is bool) return value ? 'Yes' : 'No';
     if (key == 'direction' && name == 'cash-movements') return value == 'in' ? 'Cash in' : 'Cash out';
     if (key == 'cashierId' || key == 'userId') return app.userName('$value');
-    final timestamp = DateTime.tryParse('$value');
-    if ('$value'.contains('T') && timestamp != null) {
-      final time = timestamp.toUtc().add(report?['timeZone'] == 'Asia/Kolkata' ? const Duration(hours: 5, minutes: 30) : Duration.zero);
-      return DateFormat('dd/MM/yyyy, h:mm a').format(time).replaceAll('AM', 'am').replaceAll('PM', 'pm');
+    if (DateTime.tryParse('$value') != null && RegExp(r'^\d{4}-\d{2}-\d{2}(?:$|T)').hasMatch('$value')) {
+      return formatDate(value, inTimeZone: (timestamp) =>
+          report?['timeZone'] == 'Asia/Kolkata' ? timestamp.toUtc().add(const Duration(hours: 5, minutes: 30)) : timestamp.toUtc());
     }
-    // Plain days ("2026-11-21") in the app's dd/mm/yyyy.
-    if (RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch('$value')) return formatIsoDay(value);
     return '$value';
   }
 
@@ -359,6 +354,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         Chip(avatar: const Icon(Icons.store_outlined, size: 18), label: Text(branch), visualDensity: VisualDensity.compact),
         Row(mainAxisSize: MainAxisSize.min, children: [
           FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: Brand.forestDark, foregroundColor: Colors.white),
             onPressed: busy ? null : () => run(),
             icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow),
             label: const Text('Run report'),
@@ -397,8 +393,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         // WS-F: GSTR-1 and Tally, for the accountant.
         if (app.isManager) OutlinedButton.icon(onPressed: () => showAccountingExports(context, range: range),
             icon: const Icon(Icons.account_balance_outlined), label: const Text('GST & Tally')),
-        if (app.canStock) TextButton.icon(onPressed: () => context.go('/catalog/import'),
-            icon: const Icon(Icons.upload_file_outlined), label: const Text('Parts import')),
         if (name == 'tenders' && app.isManager && app.settings['currency'] == 'INR')
           OutlinedButton.icon(onPressed: busy ? null : () => compareTenderStatement(context, range: range, method: payment),
             icon: const Icon(Icons.compare_arrows), label: const Text('Compare provider CSV')),

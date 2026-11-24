@@ -82,6 +82,50 @@ void main() {
     expect(_location(tester), '/purchasing/suppliers');
   });
 
+  testWidgets('purchase orders use the shared search for suppliers, SKUs and status', (tester) async {
+    final app = _signedIn('owner');
+    app.snapshot.addAll({
+      'suppliers': [
+        {'id': 'a', 'name': 'Southside Spares'},
+        {'id': 'b', 'name': 'East Auto'},
+      ],
+      'products': [
+        {'id': 'p1', 'name': 'Oil filter', 'sku': 'OF-1'},
+        {'id': 'p2', 'name': 'Brake pads', 'sku': 'BP-2'},
+      ],
+      'purchaseOrders': [
+        {'id': 'po-1', 'supplierId': 'a', 'status': 'open', 'lines': [{'productId': 'p1', 'quantity': 2, 'cost': 6000, 'received': 0}]},
+        {'id': 'po-2', 'supplierId': 'b', 'status': 'received', 'lines': [{'productId': 'p2', 'quantity': 1, 'cost': 8500, 'received': 1}]},
+      ],
+    });
+    await _open(tester, app, '/purchasing/orders', const Size(1024, 900));
+    final search = find.byType(TextField);
+    expect(find.text('Oil filter 0/2'), findsOneWidget);
+    expect(find.text('Brake pads 1/1'), findsOneWidget);
+    for (final term in ['Southside', 'OF-1', 'open']) {
+      await tester.enterText(search, term);
+      await tester.pumpAndSettle();
+      expect(find.text('Oil filter 0/2'), findsOneWidget);
+      expect(find.text('Brake pads 1/1'), findsNothing);
+    }
+    expect(find.text('Reorder alerts'), findsOneWidget);
+    expect(find.text('Cost changes'), findsOneWidget);
+  });
+
+  testWidgets('legacy supplier links reach Purchasing and Dashboard has a manager rail entry', (tester) async {
+    final app = _signedIn('owner');
+    expect(redirectFor(app, Uri.parse('/people/suppliers/a?origin=people')), '/purchasing/suppliers/a?origin=people');
+    expect(pathForId('people-suppliers'), '/purchasing/suppliers');
+    await _open(tester, app, '/people/suppliers', const Size(1400, 900));
+    expect(_location(tester), '/purchasing/suppliers');
+    await tester.tap(find.text('Dashboard'));
+    await tester.pumpAndSettle();
+    expect(_location(tester), '/dashboard');
+    expect(find.byKey(const ValueKey('workspace-tab-dashboard')), findsNothing);
+    expect(homePath(_signedIn('cashier')), '/counter');
+    expect(redirectFor(_signedIn('cashier'), Uri.parse('/dashboard')), isNull);
+  });
+
   testWidgets('a workspace address opens its first tab and reports take a name', (tester) async {
     await _open(tester, _signedIn('owner'), '/reports/tax', const Size(1400, 900));
     expect(tester.widget<ReportsScreen>(find.byType(ReportsScreen)).initial, 'tax');

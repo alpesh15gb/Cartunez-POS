@@ -240,7 +240,8 @@ class CheckoutDialogState extends State<CheckoutDialog> {
     final due = total - (firstAmount ?? 0) - (secondAmount ?? 0);
     final allocationError = _paymentAllocationError(firstAmount, secondAmount);
     final canPay = allocationError == null && due <= 0;
-    final statusError = allocationError ?? error;
+    final waitingForSplit = split && (firstAmount == 0 || secondAmount == 0);
+    final statusError = error ?? (waitingForSplit ? null : allocationError);
     final nonCash = _external(tender) || (split && _external(secondTender));
     final upiAmount = (tender == 'UPI' ? firstAmount : secondAmount) ?? 0;
     final customer = app.customerById('${app.cart['customerId']}');
@@ -335,7 +336,8 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 ),
               ),
             if (split)
-              Row(children: [
+              Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Row(children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     key: ValueKey((tender, secondTender)),
@@ -354,6 +356,12 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                     onChanged: (_) => setState(resetConfirmation),
                   ),
                 ),
+                ]),
+                if (waitingForSplit && statusError == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text('Enter an amount for each payment method.', style: Theme.of(context).textTheme.bodySmall),
+                  ),
               ]),
             // WS-A: static UPI QR for the UPI part of the payment.
             // QA #9: offered only when the shop has a UPI ID; otherwise disabled with a Settings link.
@@ -420,9 +428,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                 title: Text(phone ? 'Payment confirmed (checked manually)' : 'Payment confirmed: checked on the card machine / UPI app'),
                 subtitle: Text(confirmed
                     ? 'The sale is saved as paid.'
-                    : phone
-                        ? 'Off: the sale is saved as a pending payment in Sync & audit until someone confirms it.'
-                        : 'Off: saved as a pending payment in Sync & audit until confirmed.'),
+                    : 'Pending payments appear under Waiting on this device in Sync & audit.'),
               ),
               for (final type in {tender, if (split) secondTender}.where(_external))
                 TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference'),

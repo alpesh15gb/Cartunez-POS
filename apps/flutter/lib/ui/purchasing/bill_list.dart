@@ -41,7 +41,7 @@ class BillsScreen extends StatelessWidget {
             onTap: (b) => showBill(context, b),
             actionWidth: 60,
             columns: [
-              Col('Date', (b) => Text('${b['billDate']}')),
+              Col('Date', (b) => Text(formatDate(b['billDate']))),
               Col('Supplier', (b) => Text('${b['supplierName'] ?? app.supplierById(b['supplierId'])?['name'] ?? '—'}', style: const TextStyle(fontWeight: FontWeight.w700)), flex: 2),
               Col('Bill no.', (b) => Text('${(b['billNumber'] ?? '').toString().isEmpty ? '—' : b['billNumber']}')),
               Col('Items', (b) => Text((b['lines'] as List).map((l) => '${l['name']} × ${l['quantity']}').join(', '), maxLines: 2, overflow: TextOverflow.ellipsis), flex: 3),

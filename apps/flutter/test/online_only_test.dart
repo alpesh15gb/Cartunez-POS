@@ -198,7 +198,7 @@ void main() {
     final shell = ShellController()..section = 'billing';
     await tester.pumpWidget(AppScope(state: app,
       child: MaterialApp(home: ShellScope(controller: shell, child: const Scaffold(body: BillingScreen())))));
-    await tester.tap(find.byTooltip('Add Oil filter'));
+    await tester.tap(find.text('Oil filter'));
     await tester.pumpAndSettle();
     app.snapshot = {...app.snapshot, 'products': [{..._filter, 'onlineOnly': true}]};
     await tester.tap(find.text('Add to sale'));

@@ -13,25 +13,75 @@ import '../orders/returns.dart' show startReturnForInvoice; // WS-B
 export '../shift/shift_dialogs.dart' show recordDrawerMovement, showDrawerActivity, closeShift;
 export '../shift/shift_home.dart' show ShiftsScreen;
 
-class InvoicesScreen extends StatelessWidget {
+class InvoicesScreen extends StatefulWidget {
   const InvoicesScreen({super.key});
+
+  @override
+  State<InvoicesScreen> createState() => _InvoicesScreenState();
+}
+
+class _InvoicesScreenState extends State<InvoicesScreen> {
+  DateTimeRange? _dates;
+  String? _status;
+
+  bool _inDates(Object? createdAt) {
+    final dates = _dates;
+    if (dates == null) return true;
+    final timestamp = DateTime.tryParse('${createdAt ?? ''}');
+    if (timestamp == null) return false;
+    final day = DateUtils.dateOnly(timestamp.toLocal());
+    return !day.isBefore(dates.start) && !day.isAfter(dates.end);
+  }
+
+  Future<void> _pickDates() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateUtils.dateOnly(DateTime.now()),
+      initialDateRange: _dates,
+      helpText: 'Invoice dates',
+    );
+    if (mounted && picked != null) setState(() => _dates = picked);
+  }
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
     final shell = ShellScope.of(context);
+    final dates = _dates;
+    String dateLabel(DateTime day) => formatDate(day.toIso8601String().substring(0, 10));
     return ValueListenableBuilder(
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        bool match(Json r) => q.isEmpty || normalize('${r['number']} ${r['invoiceNumber']} ${r['customer']?['name']}').contains(q);
-        final invoices = app.list('invoices').reversed.where(match).toList();
+        bool match(Json r) => _inDates(r['createdAt']) &&
+            (q.isEmpty || normalize('${r['number']} ${r['invoiceNumber']} ${r['customer']?['name']}').contains(q));
+        final invoices = app.list('invoices').reversed
+            .where((row) => match(row) && (_status == null || app.invoiceStatus(row) == _status)).toList();
         final credits = app.list('returns').reversed.where(match).toList();
+        final filtered = q.isNotEmpty || dates != null || _status != null;
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Toolbar([
+            OutlinedButton.icon(
+              onPressed: _pickDates,
+              icon: const Icon(Icons.date_range_outlined),
+              label: Text(dates == null
+                  ? 'Invoice dates'
+                  : dates.start == dates.end ? dateLabel(dates.start) : '${dateLabel(dates.start)} – ${dateLabel(dates.end)}'),
+            ),
+            if (dates != null)
+              IconButton(tooltip: 'Clear date filter', onPressed: () => setState(() => _dates = null), icon: const Icon(Icons.close)),
+            for (final status in const [null, 'Finalized', 'Partially returned', 'Returned', 'Voided'])
+              ChoiceChip(
+                label: Text(status ?? 'All statuses'),
+                selected: _status == status,
+                onSelected: (_) => setState(() => _status = status),
+              ),
+          ]),
           DataList(
             rows: invoices,
-            empty: q.isEmpty ? 'No invoices yet. Completed sales appear here.' : 'No invoice matches.',
-            emptyAction: q.isEmpty && app.canSell
+            empty: filtered ? 'No invoices match these filters.' : 'No invoices yet. Completed sales appear here.',
+            emptyAction: !filtered && app.canSell
                 ? FilledButton.icon(onPressed: () => shell.open('/counter'), icon: const Icon(Icons.point_of_sale_outlined), label: const Text('Go to Counter'))
                 : null,
             onTap: (row) => showReceipt(context, row),
@@ -83,7 +133,7 @@ class InvoicesScreen extends StatelessWidget {
           SectionTitle('Credit notes'),
           DataList(
             rows: credits,
-            empty: 'No returns or voids.',
+            empty: q.isEmpty && dates == null ? 'No returns or voids.' : 'No credit notes match these filters.',
             onTap: (row) => showReceipt(context, row),
             columns: [
               Col('Credit note', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
