@@ -111,7 +111,7 @@ class CatalogState extends ChangeNotifier {
     return matches.length == 1 ? matches.single['id'] as String : null;
   }
 
-  String? binIdForCode(String code) => bins.where((bin) => bin['id'] == code.trim()).firstOrNull?['id'] as String?;
+  String? binIdForCode(String code) => bins.where((bin) => normalize(bin['id']) == normalize(code)).firstOrNull?['id'] as String?;
 
   // ---------- photos and files ----------
   /// Photos of a part, main photo first.

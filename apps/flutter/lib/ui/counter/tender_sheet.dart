@@ -69,8 +69,10 @@ class CheckoutDialog extends StatefulWidget {
 class CheckoutDialogState extends State<CheckoutDialog> {
   late String tender;
   late final TextEditingController amount = TextEditingController(text: (widget.total / 100).toStringAsFixed(2));
+  final amountFocus = FocusNode();
   final second = TextEditingController(text: '0.00');
   final references = {for (final type in ['Card', 'UPI']) type: TextEditingController()};
+  final referenceFocus = {for (final type in ['Card', 'UPI']) type: FocusNode()};
   late final TextEditingController place;
   String secondTender = '';
   bool split = false;
@@ -95,6 +97,11 @@ class CheckoutDialogState extends State<CheckoutDialog> {
     }
     place = TextEditingController(
         text: '${app.customerById('${app.cart['customerId']}')?['stateCode'] ?? app.business['stateCode'] ?? ''}');
+    amountFocus.addListener(() {
+      if (amountFocus.hasFocus && amount.text.isNotEmpty) {
+        amount.selection = TextSelection(baseOffset: 0, extentOffset: amount.text.length);
+      }
+    });
   }
 
   int _minor(String text) => parsePaymentAmount(text) ?? 0;
@@ -134,8 +141,10 @@ class CheckoutDialogState extends State<CheckoutDialog> {
   @override
   void dispose() {
     amount.dispose();
+    amountFocus.dispose();
     second.dispose();
     for (final c in references.values) { c.dispose(); }
+    for (final f in referenceFocus.values) { f.dispose(); }
     place.dispose();
     super.dispose();
   }
@@ -287,6 +296,7 @@ class CheckoutDialogState extends State<CheckoutDialog> {
             const SizedBox(height: 16),
             TextField(
               controller: amount,
+              focusNode: amountFocus,
               autofocus: true,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
@@ -420,10 +430,20 @@ class CheckoutDialogState extends State<CheckoutDialog> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: confirmed,
-                onChanged: !canPay ? null : (v) => setState(() {
-                  confirmed = v;
-                  viaQr = false;
-                }),
+                onChanged: !canPay ? null : (v) {
+                  setState(() {
+                    confirmed = v;
+                    viaQr = false;
+                  });
+                  if (v) {
+                    final firstExt = [tender, if (split) secondTender]
+                        .where((t) => _external(t) && references[t]!.text.trim().isEmpty)
+                        .firstOrNull;
+                    if (firstExt != null) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) => referenceFocus[firstExt]?.requestFocus());
+                    }
+                  }
+                },
                 // QA #9: this is the manually verified path (no QR): the cashier checked the machine / app.
                 title: Text(phone ? 'Payment confirmed (checked manually)' : 'Payment confirmed: checked on the card machine / UPI app'),
                 subtitle: Text(confirmed
@@ -431,10 +451,14 @@ class CheckoutDialogState extends State<CheckoutDialog> {
                     : 'Pending payments appear under Waiting on this device in Sync & audit.'),
               ),
               for (final type in {tender, if (split) secondTender}.where(_external))
-                TextField(controller: references[type], decoration: InputDecoration(labelText: '$type payment reference'),
+                TextField(
+                  controller: references[type],
+                  focusNode: referenceFocus[type],
+                  decoration: InputDecoration(labelText: '$type payment reference'),
                   onChanged: (_) {
                     if (viaQr && type == 'UPI') setState(() { confirmed = false; viaQr = false; });
-                  }),
+                  },
+                ),
             ],
             if (app.gst) ...[
               const SizedBox(height: 12),

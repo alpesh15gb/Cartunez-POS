@@ -154,11 +154,6 @@ Future<void> showReceipt(BuildContext context, Json doc) {
             icon: const Icon(Icons.chat_outlined),
             label: const Text('WhatsApp'),
           ),
-        TextButton.icon(
-          onPressed: () => shareReceipt(app, doc),
-          icon: const Icon(Icons.ios_share),
-          label: const Text('Share PDF'),
-        ),
         OutlinedButton.icon(
           onPressed: () => printReceipt(app, doc),
           icon: const Icon(Icons.print_outlined),

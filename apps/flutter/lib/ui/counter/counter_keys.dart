@@ -19,6 +19,7 @@ const counterKeyMap = <(String, String)>[
   ('F4', 'Hold this bill'),
   ('F5', 'Recall a held bill'),
   ('F6', 'Take UPI payment'),
+  ('F7', 'Take card payment'),
   ('F8', 'Discount'),
   ('F9', 'Review exact cash'),
   ('F10', 'Split payment'),
@@ -37,6 +38,7 @@ class CounterController extends ChangeNotifier {
   int? selected;
   bool services = false;
   bool photos = false;
+  bool showAllFitment = false;
 
   void select(int? index) {
     if (selected == index) return;
@@ -52,6 +54,11 @@ class CounterController extends ChangeNotifier {
 
   void togglePhotos() {
     photos = !photos;
+    notifyListeners();
+  }
+
+  void toggleShowAllFitment() {
+    showAllFitment = !showAllFitment;
     notifyListeners();
   }
 }
@@ -293,6 +300,14 @@ class _CounterKeyboardState extends State<CounterKeyboard> {
         startCheckout(context, tender: 'UPI');
       } else {
         app.toast('UPI is switched off in Register settings.');
+      }
+    },
+    LogicalKeyboardKey.f7: () {
+      final app = context.appRead;
+      if (app.tenderTypes.contains('Card')) {
+        startCheckout(context, tender: 'Card');
+      } else {
+        app.toast('Card is switched off in Register settings.');
       }
     },
     LogicalKeyboardKey.f8: () {

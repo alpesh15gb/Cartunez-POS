@@ -6,6 +6,7 @@ import '../photos.dart';
 import '../widgets.dart';
 import '../shell.dart';
 import 'counter_actions.dart';
+import 'counter_keys.dart';
 import 'fitment_bar.dart';
 
 /// The parts grid with its header and category chips. Rebuilds when the search
@@ -20,6 +21,7 @@ class CounterCatalog extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.appRead;
     final shell = ShellScope.of(context);
+    final counter = CounterScope.maybeOf(context);
     return ListenableBuilder(
       listenable: Listenable.merge([shell.search, category, app.catalogState, app.shiftState, app.cartState.terms]),
       builder: (context, _) {
@@ -30,6 +32,8 @@ class CounterCatalog extends StatelessWidget {
         final saleProducts = app.saleProducts.where((p) => p['type'] != 'service');
         final categories = {'All parts', ...saleProducts.map((p) => '${p['category']}')}.toList();
         final currentCategory = categories.contains(category.value) ? category.value : 'All parts';
+        final showAll = counter?.showAllFitment == true;
+        var hiddenByFitment = 0;
         final parts = saleProducts.where((p) {
           if (exactIds.isNotEmpty) return exactIds.contains(p['id']);
           if (currentCategory != 'All parts' && p['category'] != currentCategory) return false;
@@ -38,7 +42,12 @@ class CounterCatalog extends StatelessWidget {
                   .any((v) => normalize(v).contains(q))) {
             return false;
           }
-          if (vehicle != null && fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride) return false;
+          if (vehicle != null && fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride) {
+            if (!showAll) {
+              hiddenByFitment++;
+              return false;
+            }
+          }
           return true;
         }).toList();
         return CustomScrollView(slivers: [
@@ -49,6 +58,9 @@ class CounterCatalog extends StatelessWidget {
                 categories: categories,
                 current: currentCategory,
                 onCategory: (c) => category.value = c,
+                hiddenByFitment: hiddenByFitment,
+                showAllFitment: showAll && vehicle != null,
+                onToggleFitment: counter == null || vehicle == null ? null : counter.toggleShowAllFitment,
               ),
             ),
           ),

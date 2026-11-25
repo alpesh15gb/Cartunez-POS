@@ -7,10 +7,13 @@
 // the excess back by cash/card/UPI or on their account.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
+import '../counter/tender_sheet.dart' show upiQrAvailable;
+import '../counter/upi_qr.dart' show showUpiQr;
 import '../theme.dart';
 import '../widgets.dart';
 import 'returns.dart';
@@ -118,6 +121,7 @@ class ExchangeCheckoutDialog extends StatefulWidget {
 
 class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
   late String method;
+  late final TextEditingController cashReceived = TextEditingController(text: net > 0 ? (net / 100).toStringAsFixed(2) : '0.00');
   final reference = TextEditingController();
   final approval = TextEditingController();
   late final TextEditingController place;
@@ -149,6 +153,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
 
   @override
   void dispose() {
+    cashReceived.dispose();
     reference.dispose();
     approval.dispose();
     place.dispose();
@@ -159,6 +164,13 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
     final app = context.appRead;
     setState(() => error = null);
     final external = method == 'Card' || method == 'UPI';
+    int? cashAmount;
+    if (net > 0 && method == 'Cash') {
+      cashAmount = parsePaymentAmount(cashReceived.text);
+      if (cashAmount == null || cashAmount < net) {
+        return setState(() => error = 'Enter cash received of at least ${app.money(net)}.');
+      }
+    }
     if (net > 0 && external && reference.text.trim().isEmpty) return setState(() => error = 'Enter the $method payment reference.');
     if (!app.isManager && approval.text.trim().isEmpty) {
       return setState(() => error = 'A manager approval ID is needed for the return. Reference ${app.cart['transactionId']}');
@@ -171,7 +183,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
       'exchangeRefundType': net < 0 && method != 'Original' ? method : null,
     });
     final tenders = net > 0
-        ? [{'type': method, 'amount': net, 'confirmed': true, 'reference': reference.text.trim()}]
+        ? [{'type': method, 'amount': method == 'Cash' ? cashAmount! : net, 'confirmed': true, 'reference': reference.text.trim()}]
         : [{'type': 'Cash', 'amount': 0, 'confirmed': true, 'reference': ''}];
     setState(() => busy = true);
     try {
@@ -189,6 +201,14 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
     final app = context.app;
     final list = methods;
     if (!list.contains(method)) method = list.first;
+    final cashParsed = net > 0 && method == 'Cash' ? parsePaymentAmount(cashReceived.text) : null;
+    final cashChange = cashParsed != null && cashParsed > net ? cashParsed - net : 0;
+    final quickCash = net <= 0
+        ? const <int>[]
+        : <int>{net, for (final step in [10000, 20000, 50000, 200000]) (net / step).ceil() * step}
+            .where((v) => v >= net)
+            .take(4)
+            .toList();
     return AlertDialog(
       scrollable: true,
       title: const Text('Exchange'),
@@ -204,7 +224,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
           if (net != 0) ...[
             Text(net > 0 ? 'Paid by' : 'Give back by', style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 6),
-            Wrap(spacing: 8, children: [
+            Wrap(spacing: 8, runSpacing: 6, children: [
               for (final m in list)
                 ChoiceChip(
                   label: Text(m == 'Original' ? 'Same as paid' : m == 'Credit' ? (net > 0 ? 'On account' : 'Store credit') : m),
@@ -213,15 +233,59 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
                 ),
             ]),
           ],
-          if (net > 0 && (method == 'Card' || method == 'UPI'))
+          if (net > 0 && method == 'Cash') ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: cashReceived,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+              decoration: const InputDecoration(labelText: 'Cash received'),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              for (final v in quickCash)
+                ActionChip(
+                  label: Text(v == net ? 'Exact' : app.money(v)),
+                  onPressed: () => setState(() => cashReceived.text = (v / 100).toStringAsFixed(2)),
+                ),
+            ]),
+            if (cashChange > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('Change to give: ${app.money(cashChange)}',
+                    style: const TextStyle(color: Brand.forest, fontWeight: FontWeight.w700)),
+              ),
+          ],
+          if (net > 0 && method == 'UPI' && upiQrAvailable(app))
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: FilledButton.tonalIcon(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final ref = await showUpiQr(context, amount: net, note: 'Exch ${app.cart['transactionId']}'.substring(0, 14));
+                        if (ref != null && mounted) setState(() => reference.text = ref);
+                      },
+                icon: const Icon(Icons.qr_code_2),
+                label: Text('UPI QR checkout · ${app.money(net)}'),
+              ),
+            ),
+          if (net > 0 && (method == 'Card' || method == 'UPI')) ...[
+            const SizedBox(height: 8),
             TextField(controller: reference, decoration: InputDecoration(labelText: '$method payment reference')),
-          if (!app.isManager)
+          ],
+          if (!app.isManager) ...[
+            const SizedBox(height: 8),
             TextField(
               controller: approval,
               decoration: InputDecoration(labelText: 'Manager approval ID (return)', helperText: 'Reference ${app.cart['transactionId']}'),
             ),
-          if (app.gst)
+          ],
+          if (app.gst) ...[
+            const SizedBox(height: 8),
             TextField(controller: place, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Place of supply (state code)')),
+          ],
           if (error != null)
             Padding(padding: const EdgeInsets.only(top: 10), child: Text(error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600))),
         ]),

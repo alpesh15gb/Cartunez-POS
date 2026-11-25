@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../../core/billing.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
+import '../orders/exchange.dart' show ExchangeReturnsPanel, exchangeCredit, exchangeReturns; // WS-B
+import '../people/account_actions.dart' show availableAdvance; // WS-B
 import '../screens/inventory.dart' show editProduct;
 import '../screens/people.dart';
 import '../shell.dart';
+import '../theme.dart';
 import '../widgets.dart';
 import 'catalog_grid.dart';
 import 'counter_actions.dart';
@@ -23,7 +26,7 @@ import 'tender_sheet.dart';
 const _figures = [FontFeature.tabularFigures()];
 
 /// Parts for sale matching the search box, category and vehicle (fitment).
-List<Json> counterParts(AppState app, String search, String category, {bool services = false}) {
+List<Json> counterParts(AppState app, String search, String category, {bool services = false, bool showAllFitment = false}) {
   final q = normalize(search);
   final exactIds = {for (final part in app.findByCode(search, forSale: true)) part['id']};
   final vehicle = app.cart['vehicle'] as Map?;
@@ -36,7 +39,7 @@ List<Json> counterParts(AppState app, String search, String category, {bool serv
             .any((v) => normalize(v).contains(q))) {
       return false;
     }
-    if (vehicle != null && fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride) return false;
+    if (!showAllFitment && vehicle != null && fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride) return false;
     return true;
   }).toList();
 }
@@ -102,18 +105,34 @@ class PartsList extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.appRead;
     final shell = ShellScope.of(context);
+    final counter = CounterScope.maybeOf(context);
     return ListenableBuilder(
       listenable: Listenable.merge([shell.search, category, app.catalogState, app.shiftState, app.cartState.terms]),
       builder: (context, _) {
         final saleProducts = app.saleProducts.where((p) => p['type'] != 'service');
         final categories = {'All parts', ...saleProducts.map((p) => '${p['category']}')}.toList();
         final current = categories.contains(category.value) ? category.value : 'All parts';
-        final parts = counterParts(app, shell.search.text, current);
+        final vehicle = app.cart['vehicle'] as Map?;
+        final showAll = counter?.showAllFitment == true;
+        final allMatches = counterParts(app, shell.search.text, current, showAllFitment: true);
+        final parts = showAll || vehicle == null
+            ? allMatches
+            : allMatches.where((p) => !fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride).toList();
+        final hiddenByFitment = vehicle == null || showAll ? 0 : allMatches.length - parts.length;
         final pad = compact ? 12.0 : 20.0;
         return CustomScrollView(slivers: [
           SliverPadding(
             padding: EdgeInsets.fromLTRB(pad, compact ? 10 : 14, pad, 0),
-            sliver: SliverToBoxAdapter(child: FitmentBar(categories: categories, current: current, onCategory: (c) => category.value = c)),
+            sliver: SliverToBoxAdapter(
+              child: FitmentBar(
+                categories: categories,
+                current: current,
+                onCategory: (c) => category.value = c,
+                hiddenByFitment: hiddenByFitment,
+                showAllFitment: showAll && vehicle != null,
+                onToggleFitment: counter == null || vehicle == null ? null : counter.toggleShowAllFitment,
+              ),
+            ),
           ),
           if (parts.isEmpty)
             SliverToBoxAdapter(
@@ -260,6 +279,41 @@ class CustomerVehicleChip extends StatelessWidget {
   }
 }
 
+/// Compact balance / advance badge for the selected customer on the counter.
+class _CustomerAccountHint extends StatelessWidget {
+  const _CustomerAccountHint({this.padding = const EdgeInsets.fromLTRB(16, 0, 16, 6)});
+  final EdgeInsets padding;
+  @override
+  Widget build(BuildContext context) {
+    final app = context.appRead;
+    return ListenableBuilder(
+      listenable: Listenable.merge([app.cartState.terms, app]),
+      builder: (context, _) {
+        final customer = app.customerById('${app.cart['customerId']}');
+        if (customer == null) return const SizedBox.shrink();
+        final id = '${customer['id']}';
+        final balance = app.partyBalance('customers', id);
+        final advance = availableAdvance(app, id);
+        final phone = '${customer['phone'] ?? ''}'.trim();
+        if (balance == 0 && advance == 0 && phone.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: padding,
+          child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            if (phone.isNotEmpty)
+              Text(phone, style: Theme.of(context).textTheme.bodySmall),
+            if (balance > 0)
+              Text('Owes ${app.money(balance)}',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Brand.danger)),
+            if (advance > 0)
+              Text('Advance ${app.money(advance)}',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Brand.forest)),
+          ]),
+        );
+      },
+    );
+  }
+}
+
 /// A wide table or a stacked list, depending on the cart's own available width.
 class CartTable extends StatelessWidget {
   const CartTable({super.key, this.padding = const EdgeInsets.symmetric(horizontal: 16)});
@@ -273,8 +327,16 @@ class CartTable extends StatelessWidget {
       listenable: Listenable.merge([app.cartState, app.catalogState, ?counter]),
       builder: (context, _) {
         final lines = (app.cart['lines'] as List).cast<Map>();
+        final hasExchange = exchangeReturns(app.cart).isNotEmpty;
         final bill = app.bill;
-        if (lines.isEmpty) return const EmptyState(message: 'No items yet.\nScan a barcode or tap a part.', icon: Icons.qr_code_2);
+        if (lines.isEmpty) {
+          return EmptyState(
+            message: hasExchange
+                ? 'Exchange credit on this bill.\nScan a barcode or tap a replacement part.'
+                : 'No items yet.\nScan a barcode or tap a part.',
+            icon: hasExchange ? Icons.swap_horiz : Icons.qr_code_2,
+          );
+        }
         final head = Theme.of(context).textTheme.labelSmall;
         return LayoutBuilder(builder: (context, constraints) {
           final compact = constraints.maxWidth < 540;
@@ -362,6 +424,9 @@ class _TableLine extends StatelessWidget {
         style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: _figures));
     final stockWarning = raw['binId'] != null && beyondStock(app, product) &&
         qty > app.available('${raw['productId']}', '${raw['binId']}');
+    final serialList = (raw['serials'] as List? ?? const []).map((e) => '$e').where((e) => e.isNotEmpty).toList();
+    final overrideReason = '${raw['overrideReason'] ?? ''}'.trim();
+    final meta = Theme.of(context).textTheme.bodySmall;
     return Material(
       color: selected ? scheme.primaryContainer.withValues(alpha: 0.6) : Colors.transparent,
       child: InkWell(
@@ -371,7 +436,9 @@ class _TableLine extends StatelessWidget {
           child: compact
               ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   Row(children: [Expanded(child: title), remove]),
-                  Text('$qty × ${app.money(line?.unitPrice ?? 0)}', style: Theme.of(context).textTheme.bodySmall),
+                  Text('$qty × ${app.money(line?.unitPrice ?? 0)}', style: meta),
+                  if (serialList.isNotEmpty) Text('Serials: ${serialList.join(', ')}', style: meta),
+                  if (overrideReason.isNotEmpty) Text('Fitment override: $overrideReason', style: meta),
                   if (stockWarning) const StockCaution('This sale exceeds available stock.'),
                   Row(children: [
                     Expanded(child: staffAction),
@@ -385,6 +452,8 @@ class _TableLine extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 title,
                 staffAction,
+                if (serialList.isNotEmpty) Text('Serials: ${serialList.join(', ')}', style: meta),
+                if (overrideReason.isNotEmpty) Text('Fitment override: $overrideReason', style: meta),
                 if (stockWarning) const StockCaution('Exceeds available stock'),
               ]),
             ),
@@ -413,6 +482,8 @@ class PaymentDock extends StatelessWidget {
       listenable: Listenable.merge([app.cartState, app]),
       builder: (context, _) {
         final lines = app.cart['lines'] as List;
+        final exchange = exchangeReturns(app.cart).isNotEmpty;
+        final exCredit = exchange ? exchangeCredit(app.cart) : 0;
         final bill = app.bill;
         final blocker = lines.isEmpty ? null : checkoutBlocker(app);
         final can = lines.isNotEmpty && blocker == null && app.canSell;
@@ -449,6 +520,15 @@ class PaymentDock extends StatelessWidget {
               return primary && !hasHint ? Tooltip(message: 'Pay & print ($key)', child: button) : button;
             });
 
+        final netTotal = (bill?.total ?? 0) - exCredit;
+        final summaryParts = [
+          'Subtotal ${app.money(bill?.subtotal ?? 0)}',
+          if (!app.noTax) '${app.settings['taxDisplayName'] ?? 'Tax'} ${app.money(bill?.tax ?? 0)}',
+          if ((bill?.core ?? 0) != 0) 'Core ${app.money(bill!.core)}',
+          if ((bill?.rounding ?? 0) != 0) 'Rounding ${app.money(bill!.rounding)}',
+          if (exchange) 'Exchange −${app.money(exCredit)}',
+        ];
+
         return Container(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
           decoration: BoxDecoration(color: scheme.surfaceContainerLow, border: Border(top: BorderSide(color: Theme.of(context).dividerColor))),
@@ -456,8 +536,7 @@ class PaymentDock extends StatelessWidget {
             Row(children: [
               Expanded(
                 child: Text(
-                  'Subtotal ${app.money(bill?.subtotal ?? 0)} · ${app.settings['taxDisplayName'] ?? 'Tax'} ${app.money(bill?.tax ?? 0)}'
-                  '${(bill?.rounding ?? 0) != 0 ? ' · Rounding ${app.money(bill!.rounding)}' : ''}',
+                  summaryParts.join(' · '),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(fontFeatures: _figures),
                 ),
               ),
@@ -477,11 +556,35 @@ class PaymentDock extends StatelessWidget {
                     : Text(blocker, style: TextStyle(color: scheme.error)),
               ),
             Row(children: [
-              Text('${app.cartState.units} ${app.cartState.units == 1 ? 'item' : 'items'}', style: Theme.of(context).textTheme.bodyMedium),
-              const Spacer(),
-              Text(app.money(bill?.total ?? 0),
-                  key: const ValueKey('dock-total'),
-                  style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800, letterSpacing: -0.8, fontFeatures: _figures)),
+              Expanded(
+                child: Text(
+                  exchange
+                      ? (netTotal >= 0 ? 'Customer pays' : 'Refund due')
+                      : '${app.cartState.units} ${app.cartState.units == 1 ? 'item' : 'items'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: exchange && netTotal < 0 ? Brand.forest : null,
+                        fontWeight: exchange ? FontWeight.w700 : null,
+                      ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(app.money(exchange ? netTotal.abs() : (bill?.total ?? 0)),
+                      key: const ValueKey('dock-total'),
+                      style: TextStyle(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.8,
+                        fontFeatures: _figures,
+                        color: exchange && netTotal < 0 ? Brand.forest : null,
+                      )),
+                ),
+              ),
             ]),
             const SizedBox(height: 8),
             Row(children: [
@@ -495,10 +598,13 @@ class PaymentDock extends StatelessWidget {
             ]),
             const SizedBox(height: 8),
             Row(children: [
-              OutlinedButton(
-                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
-                onPressed: lines.isEmpty || !app.online ? null : () => run(() => parkWithPrompt(context)),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.pause, size: 18), SizedBox(width: 4), Text('Hold'), KeyCap('F4')]),
+              Tooltip(
+                message: exchange ? 'Complete or remove the exchange instead of holding' : 'Hold this bill',
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
+                  onPressed: lines.isEmpty || exchange || !app.online ? null : () => run(() => parkWithPrompt(context)),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.pause, size: 18), SizedBox(width: 4), Text('Hold'), KeyCap('F4')]),
+                ),
               ),
               const SizedBox(width: 8),
               Badge(
@@ -551,7 +657,7 @@ class DeskCartPane extends StatelessWidget {
           ),
           ListenableBuilder(
             listenable: app.cartState,
-            builder: (context, _) => (app.cart['lines'] as List).isEmpty
+            builder: (context, _) => (app.cart['lines'] as List).isEmpty && exchangeReturns(app.cart).isEmpty
                 ? const SizedBox.shrink()
                 : IconButton(
                     tooltip: 'Clear sale',
@@ -565,8 +671,10 @@ class DeskCartPane extends StatelessWidget {
           ),
         ]),
       ),
+      const _CustomerAccountHint(),
       const Divider(height: 1),
       const Expanded(child: CartTable()),
+      const ExchangeReturnsPanel(),
       const PaymentDock(),
     ]);
   }
@@ -592,7 +700,7 @@ class TabletCartPane extends StatelessWidget {
           ),
           ListenableBuilder(
             listenable: app.cartState,
-            builder: (context, _) => (app.cart['lines'] as List).isEmpty
+            builder: (context, _) => (app.cart['lines'] as List).isEmpty && exchangeReturns(app.cart).isEmpty
                 ? const SizedBox.shrink()
                 : IconButton(
                     tooltip: 'Clear sale',
@@ -606,6 +714,7 @@ class TabletCartPane extends StatelessWidget {
           ),
         ]),
       ),
+      const _CustomerAccountHint(padding: EdgeInsets.fromLTRB(14, 0, 14, 6)),
       Padding(
         padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
         child: ListenableBuilder(
@@ -621,6 +730,7 @@ class TabletCartPane extends StatelessWidget {
       ),
       const Divider(height: 1),
       const Expanded(child: CartTable(padding: EdgeInsets.symmetric(horizontal: 14))),
+      const ExchangeReturnsPanel(),
       const PaymentDock(),
     ]);
   }
@@ -636,8 +746,14 @@ class CartPill extends StatelessWidget {
     return ListenableBuilder(
       listenable: app.cartState,
       builder: (context, _) {
-        if ((app.cart['lines'] as List).isEmpty) return const SizedBox.shrink();
+        final lines = app.cart['lines'] as List;
+        final exchange = exchangeReturns(app.cart).isNotEmpty;
+        if (lines.isEmpty && !exchange) return const SizedBox.shrink();
         final units = app.cartState.units;
+        final net = (app.bill?.total ?? 0) - (exchange ? exchangeCredit(app.cart) : 0);
+        final summary = lines.isEmpty
+            ? 'Exchange credit • ${app.money(exchangeCredit(app.cart))}'
+            : '$units ${units == 1 ? 'item' : 'items'} • ${app.money(exchange ? net.abs() : (app.bill?.total ?? 0))}';
         return SafeArea(
           top: false,
           child: Padding(
@@ -647,13 +763,12 @@ class CartPill extends StatelessWidget {
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(58), shape: const StadiumBorder()),
               onPressed: () => openPhoneCart(context),
               child: Row(children: [
-                const Icon(Icons.shopping_bag_outlined),
+                Icon(exchange ? Icons.swap_horiz : Icons.shopping_bag_outlined),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text('$units ${units == 1 ? 'item' : 'items'} • ${app.money(app.bill?.total ?? 0)}',
-                      overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontFeatures: _figures)),
+                  child: Text(summary, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontFeatures: _figures)),
                 ),
-                const Text('Pay', style: TextStyle(fontWeight: FontWeight.w800)),
+                Text(exchange && lines.isEmpty ? 'View' : 'Pay', style: const TextStyle(fontWeight: FontWeight.w800)),
                 const Icon(Icons.arrow_forward),
               ]),
             ),
@@ -698,6 +813,7 @@ Future<void> openPhoneCart(BuildContext context) {
                 listenable: app.cartState,
                 builder: (context, _) {
                   final lines = (app.cart['lines'] as List).cast<Map>();
+                  final hasExchange = exchangeReturns(app.cart).isNotEmpty;
                   final bill = app.bill;
                   return ListView(controller: scroll, padding: const EdgeInsets.fromLTRB(16, 8, 16, 8), children: [
                     Center(
@@ -708,17 +824,50 @@ Future<void> openPhoneCart(BuildContext context) {
                     ),
                     Row(children: [
                       Expanded(child: Text('Current sale', style: Theme.of(context).textTheme.titleLarge)),
+                      if (lines.isNotEmpty || hasExchange)
+                        IconButton(
+                          tooltip: 'Clear sale',
+                          onPressed: () async {
+                            if (await confirm(context, 'Clear this sale?', 'All items will be removed from the current bill.', action: 'Clear')) {
+                              app.clearCart();
+                            }
+                          },
+                          icon: const Icon(Icons.delete_sweep_outlined),
+                        ),
                       IconButton(tooltip: 'Close', onPressed: () => Navigator.pop(sheet), icon: const Icon(Icons.close)),
                     ]),
-                    const Align(alignment: Alignment.centerLeft, child: CustomerVehicleChip()),
-                    const SizedBox(height: 6),
-                    if (lines.isEmpty) const EmptyState(message: 'No items yet.'),
+                    Row(children: [
+                      const Expanded(child: Align(alignment: Alignment.centerLeft, child: CustomerVehicleChip())),
+                      IconButton(
+                        tooltip: 'New customer',
+                        onPressed: () => editContact(context, 'customers', const {}, onSaved: (saved) => app.updateCart({'customerId': saved['id']})),
+                        icon: const Icon(Icons.person_add_alt),
+                      ),
+                    ]),
+                    const _CustomerAccountHint(padding: EdgeInsets.only(top: 2, bottom: 4)),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 6),
+                      child: SegmentedButton<String>(
+                        showSelectedIcon: false,
+                        style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                        segments: const [ButtonSegment(value: 'retail', label: Text('Retail')), ButtonSegment(value: 'wholesale', label: Text('Wholesale'))],
+                        selected: {'${app.cart['priceLevel'] ?? 'retail'}'},
+                        onSelectionChanged: (v) => app.updateCart({'priceLevel': v.first}),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (lines.isEmpty)
+                      EmptyState(
+                        message: hasExchange ? 'Exchange credit active.\nClose to add the replacement part.' : 'No items yet.',
+                        icon: hasExchange ? Icons.swap_horiz : Icons.inbox_outlined,
+                      ),
                     for (var i = 0; i < lines.length; i++)
                       _PhoneLine(index: i, raw: Map<String, dynamic>.from(lines[i]), line: bill?.lines.elementAtOrNull(i)),
                   ]);
                 },
               ),
             ),
+            const ExchangeReturnsPanel(),
             PaymentDock(onDone: () {
               if (Navigator.of(sheet).canPop()) Navigator.pop(sheet);
             }),
@@ -743,13 +892,18 @@ class _PhoneLine extends StatelessWidget {
     final staff = '${raw['staffId'] ?? ''}';
     final stockWarning = raw['binId'] != null && beyondStock(app, product) &&
         qty > app.available('${raw['productId']}', '${raw['binId']}');
+    final serialList = (raw['serials'] as List? ?? const []).map((e) => '$e').where((e) => e.isNotEmpty).toList();
+    final overrideReason = '${raw['overrideReason'] ?? ''}'.trim();
+    final meta = Theme.of(context).textTheme.bodySmall;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${product?['name'] ?? raw['productId']}', style: const TextStyle(fontWeight: FontWeight.w700)),
-            Text('${app.money(line?.unitPrice ?? 0)} each', style: Theme.of(context).textTheme.bodySmall?.copyWith(fontFeatures: _figures)),
+            Text('${app.money(line?.unitPrice ?? 0)} each', style: meta?.copyWith(fontFeatures: _figures)),
+            if (serialList.isNotEmpty) Text('Serials: ${serialList.join(', ')}', style: meta),
+            if (overrideReason.isNotEmpty) Text('Fitment override: $overrideReason', style: meta),
             if (stockWarning) const StockCaution('Exceeds available stock'),
             ActionChip(
               visualDensity: VisualDensity.compact,

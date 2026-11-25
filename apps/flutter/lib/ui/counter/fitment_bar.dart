@@ -9,10 +9,21 @@ import 'vehicle_chip.dart';
 /// Counter header: title, vehicle (fitment) chip, shift hint and category chips.
 /// The part search itself lives in the shell's top bar ([ShellController.search]).
 class FitmentBar extends StatelessWidget {
-  const FitmentBar({super.key, required this.categories, required this.current, required this.onCategory});
+  const FitmentBar({
+    super.key,
+    required this.categories,
+    required this.current,
+    required this.onCategory,
+    this.hiddenByFitment = 0,
+    this.showAllFitment = false,
+    this.onToggleFitment,
+  });
   final List<String> categories;
   final String current;
   final ValueChanged<String> onCategory;
+  final int hiddenByFitment;
+  final bool showAllFitment;
+  final VoidCallback? onToggleFitment;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +54,15 @@ class FitmentBar extends StatelessWidget {
       SizedBox(
         height: 38,
         child: ListView(scrollDirection: Axis.horizontal, children: [
+          if ((hiddenByFitment > 0 || showAllFitment) && onToggleFitment != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                label: Text(showAllFitment ? 'Fits vehicle only' : 'Show all ($hiddenByFitment hidden)'),
+                selected: showAllFitment,
+                onSelected: (_) => onToggleFitment!(),
+              ),
+            ),
           for (final c in categories)
             Padding(
               padding: const EdgeInsets.only(right: 8),

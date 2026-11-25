@@ -7,9 +7,13 @@ import '../../core/billing.dart';
 import '../../core/receipt_print.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
+import '../screens/people.dart' show editContact;
 import '../screens/receipt.dart';
 import '../shell.dart';
+import '../theme.dart';
 import '../widgets.dart';
+import '../workshop/common.dart' show vehicleTitle;
+import '../workshop/vehicles.dart' show counterVehicle, editVehicle, searchVehicles;
 import 'counter_keys.dart';
 import 'tender_sheet.dart';
 
@@ -270,57 +274,271 @@ class _HoldPromptState extends State<HoldPrompt> {
   }
 }
 
-/// F2: customer and vehicle in one dialog. A registration number that matches
-/// a saved vehicle fills in the vehicle (and its owner).
+/// F2: searchable customer and vehicle picker in one dialog. Selecting a
+/// registered vehicle fills in the fitment vehicle (with customerVehicleId) and
+/// links its owner; selecting a customer offers their registered vehicles.
 Future<void> editCustomerVehicle(BuildContext context) async {
   final app = context.appRead;
-  final current = Map<String, dynamic>.from(app.cart['vehicle'] as Map? ?? {});
-  await showFormDialog<void>(
-    context,
-    title: 'Customer and vehicle',
-    submit: 'Use',
-    fields: [
-      FieldSpec('customerId', 'Customer', kind: FieldKind.select, value: '${app.cart['customerId'] ?? ''}', options: [
-        ('', 'Walk-in customer'),
-        for (final c in app.list('customers'))
-          ('${c['id']}', '${c['name']}${'${c['phone'] ?? ''}'.isNotEmpty ? ' · ${c['phone']}' : ''}'),
-      ]),
-      FieldSpec('regNo', 'Vehicle reg. no.', value: app.cart['regNo'], help: 'For example MH12AB1234'),
-      FieldSpec('preset', 'Saved vehicle', kind: FieldKind.select, options: [
-        for (final v in app.list('vehicles')) ('${v['id']}', '${v['year']} ${v['make']} ${v['model']} ${v['engine'] ?? ''}'.trim()),
-      ]),
-      FieldSpec('make', 'Make', value: current['make'], advanced: true),
-      FieldSpec('model', 'Model', value: current['model'], advanced: true),
-      FieldSpec('year', 'Year', kind: FieldKind.number, value: current['year'], advanced: true),
-    ],
-    onSubmit: (values) async {
-      final plate = normalizeRegNo('${values['regNo'] ?? ''}'.trim());
-      if (!validRegNo(plate)) throw FormProblem('Enter the registration with letters and digits only, for example MH12AB1234.');
-      Json? vehicle = app.cart['vehicle'] == null ? null : current;
-      var customerId = '${values['customerId'] ?? ''}';
-      final saved = plate.isEmpty
-          ? null
-          : app.list('vehicles').where((v) => normalizeRegNo('${v['regNo'] ?? v['registration'] ?? ''}') == plate).firstOrNull;
-      if ('${values['preset'] ?? ''}'.isNotEmpty) {
-        vehicle = app.list('vehicles').firstWhere((v) => v['id'] == values['preset']);
-      } else if (saved != null) {
-        vehicle = saved;
-        if (customerId.isEmpty && '${saved['customerId'] ?? ''}'.isNotEmpty) customerId = '${saved['customerId']}';
-      } else if ('${values['make'] ?? ''}'.isNotEmpty && '${values['model'] ?? ''}'.isNotEmpty) {
-        vehicle = {'make': values['make'], 'model': values['model'], 'year': int.tryParse('${values['year']}') ?? 0};
-      }
-      final vehicleChanged = !_sameVehicle(vehicle, app.cart['vehicle'] as Map?);
-      app.updateCart({
-        'customerId': customerId,
-        'regNo': plate,
-        if (vehicleChanged) ...{
-          'vehicle': vehicle,
-          'approvalId': null,
-          'lines': [for (final l in app.cart['lines'] as List) {...Map<String, dynamic>.from(l as Map), 'overrideReason': ''}],
-        },
-      });
-    },
+  await showDialog<void>(
+    context: context,
+    builder: (_) => AppScope(state: app, child: const CustomerVehicleDialog()),
   );
+}
+
+class CustomerVehicleDialog extends StatefulWidget {
+  const CustomerVehicleDialog({super.key});
+  @override
+  State<CustomerVehicleDialog> createState() => _CustomerVehicleDialogState();
+}
+
+class _CustomerVehicleDialogState extends State<CustomerVehicleDialog> {
+  late final AppState app = context.appRead;
+  final search = TextEditingController();
+  late String customerId = '${app.cart['customerId'] ?? ''}';
+  late String regNo = '${app.cart['regNo'] ?? ''}';
+  late Json? vehicle = app.cart['vehicle'] == null ? null : Map<String, dynamic>.from(app.cart['vehicle'] as Map);
+  bool manualVehicle = false;
+  late final make = TextEditingController(text: '${vehicle?['make'] ?? ''}');
+  late final model = TextEditingController(text: '${vehicle?['model'] ?? ''}');
+  late final year = TextEditingController(text: '${vehicle?['year'] ?? ''}' == '0' ? '' : '${vehicle?['year'] ?? ''}');
+  String? error;
+
+  @override
+  void dispose() {
+    search.dispose();
+    make.dispose();
+    model.dispose();
+    year.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    final plate = normalizeRegNo(regNo.trim());
+    if (!validRegNo(plate)) {
+      setState(() => error = 'Enter the registration with letters and digits only, for example MH12AB1234.');
+      return;
+    }
+    var resolvedVehicle = vehicle;
+    var resolvedCustomerId = customerId;
+    if (plate.isNotEmpty && resolvedVehicle == null) {
+      final saved = app.list('customerVehicles')
+          .where((v) => normalizeRegNo('${v['regNo'] ?? v['regKey'] ?? ''}') == plate)
+          .firstOrNull;
+      if (saved != null) {
+        resolvedVehicle = counterVehicle(saved);
+        if (resolvedCustomerId.isEmpty && '${saved['customerId'] ?? ''}'.isNotEmpty) {
+          resolvedCustomerId = '${saved['customerId']}';
+        }
+      }
+    }
+    if (manualVehicle && make.text.trim().isNotEmpty && model.text.trim().isNotEmpty) {
+      resolvedVehicle = {
+        'make': make.text.trim(),
+        'model': model.text.trim(),
+        'year': int.tryParse(year.text.trim()) ?? 0,
+        if (plate.isNotEmpty) 'regNo': plate,
+      };
+    }
+    final vehicleChanged = !_sameVehicle(resolvedVehicle, app.cart['vehicle'] as Map?);
+    app.updateCart({
+      'customerId': resolvedCustomerId,
+      'regNo': plate,
+      if (vehicleChanged) ...{
+        'vehicle': resolvedVehicle,
+        'approvalId': null,
+        'lines': [for (final l in app.cart['lines'] as List) {...Map<String, dynamic>.from(l as Map), 'overrideReason': ''}],
+      },
+    });
+    Navigator.pop(context);
+  }
+
+  void _pickRegisteredVehicle(Json v) {
+    setState(() {
+      vehicle = counterVehicle(v);
+      regNo = '${v['regNo'] ?? ''}';
+      make.text = '${v['make'] ?? ''}';
+      model.text = '${v['model'] ?? ''}';
+      year.text = '${v['year'] ?? ''}' == '0' ? '' : '${v['year'] ?? ''}';
+      manualVehicle = false;
+      if (customerId.isEmpty && '${v['customerId'] ?? ''}'.isNotEmpty) {
+        customerId = '${v['customerId']}';
+      }
+      error = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.app;
+    final q = normalize(search.text);
+    final selectedCustomer = customerId.isEmpty ? null : app.customerById(customerId);
+    final customers = app.list('customers').where((c) {
+      if (q.isEmpty) return true;
+      return normalize('${c['name']} ${c['phone']} ${c['taxRegistrationId']}').contains(q);
+    }).take(25).toList();
+    final vehicles = searchVehicles(app, search.text).where((v) {
+      if (q.isNotEmpty) return true;
+      return customerId.isEmpty || v['customerId'] == customerId;
+    }).take(20).toList();
+    final customerVehicles = customerId.isEmpty
+        ? const <Json>[]
+        : app.list('customerVehicles').where((v) => v['customerId'] == customerId).toList();
+    final scheme = Theme.of(context).colorScheme;
+    final small = Theme.of(context).textTheme.bodySmall;
+
+    return AlertDialog(
+      title: const Text('Customer and vehicle'),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: scheme.surfaceContainerLow, borderRadius: BorderRadius.circular(10)),
+              child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                InputChip(
+                  avatar: const Icon(Icons.person_outline, size: 18),
+                  label: Text(selectedCustomer == null
+                      ? 'Walk-in customer'
+                      : '${selectedCustomer['name']}${'${selectedCustomer['phone'] ?? ''}'.isNotEmpty ? ' · ${selectedCustomer['phone']}' : ''}'),
+                  onDeleted: customerId.isEmpty ? null : () => setState(() => customerId = ''),
+                ),
+                if (vehicle != null || regNo.isNotEmpty)
+                  InputChip(
+                    avatar: const Icon(Icons.directions_car_outlined, size: 18),
+                    label: Text(vehicle == null
+                        ? regNo
+                        : '${regNo.isEmpty ? '' : '$regNo · '}${vehicle!['year'] == 0 || vehicle!['year'] == null ? '' : '${vehicle!['year']} '}${vehicle!['make']} ${vehicle!['model']}'.trim()),
+                    onDeleted: () => setState(() {
+                      vehicle = null;
+                      regNo = '';
+                      make.clear();
+                      model.clear();
+                      year.clear();
+                    }),
+                  ),
+              ]),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              key: const ValueKey('customer-vehicle-search'),
+              controller: search,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Search customer, phone or vehicle reg. no.',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: search.text.isEmpty
+                    ? null
+                    : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close, size: 18), onPressed: () => setState(search.clear)),
+              ),
+              onChanged: (_) => setState(() => error = null),
+            ),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              OutlinedButton.icon(
+                onPressed: () => editContact(context, 'customers', const {}, onSaved: (saved) {
+                  if (mounted) setState(() => customerId = '${saved['id']}');
+                }),
+                icon: const Icon(Icons.person_add_alt, size: 18),
+                label: const Text('New customer'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final saved = await editVehicle(context, {
+                    if (customerId.isNotEmpty) 'customerId': customerId,
+                    if (search.text.trim().isNotEmpty && RegExp(r'\d').hasMatch(search.text))
+                      'regNo': search.text.trim().toUpperCase(),
+                  });
+                  if (saved != null && mounted) _pickRegisteredVehicle(saved);
+                },
+                icon: const Icon(Icons.directions_car_outlined, size: 18),
+                label: const Text('New vehicle'),
+              ),
+              TextButton.icon(
+                onPressed: () => setState(() => manualVehicle = !manualVehicle),
+                icon: Icon(manualVehicle ? Icons.expand_less : Icons.tune, size: 18),
+                label: Text(manualVehicle ? 'Hide manual vehicle' : 'Enter make / model'),
+              ),
+            ]),
+            if (customerVehicles.isNotEmpty && q.isEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Customer vehicles', style: small),
+              const SizedBox(height: 4),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final v in customerVehicles)
+                  ActionChip(
+                    avatar: const Icon(Icons.directions_car_outlined, size: 16),
+                    label: Text(vehicleTitle(v)),
+                    onPressed: () => _pickRegisteredVehicle(v),
+                  ),
+              ]),
+            ],
+            if (manualVehicle) ...[
+              const SizedBox(height: 10),
+              TextFormField(
+                initialValue: regNo,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(labelText: 'Vehicle reg. no.', hintText: 'MH12AB1234'),
+                onChanged: (v) => regNo = v,
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: TextField(controller: make, decoration: const InputDecoration(labelText: 'Make'))),
+                const SizedBox(width: 8),
+                Expanded(child: TextField(controller: model, decoration: const InputDecoration(labelText: 'Model'))),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 88,
+                  child: TextField(controller: year, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Year')),
+                ),
+              ]),
+            ],
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 240),
+              child: ListView(shrinkWrap: true, children: [
+                if (vehicles.isNotEmpty) ...[
+                  Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('Vehicles', style: small)),
+                  for (final v in vehicles)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.directions_car_outlined, size: 20),
+                      title: Text(vehicleTitle(v)),
+                      subtitle: v['customerId'] == null ? null : Text(app.customerById('${v['customerId']}')?['name'] ?? ''),
+                      selected: vehicle?['customerVehicleId'] == v['id'],
+                      onTap: () => _pickRegisteredVehicle(v),
+                    ),
+                ],
+                if (customers.isNotEmpty) ...[
+                  Padding(padding: const EdgeInsets.only(top: 6, bottom: 4), child: Text('Customers', style: small)),
+                  for (final c in customers)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.person_outline, size: 20),
+                      title: Text('${c['name']}'),
+                      subtitle: '${c['phone'] ?? ''}'.isEmpty ? null : Text('${c['phone']}'),
+                      selected: customerId == '${c['id']}',
+                      onTap: () => setState(() => customerId = '${c['id']}'),
+                    ),
+                ],
+                if (vehicles.isEmpty && customers.isEmpty)
+                  const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('No matching customers or vehicles.')),
+              ]),
+            ),
+            if (error != null)
+              Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600))),
+          ]),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: _apply, child: const Text('Use')),
+      ],
+    );
+  }
 }
 
 bool _sameVehicle(Map? a, Map? b) =>

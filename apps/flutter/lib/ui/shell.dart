@@ -917,79 +917,98 @@ class _TopBar extends StatelessWidget {
     final tiny = MediaQuery.sizeOf(context).width < 420;
     final scheme = Theme.of(context).colorScheme;
     final prefs = UiPrefsScope.maybeOf(context);
-    final status = Tooltip(
-      message: app.online ? 'Connected. Tap to refresh.' : 'Offline. Tap to retry.',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () => app.sync(loud: true),
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: tiny ? 8 : 10, vertical: 6),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            app.syncing
-                ? const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.6))
-                : Icon(Icons.circle, size: tiny ? 11 : 9, color: app.online ? Brand.forest : const Color(0xFFB46C15),
-                    semanticLabel: app.online ? 'Online' : 'Offline'),
-            if (!tiny) ...[
-            const SizedBox(width: 7),
-            Text(
-              narrow
-                  ? (app.online ? 'Online' : 'Offline')
-                  : '${app.online ? 'Online' : 'Offline'}${app.pending.isEmpty ? '' : ' · ${app.pending.length} waiting'}',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-            ],
-          ]),
+    final status = Row(mainAxisSize: MainAxisSize.min, children: [
+      Tooltip(
+        message: app.online ? 'Connected. Tap to refresh.' : 'Offline. Tap to retry.',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => app.sync(loud: true),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: tiny ? 8 : 10, vertical: 6),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              app.syncing
+                  ? const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.6))
+                  : Icon(Icons.circle, size: tiny ? 11 : 9, color: app.online ? Brand.forest : const Color(0xFFB46C15),
+                      semanticLabel: app.online ? 'Online' : 'Offline'),
+              if (!tiny) ...[
+                const SizedBox(width: 7),
+                Text(app.online ? 'Online' : 'Offline', style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              ],
+            ]),
+          ),
         ),
       ),
-    );
+      if (!tiny && app.pending.isNotEmpty && app.canSell)
+        Tooltip(
+          message: 'Open Sync & audit to confirm or send waiting sales',
+          child: ActionChip(
+            visualDensity: VisualDensity.compact,
+            backgroundColor: const Color(0xFFFDF3DF),
+            side: BorderSide.none,
+            label: Text(
+              '${app.pending.length} waiting',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Brand.warning),
+            ),
+            onPressed: () => controller.open('sync'),
+          ),
+        ),
+    ]);
     final scans = {'billing', 'parts', 'bins'}.contains(controller.section);
     return Container(
       height: layout == DeviceLayout.desktop ? 56 : 64,
       padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 24),
       decoration: BoxDecoration(color: scheme.surface, border: Border(bottom: BorderSide(color: Theme.of(context).dividerColor))),
       child: Row(children: [
-        if (!searchable) const Spacer() else Expanded(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: TextField(
-              key: controller.section == 'vehicles' ? const ValueKey('vehicle-list-search') : null,
-              controller: controller.search,
-              focusNode: controller.searchFocus,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: switch (controller.section) {
-                  'billing' => narrow ? 'Find a part' : showKeyHints(context) ? 'Search or scan parts  (F1)' : 'Search or scan parts',
-                  'vehicles' => tiny ? 'Find a vehicle' : 'Registration, VIN or owner',
-                  'orders' => tiny ? 'Find an order' : 'Find purchase orders',
-                  'shifts' => tiny ? 'Find a shift' : 'Find shifts',
-                  _ => tiny ? 'Search' : 'Search this list',
-                },
-                prefixIcon: const Icon(Icons.search, size: 20),
-                suffixIcon: ValueListenableBuilder(
-                  valueListenable: controller.search,
-                  builder: (_, value, _) => value.text.isEmpty
-                      ? const SizedBox.shrink()
-                      : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close, size: 18), onPressed: controller.search.clear),
+        if (!searchable)
+          const Spacer()
+        else
+          Expanded(
+            child: Row(children: [
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 460),
+                  child: TextField(
+                    key: controller.section == 'vehicles' ? const ValueKey('vehicle-list-search') : null,
+                    controller: controller.search,
+                    focusNode: controller.searchFocus,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: switch (controller.section) {
+                        'billing' => narrow ? 'Find a part' : showKeyHints(context) ? 'Search or scan parts  (F1)' : 'Search or scan parts',
+                        'vehicles' => tiny ? 'Find a vehicle' : 'Registration, VIN or owner',
+                        'orders' => tiny ? 'Find an order' : 'Find purchase orders',
+                        'shifts' => tiny ? 'Find a shift' : 'Find shifts',
+                        _ => tiny ? 'Search' : 'Search this list',
+                      },
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      suffixIcon: ValueListenableBuilder(
+                        valueListenable: controller.search,
+                        builder: (_, value, _) => value.text.isEmpty
+                            ? const SizedBox.shrink()
+                            : IconButton(tooltip: 'Clear search', icon: const Icon(Icons.close, size: 18), onPressed: controller.search.clear),
+                      ),
+                    ),
+                    onSubmitted: (value) {
+                      if (scans && value.trim().isNotEmpty) handleScan(context, controller, value);
+                    },
+                  ),
                 ),
               ),
-              onSubmitted: (value) {
-                if (scans && value.trim().isNotEmpty) handleScan(context, controller, value);
-              },
-            ),
+              if (scans) ...[
+                SizedBox(width: tiny ? 4 : 8),
+                IconButton.filledTonal(
+                  tooltip: 'Scan barcode',
+                  visualDensity: tiny ? VisualDensity.compact : null,
+                  onPressed: () async {
+                    final code = await requestBarcode(context);
+                    if (code != null && context.mounted) handleScan(context, controller, code);
+                  },
+                  icon: const Icon(Icons.qr_code_scanner),
+                ),
+              ],
+            ]),
           ),
-        ),
         if (searchable) SizedBox(width: tiny ? 4 : 8),
-        if (scans)
-          IconButton.filledTonal(
-            tooltip: 'Scan barcode',
-            visualDensity: tiny ? VisualDensity.compact : null,
-            onPressed: () async {
-              final code = await requestBarcode(context);
-              if (code != null && context.mounted) handleScan(context, controller, code);
-            },
-            icon: const Icon(Icons.qr_code_scanner),
-          ),
-        if (!narrow && searchable) const Spacer(),
         status,
         if (!narrow && prefs != null)
           IconButton(

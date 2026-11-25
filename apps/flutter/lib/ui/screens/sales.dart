@@ -54,8 +54,22 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       valueListenable: shell.search,
       builder: (context, search, _) {
         final q = normalize(search.text);
-        bool match(Json r) => _inDates(r['createdAt']) &&
-            (q.isEmpty || normalize('${r['number']} ${r['invoiceNumber']} ${r['customer']?['name']}').contains(q));
+        bool match(Json r) {
+          if (!_inDates(r['createdAt'])) return false;
+          if (q.isEmpty) return true;
+          final terms = [
+            r['number'],
+            r['invoiceNumber'],
+            r['customer']?['name'],
+            r['customer']?['phone'],
+            r['vehicle']?['regNo'],
+            for (final l in (r['lines'] as List? ?? const [])) ...[
+              (l as Map)['name'],
+              l['sku'],
+            ],
+          ];
+          return terms.any((t) => normalize(t).contains(q));
+        }
         final invoices = app.list('invoices').reversed
             .where((row) => match(row) && (_status == null || app.invoiceStatus(row) == _status)).toList();
         final credits = app.list('returns').reversed.where(match).toList();

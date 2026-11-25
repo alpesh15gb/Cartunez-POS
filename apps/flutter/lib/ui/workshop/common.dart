@@ -77,7 +77,7 @@ String documentSummary(AppState app, Json doc, {required String title}) {
         '${'${l['description'] ?? ''}'.isEmpty ? '' : ' (${l['description']})'} — ${app.money(lineAmount(l))}');
   }
   buffer
-    ..writeln('Tax: ${app.money(doc['tax'] as num?)}')
+    ..writeln(app.noTax ? '' : 'Tax: ${app.money(doc['tax'] as num?)}')
     ..writeln('Total: ${app.money(doc['total'] as num?)}');
   if (doc['validUntil'] != null) buffer.writeln('Valid until ${doc['validUntil']}');
   return buffer.toString().replaceAll(RegExp(r'\n{2,}'), '\n').trim();
@@ -139,8 +139,9 @@ Future<void> shareDocumentPdf(BuildContext context, Json doc, {required String t
         pw.Align(
           alignment: pw.Alignment.centerRight,
           child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-            pw.Text('Subtotal: ${money(doc['subtotal'] as num?)}'),
-            pw.Text('Tax: ${money(doc['tax'] as num?)}'),
+            pw.Text('Subtotal${app.settings['taxMode'] == 'inclusive' ? ' (incl. tax)' : ''}: ${money(doc['subtotal'] as num?)}'),
+            if (!app.noTax)
+              pw.Text('${app.settings['taxDisplayName'] ?? 'Tax'}${app.settings['taxMode'] == 'inclusive' ? ' included' : ''}: ${money(doc['tax'] as num?)}'),
             if ((doc['core'] ?? 0) != 0) pw.Text('Core deposits: ${money(doc['core'] as num?)}'),
             if ((doc['rounding'] ?? 0) != 0) pw.Text('Rounding: ${money(doc['rounding'] as num?)}'),
             pw.Text('Total: ${money(doc['total'] as num?)}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
@@ -357,6 +358,7 @@ class DocumentTotals extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
+    final inclusive = app.settings['taxMode'] == 'inclusive';
     Widget row(String label, Object? value, {bool bold = false}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(children: [
@@ -368,8 +370,8 @@ class DocumentTotals extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(children: [
-          row('Subtotal', doc['subtotal']),
-          row('Tax', doc['tax']),
+          row('Subtotal${!app.noTax && inclusive ? ' (incl. tax)' : ''}', doc['subtotal']),
+          if (!app.noTax) row('${app.settings['taxDisplayName'] ?? 'Tax'}${inclusive ? ' included' : ''}', doc['tax']),
           if ((doc['core'] ?? 0) != 0) row('Core deposits', doc['core']),
           if ((doc['rounding'] ?? 0) != 0) row('Rounding', doc['rounding']),
           row('Total', doc['total'], bold: true),

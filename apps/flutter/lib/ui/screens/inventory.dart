@@ -24,6 +24,7 @@ class PartsScreen extends StatefulWidget {
 class _PartsScreenState extends State<PartsScreen> {
   /// Online only filter: 'all', 'shop' (shop stock) or 'online' (website only).
   String _kind = 'shop';
+  bool _lowOnly = false;
 
   @override
   Widget build(BuildContext context) {
@@ -38,10 +39,18 @@ class _PartsScreenState extends State<PartsScreen> {
         final exactIds = {for (final part in app.findByCode(search.text)) part['id']};
         final matches = app.products
             .where((p) => exactIds.isNotEmpty ? exactIds.contains(p['id']) : q.isEmpty ||
-                [p['name'], p['sku'], p['partNumber'], p['brand'], p['category'], ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? [])]
-                    .any((v) => normalize(v).contains(q)))
+                [
+                  p['name'], p['sku'], p['partNumber'], p['brand'], p['category'],
+                  ...(p['barcodes'] as List? ?? []), ...(p['oemReferences'] as List? ?? []),
+                  ...(p['supplierReferences'] as List? ?? []), ...(p['supersedes'] as List? ?? []),
+                  ...(p['interchanges'] as List? ?? []),
+                ].any((v) => normalize(v).contains(q)))
             .toList();
-        final rows = matches.where((p) => kind == 'all' || (kind == 'online') == isOnlineOnly(p)).toList();
+        final kindMatches = matches.where((p) => kind == 'all' || (kind == 'online') == isOnlineOnly(p)).toList();
+        final lowCount = kindMatches.where((p) => p['type'] != 'service' && !isOnlineOnly(p) && app.available('${p['id']}') <= (p['reorderLevel'] ?? 0)).length;
+        final rows = _lowOnly && kind != 'online'
+            ? kindMatches.where((p) => p['type'] != 'service' && !isOnlineOnly(p) && app.available('${p['id']}') <= (p['reorderLevel'] ?? 0)).toList()
+            : kindMatches;
         // Online-only parts have no shelf, so they need no labels.
         final labelRows = rows.where((p) => p['type'] != 'service' && !isOnlineOnly(p)).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -63,12 +72,19 @@ class _PartsScreenState extends State<PartsScreen> {
             ],
             OutlinedButton.icon(onPressed: () => shell.open('labels'), icon: const Icon(Icons.qr_code_2, size: 18), label: const Text('Labels')),
           ]),
-          if (anyOnlineOnly)
+          if (anyOnlineOnly || lowCount > 0 || _lowOnly)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Wrap(spacing: 8, runSpacing: 4, children: [
-                for (final (key, label) in const [('shop', 'Shop stock'), ('online', 'Online only'), ('all', 'All parts')])
-                  ChoiceChip(label: Text(label), selected: kind == key, onSelected: (_) => setState(() => _kind = key)),
+                if (anyOnlineOnly)
+                  for (final (key, label) in const [('shop', 'Shop stock'), ('online', 'Online only'), ('all', 'All parts')])
+                    ChoiceChip(label: Text(label), selected: kind == key, onSelected: (_) => setState(() => _kind = key)),
+                if (kind != 'online' && (lowCount > 0 || _lowOnly))
+                  FilterChip(
+                    label: Text('Low / out ($lowCount)'),
+                    selected: _lowOnly,
+                    onSelected: (v) => setState(() => _lowOnly = v),
+                  ),
               ]),
             ),
           if (app.canStock && app.bins.isEmpty && app.stockParts.isNotEmpty)

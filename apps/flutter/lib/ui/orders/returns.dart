@@ -505,6 +505,18 @@ class ReturnDialogState extends State<ReturnDialog> {
           ],
           const SizedBox(height: 8),
           TextField(controller: reason, decoration: InputDecoration(labelText: settle == 'exchange' ? 'Reason (optional)' : 'Reason')),
+          if (settle != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(spacing: 6, runSpacing: 4, children: [
+                for (final r in const ['Wrong part / fitment', 'Defective / damaged', 'Customer changed mind', 'Not needed'])
+                  ActionChip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text(r, style: const TextStyle(fontSize: 12)),
+                    onPressed: busy ? null : () => setState(() => reason.text = r),
+                  ),
+              ]),
+            ),
           if (!app.isManager && settle != 'exchange' && settle != null)
             TextField(
               controller: approval,
