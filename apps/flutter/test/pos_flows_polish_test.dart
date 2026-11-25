@@ -464,4 +464,90 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     app.dispose();
   });
+
+  testWidgets('Services are always universal across vehicles, can be added from Catalog, and skip stock prompt', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final app = await _readyApp(tester, role: 'owner');
+    app.snapshot = {
+      ...app.snapshot,
+      'products': [
+        ...app.products,
+        {
+          'id': 'svc-1',
+          'name': 'Wheel Alignment',
+          'sku': 'SVC-ALIGN',
+          'type': 'service',
+          'universal': false,
+          'retailPrice': 50000,
+        },
+      ],
+    };
+    app.updateCart({'vehicle': {'make': 'Maruti', 'model': 'Swift', 'year': 2021}});
+
+    final shell = ShellController()..section = 'billing';
+    await tester.pumpWidget(AppScope(
+      state: app,
+      child: MaterialApp(home: ShellScope(controller: shell, child: const Scaffold(body: BillingScreen()))),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
+    expect(find.text('Wheel Alignment'), findsOneWidget);
+    expect(find.text('Create service'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('Receipt dialog displays vehicle registration and line serial numbers', (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final app = await _readyApp(tester);
+    final doc = {
+      'id': 'inv-99',
+      'number': 'INV-MAIN-99',
+      'createdAt': '2026-11-25T10:00:00Z',
+      'customer': {'id': 'c1', 'name': 'QA Rider'},
+      'vehicle': {'regNo': 'MH 12 QA 2026', 'year': 2021, 'make': 'Maruti', 'model': 'Swift'},
+      'jobNumber': 'JOB-MAIN-1',
+      'subtotal': 550000,
+      'total': 550000,
+      'tenders': [{'type': 'Cash', 'amount': 550000}],
+      'lines': [
+        {
+          'id': 'l1',
+          'productId': 'p1',
+          'name': 'QA Car Battery 45Ah',
+          'qty': 1,
+          'unit': 'Each',
+          'total': 550000,
+          'serials': ['QABAT001'],
+        },
+      ],
+    };
+    await tester.pumpWidget(AppScope(
+      state: app,
+      child: MaterialApp(
+        home: Scaffold(
+          body: Builder(builder: (c) => TextButton(onPressed: () => showReceipt(c, doc), child: const Text('Open'))),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Vehicle: MH 12 QA 2026 2021 Maruti Swift'), findsOneWidget);
+    expect(find.text('Job card: JOB-MAIN-1'), findsOneWidget);
+    expect(find.text('Serials: QABAT001'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
 }

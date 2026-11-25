@@ -13,3 +13,5 @@ Future<List<Printer>> receiptPrinters() async {
     return [];
   }
 }
+
+void cleanupPrintFrame() {}

@@ -110,6 +110,11 @@ Future<void> showReceipt(BuildContext context, Json doc) {
           if (r.credit) Text('Against invoice ${doc['invoiceNumber']} · Reason: ${doc['reason'] ?? '—'}'),
           if (doc['customer'] is Map)
             Text('Customer: ${doc['customer']['name']}${customerTaxId.isNotEmpty ? ' · $customerTaxId' : ''}'),
+          if (doc['vehicle'] is Map && '${doc['vehicle']['regNo'] ?? doc['vehicle']['make'] ?? ''}'.isNotEmpty)
+            Text(
+              'Vehicle: ${[doc['vehicle']['regNo'], doc['vehicle']['year'], doc['vehicle']['make'], doc['vehicle']['model']].where((e) => e != null && '$e'.isNotEmpty && '$e' != '0').join(' ')}',
+            ),
+          if ('${doc['jobNumber'] ?? ''}'.isNotEmpty) Text('Job card: ${doc['jobNumber']}'),
           if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) Text('Place of supply: ${doc['placeOfSupply']}'),
           Text(formatDate(doc['createdAt']), style: Theme.of(context).textTheme.bodySmall),
           if (r.cashier case final name?)
@@ -132,6 +137,8 @@ Future<void> showReceipt(BuildContext context, Json doc) {
                               '${'${l['hsnSac'] ?? ''}'.isNotEmpty ? ' · HSN ${l['hsnSac']}' : ''}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    if ((l['serials'] as List? ?? []).isNotEmpty)
+                      Text('Serials: ${(l['serials'] as List).join(', ')}', style: Theme.of(context).textTheme.bodySmall),
                   ]),
                 ),
                 Text(r.money(l['total'] as num? ?? 0), style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -274,6 +281,9 @@ Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
         if ('${doc['customer']['address'] ?? ''}'.isNotEmpty) row('Customer address', '${doc['customer']['address']}'),
         if (!r.noTax && '${doc['customer']['taxRegistrationId'] ?? ''}'.isNotEmpty) row('Customer tax ID', '${doc['customer']['taxRegistrationId']}'),
       ],
+      if (doc['vehicle'] is Map && '${doc['vehicle']['regNo'] ?? doc['vehicle']['make'] ?? ''}'.isNotEmpty)
+        row('Vehicle', [doc['vehicle']['regNo'], doc['vehicle']['year'], doc['vehicle']['make'], doc['vehicle']['model']].where((e) => e != null && '$e'.isNotEmpty && '$e' != '0').join(' ')),
+      if ('${doc['jobNumber'] ?? ''}'.isNotEmpty) row('Job card', '${doc['jobNumber']}'),
       if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) row('Place of supply', '${doc['placeOfSupply']}'),
       pw.Divider(thickness: 0.5),
       for (final l in r.lines) ...[

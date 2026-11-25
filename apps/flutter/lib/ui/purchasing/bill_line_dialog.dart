@@ -106,6 +106,7 @@ Future<Json?> editBillLine(BuildContext context, {required bool gst, Json? origi
                 Expanded(child: TextField(controller: cost, keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(labelText: gst ? 'Unit cost before GST' : 'Unit cost'))),
               ]),
+              const SizedBox(height: 12),
               Row(children: [
                 if (gst) ...[
                   Expanded(child: TextField(controller: rate, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'GST %'))),
@@ -114,23 +115,26 @@ Future<Json?> editBillLine(BuildContext context, {required bool gst, Json? origi
                 Expanded(child: TextField(controller: price, keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: const InputDecoration(labelText: 'New selling price (optional)', helperText: 'Leave blank to keep the current price'))),
               ]),
+              const SizedBox(height: 12),
               // Online only: the goods go straight out to the website customer (no bin, no shop stock).
               if (isOnlineOnly(part))
                 const Padding(
-                  padding: EdgeInsets.only(top: 10),
+                  padding: EdgeInsets.only(top: 4),
                   child: Text('Online only: goes straight to the website customer, not into shop stock.'),
                 )
               else
-              DropdownButtonFormField<String>(
-                key: ValueKey(binId),
-                initialValue: app.sellableBins.any((b) => b['id'] == binId) ? binId : null,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Put into bin'),
-                items: [for (final b in app.sellableBins) DropdownMenuItem(value: '${b['id']}', child: Text(app.binName(b)))],
-                onChanged: (v) => setLocal(() => binId = v),
-              ),
-              if (part?['serialTracked'] == true)
+                DropdownButtonFormField<String>(
+                  key: ValueKey(binId),
+                  initialValue: app.sellableBins.any((b) => b['id'] == binId) ? binId : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Put into bin'),
+                  items: [for (final b in app.sellableBins) DropdownMenuItem(value: '${b['id']}', child: Text(app.binName(b)))],
+                  onChanged: (v) => setLocal(() => binId = v),
+                ),
+              if (part?['serialTracked'] == true) ...[
+                const SizedBox(height: 12),
                 TextField(controller: serials, decoration: const InputDecoration(labelText: 'Serial numbers', helperText: 'One per unit, separated by commas')),
+              ],
               if (problem != null) Padding(padding: const EdgeInsets.only(top: 10), child: Text(problem!, style: const TextStyle(color: Brand.danger))),
             ]),
           ),

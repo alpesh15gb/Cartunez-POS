@@ -33,7 +33,7 @@ class FitResult {
 
 /// Mirrors the server: no vehicle selected means there is nothing to check.
 FitResult fitment(Json product, Json? vehicle) {
-  if (product['universal'] == true) return const FitResult('universal');
+  if (product['universal'] == true || product['type'] == 'service') return const FitResult('universal');
   if (vehicle == null) return const FitResult('unchecked');
   final today = DateTime.now().toIso8601String().substring(0, 10);
   final fits = ((product['fitments'] as List?) ?? const [])

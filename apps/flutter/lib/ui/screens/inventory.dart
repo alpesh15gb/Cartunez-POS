@@ -57,6 +57,11 @@ class _PartsScreenState extends State<PartsScreen> {
           Toolbar([
             if (app.canStock) ...[
               FilledButton.icon(onPressed: () => editProduct(context, const {}), icon: const Icon(Icons.add), label: const Text('Add part')),
+              OutlinedButton.icon(
+                onPressed: () => editProduct(context, const {'type': 'service', 'universal': true}),
+                icon: const Icon(Icons.build_outlined, size: 18),
+                label: const Text('Add service'),
+              ),
               OutlinedButton.icon(onPressed: () => shell.open('import'), icon: const Icon(Icons.upload_file), label: const Text('Import parts')),
               if (app.isManager && app.list('removedProducts').isNotEmpty)
                 OutlinedButton(onPressed: () => restorePart(context), child: const Text('Restore part')),
@@ -276,30 +281,35 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
   String? money(String key) => product[key] == null ? null : ((product[key] as int) / 100).toStringAsFixed(2);
   String joined(String key) => (product[key] as List? ?? []).join(', ');
   final fitmentOn = app.feature('fitment');
+  final isService = product['type'] == 'service';
   // Photos taken or chosen in the form; uploaded after the part is saved.
   final pendingPhotos = <({Uint8List bytes, int width, int height})>[];
   Json? createdPart; // QA #6: a part added here (not from a supplier bill) gets a next-step offer.
   await showFormDialog<void>(
     context,
-    title: product['id'] == null ? 'Add part' : 'Edit ${product['name']}',
-    header: PendingPartPhotos(photos: pendingPhotos),
+    title: product['id'] == null
+        ? (isService ? 'Add service' : 'Add part')
+        : 'Edit ${product['name']}',
+    header: isService ? null : PendingPartPhotos(photos: pendingPhotos),
     fields: [
       // QA #6: the required name and price (and fitment when that module is on) come first;
       // everything else is marked optional.
-      FieldSpec('name', 'Part name', value: product['name'], required: true),
-      FieldSpec('retailPrice', 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
-      FieldSpec('universal', 'Fits',
-          kind: FieldKind.select,
-          value: '${product['universal'] ?? !fitmentOn}',
-          options: const [('true', 'All vehicles (universal)'), ('false', 'Specific vehicles only')],
-          help: fitmentOn ? 'For specific vehicles, add them under Fitment after saving.' : null,
-          advanced: !fitmentOn),
-      FieldSpec('onlineOnly', 'Online only (sold on the website, not at the counter)',
-          kind: FieldKind.toggle,
-          value: product['onlineOnly'] == true,
-          help: 'For parts you do not keep in the shop: listed only on shop.cartunez.in and ordered from the supplier '
-              'when a customer buys one. The website always shows it as available. It never counts as shop stock '
-              'and is hidden from Counter, stock counts and reorder alerts.'),
+      FieldSpec('name', isService ? 'Service / labour name' : 'Part name', value: product['name'], required: true),
+      FieldSpec('retailPrice', isService ? 'Rate' : 'Retail price', kind: FieldKind.money, value: money('retailPrice'), required: true),
+      if (!isService)
+        FieldSpec('universal', 'Fits',
+            kind: FieldKind.select,
+            value: '${product['universal'] ?? !fitmentOn}',
+            options: const [('true', 'All vehicles (universal)'), ('false', 'Specific vehicles only')],
+            help: fitmentOn ? 'For specific vehicles, add them under Fitment after saving.' : null,
+            advanced: !fitmentOn),
+      if (!isService)
+        FieldSpec('onlineOnly', 'Online only (sold on the website, not at the counter)',
+            kind: FieldKind.toggle,
+            value: product['onlineOnly'] == true,
+            help: 'For parts you do not keep in the shop: listed only on shop.cartunez.in and ordered from the supplier '
+                'when a customer buys one. The website always shows it as available. It never counts as shop stock '
+                'and is hidden from Counter, stock counts and reorder alerts.'),
       FieldSpec('sku', product['id'] == null ? 'SKU / item code (optional)' : 'SKU / item code', value: product['sku'], required: product['id'] != null,
           help: product['id'] == null ? 'Leave blank to create one automatically.' : null),
       if (product['id'] != null && app.isManager)
@@ -378,10 +388,10 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
         'taxRate': app.noTax ? 0 : _minor(v['taxRate']),
         'reorderLevel': int.tryParse('${v['reorderLevel']}') ?? 0,
         'packSize': int.tryParse('${v['packSize']}') ?? 1,
-        'universal': v['universal'] == 'true',
+        'universal': isService || v['universal'] == 'true',
         // An online-only part takes no serial numbers (the website cannot record them).
-        'serialTracked': v['serialTracked'] == 'true' && v['onlineOnly'] != true,
-        'onlineOnly': v['onlineOnly'] == true,
+        'serialTracked': !isService && v['serialTracked'] == 'true' && v['onlineOnly'] != true,
+        'onlineOnly': !isService && v['onlineOnly'] == true,
         'unit': '${v['unit']}'.isEmpty ? 'Each' : v['unit'],
         for (final k in ['oemReferences', 'supplierReferences', 'supersedes', 'interchanges']) k: splitList(v[k]),
         // WS-C (workshop)
@@ -391,7 +401,9 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
       if (body['salesAction'] == 'keep') body.remove('salesAction');
       final message = isOnlineOnly(body) && body['type'] != 'service'
           ? 'Website-only part saved. Find it in the Online only view.'
-          : created == null ? 'Part saved.' : 'Part saved with barcode $created.';
+          : isService
+              ? 'Service saved.'
+              : created == null ? 'Part saved.' : 'Part saved with barcode $created.';
       final saved = await app.mutate('/products', body, message);
       if (saved is Map) {
         if (pendingPhotos.isNotEmpty) {
@@ -408,8 +420,8 @@ Future<void> editProduct(BuildContext context, Json product, {void Function(Json
     },
   );
   final newPart = createdPart;
-  // Online-only parts carry no shop stock, so there is no first stock to add.
-  if (newPart != null && !isOnlineOnly(newPart) && context.mounted) await offerFirstStock(context, newPart);
+  // Online-only parts and services carry no shop stock, so there is no first stock to add.
+  if (newPart != null && newPart['type'] != 'service' && !isOnlineOnly(newPart) && context.mounted) await offerFirstStock(context, newPart);
 }
 
 /// QA #6: a new part starts with no stock, so offer the two ways to add it.

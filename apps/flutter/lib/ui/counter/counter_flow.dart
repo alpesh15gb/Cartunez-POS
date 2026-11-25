@@ -57,19 +57,21 @@ Future<void> expressCash(BuildContext context) async {
   await startCheckout(context, tender: 'Cash');
 }
 
-/// After a completed sale: print (silently on Windows) when asked or when this
-/// device prints every receipt, offer WhatsApp / share, then hand the counter
-/// back to the scanner for the next customer.
+/// After a completed sale: print silently on Windows when asked or when this
+/// device prints every receipt (on Web/Android the user clicks Print or P on
+/// the Sale complete dialog so the browser print modal does not lock the page),
+/// offer WhatsApp / share, then hand the counter back to the scanner.
 Future<void> afterSale(BuildContext context, Json invoice, {bool print = false}) async {
   final app = context.appRead;
   final prefs = ReceiptPrinterPrefs.instance;
   await prefs.load();
-  if (print || prefs.autoPrint) {
+  final autoSilent = canPrintSilently && (print || prefs.autoPrint);
+  if (autoSilent) {
     unawaited(printReceipt(app, invoice).catchError((Object error) => app.toast('Could not print the receipt: $error')));
   }
   if (!context.mounted) return;
   CounterScope.read(context)?.select(null);
-  await showDialog<void>(context: context, builder: (_) => AppScope(state: app, child: SaleDoneDialog(invoice: invoice, printed: print || prefs.autoPrint)));
+  await showDialog<void>(context: context, builder: (_) => AppScope(state: app, child: SaleDoneDialog(invoice: invoice, printed: autoSilent)));
   if (context.mounted) focusScan(context);
 }
 

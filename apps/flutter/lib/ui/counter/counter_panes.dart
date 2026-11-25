@@ -39,7 +39,7 @@ List<Json> counterParts(AppState app, String search, String category, {bool serv
             .any((v) => normalize(v).contains(q))) {
       return false;
     }
-    if (!showAllFitment && vehicle != null && fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride) return false;
+    if (!services && !showAllFitment && vehicle != null && fitment(p, Map<String, dynamic>.from(vehicle)).needsOverride) return false;
     return true;
   }).toList();
 }
@@ -213,40 +213,56 @@ class ServiceTiles extends StatelessWidget {
         if (services.isEmpty) {
           final empty = !app.saleProducts.any((p) => p['type'] == 'service');
           return EmptyState(
-            message: empty ? 'No services yet.' : 'No service matches "${shell.search.text}".',
-            icon: Icons.build_outlined,
-            action: empty && app.canStock
-                ? FilledButton.icon(
-                    onPressed: () => editProduct(context, const {'type': 'service'}),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Create service'),
-                  )
-                : null,
-          );
-        }
-        return GridView.builder(
-          padding: const EdgeInsets.all(20),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 200, mainAxisExtent: 96, crossAxisSpacing: 10, mainAxisSpacing: 10),
-          itemCount: services.length,
-          itemBuilder: (context, i) {
-            final s = services[i];
-            final price = app.cart['priceLevel'] == 'wholesale' ? s['wholesalePrice'] : s['retailPrice'];
-            return Card(
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () => addPart(context, s, quick: true),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('${s['name']}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    const Spacer(),
-                    Text(app.money(price as num?), style: const TextStyle(fontWeight: FontWeight.w800, fontFeatures: _figures)),
-                  ]),
-                ),
-              ),
-            );
-          },
+          message: empty ? 'No services yet.' : 'No service matches "${shell.search.text}".',
+          icon: Icons.build_outlined,
+          action: empty && app.canStock
+              ? FilledButton.icon(
+                  onPressed: () => editProduct(context, const {'type': 'service', 'universal': true}),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Create service'),
+                )
+              : null,
         );
+      }
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (app.canStock)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => editProduct(context, const {'type': 'service', 'universal': true}),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Create service'),
+              ),
+            ),
+          ),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(20),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 200, mainAxisExtent: 96, crossAxisSpacing: 10, mainAxisSpacing: 10),
+            itemCount: services.length,
+            itemBuilder: (context, i) {
+              final s = services[i];
+              final price = app.cart['priceLevel'] == 'wholesale' ? s['wholesalePrice'] : s['retailPrice'];
+              return Card(
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => addPart(context, s, quick: true),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${s['name']}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      Text(app.money(price as num?), style: const TextStyle(fontWeight: FontWeight.w800, fontFeatures: _figures)),
+                    ]),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ]);
       },
     );
   }

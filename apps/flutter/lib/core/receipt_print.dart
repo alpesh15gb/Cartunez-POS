@@ -79,6 +79,16 @@ Future<String> sendReceiptPdf(Uint8List bytes, String name) async {
       if (ok) return 'Receipt sent to ${chosen.name}.';
     }
   }
+  if (kIsWeb) {
+    // In browsers, Printing.layoutPdf mounts a hidden iframe next to the app
+    // whose window.print() dialog blocks Chrome / Flutter pointer events until
+    // dismissed. Guard with a timeout and remove any stray print iframe after.
+    try {
+      await Printing.layoutPdf(name: name, onLayout: (_) async => bytes).timeout(const Duration(seconds: 15));
+    } catch (_) {}
+    platform.cleanupPrintFrame();
+    return '';
+  }
   await Printing.layoutPdf(name: name, onLayout: (_) async => bytes);
   return '';
 }

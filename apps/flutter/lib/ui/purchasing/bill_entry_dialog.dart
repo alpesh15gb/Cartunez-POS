@@ -330,7 +330,9 @@ class _BillDialogState extends State<_BillDialog> {
                 OutlinedButton.icon(onPressed: busy ? null : _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Scan items')),
               ]),
             ),
+            const SizedBox(height: 12),
             const Divider(),
+            const SizedBox(height: 12),
             Wrap(spacing: 12, runSpacing: 12, children: [
               money('Freight / other charges', freight),
               money('Discount on bill', discount),

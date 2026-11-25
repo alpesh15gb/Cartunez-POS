@@ -38,17 +38,29 @@ class FitmentBar extends StatelessWidget {
       // QA #6: the shift opens right here (no trip to Shifts); focus goes back to item search.
       ListenableBuilder(
         listenable: app,
-        builder: (context, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(app.openShift == null ? 'Open a shift to start selling.' : 'Scan or pick parts, then take payment.',
-              style: Theme.of(context).textTheme.bodySmall),
-          if (app.openShift == null && app.canSell)
-            Align(alignment: Alignment.centerLeft, child: TextButton.icon(
-              key: const ValueKey('counter-open-shift'),
-              onPressed: app.online ? () => openShiftFromCounter(context, shell) : null,
-              icon: const Icon(Icons.lock_open),
-              label: const Text('Open shift'),
-            )),
-        ]),
+        builder: (context, _) {
+          final incompleteBusiness = ('${app.business['legalName'] ?? ''}'.trim().isEmpty || '${app.business['address'] ?? ''}'.trim().isEmpty);
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(app.openShift == null ? 'Open a shift to start selling.' : 'Scan or pick parts, then take payment.',
+                style: Theme.of(context).textTheme.bodySmall),
+            if (incompleteBusiness && app.isOwner)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => shell.open('settings'),
+                  icon: const Icon(Icons.storefront_outlined, size: 18),
+                  label: const Text('Add business name & address in Settings before billing'),
+                ),
+              ),
+            if (app.openShift == null && app.canSell)
+              Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+                key: const ValueKey('counter-open-shift'),
+                onPressed: app.online ? () => openShiftFromCounter(context, shell) : null,
+                icon: const Icon(Icons.lock_open),
+                label: const Text('Open shift'),
+              )),
+          ]);
+        },
       ),
       const SizedBox(height: 16),
       SizedBox(

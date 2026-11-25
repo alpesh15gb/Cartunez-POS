@@ -62,7 +62,25 @@ class _SerialLookupScreenState extends State<SerialLookupScreen> {
           child: TextField(
             key: const ValueKey('serial-code'),
             controller: code,
-            decoration: const InputDecoration(labelText: 'Serial number or IMEI', prefixIcon: Icon(Icons.search)),
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              labelText: 'Serial number or IMEI',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: ValueListenableBuilder(
+                valueListenable: code,
+                builder: (_, v, _) => v.text.isEmpty
+                    ? const SizedBox.shrink()
+                    : IconButton(
+                        tooltip: 'Clear serial number',
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () => setState(() {
+                          code.clear();
+                          problem = null;
+                        }),
+                      ),
+              ),
+            ),
             onSubmitted: _lookup,
           ),
         ),

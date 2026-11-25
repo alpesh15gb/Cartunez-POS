@@ -509,7 +509,7 @@ class _JobCardState extends State<JobCard> {
               : null),
       DocumentLines(lines: lines, job: true, onChanged: open && !busy ? (next) => _saveLines(next, revision) : null),
       if (open && lines.isNotEmpty)
-        const Padding(padding: EdgeInsets.only(top: 4), child: Text('Parts on an open job are reserved and appear under Held bills at the counter.')),
+        const Padding(padding: EdgeInsets.only(top: 4), child: Text('Parts on an open job card are reserved in stock until billed or cancelled.')),
       const SizedBox(height: 10),
       DocumentTotals(job),
       const SizedBox(height: 10),
@@ -522,6 +522,9 @@ class _JobCardState extends State<JobCard> {
                   style: const TextStyle(fontWeight: FontWeight.w600)),
             if (open && held > 0)
               Text('${app.money(held)} is held for ${customerLabel(app, job['customerId'])}; billing offers it first.',
+                  style: Theme.of(context).textTheme.bodySmall)
+            else if (open && jobAdvances.isNotEmpty && job['customerId'] != null && app.partyBalance('customers', '${job['customerId']}') >= 0)
+              Text('Applied against ${customerLabel(app, job['customerId'])}\'s earlier account balance.',
                   style: Theme.of(context).textTheme.bodySmall),
           ]),
         ),
