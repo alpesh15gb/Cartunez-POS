@@ -627,8 +627,11 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         const candidates = creditLines.filter(l => l.source.productId === product.id && (!selected || l.source.id === selected));
         if (!candidates.length) fail("That bill line is not for " + product.name + ".");
         if (!selected && !nonStock && new Set(candidates.map(l => [l.source.cost, l.source.taxRate || 0].join("/"))).size > 1) {
-          if (candidates.some(l => !l.source.id)) fail("This older bill has differently priced lines without line IDs. The original line cannot be identified.", 409);
-          fail("Choose the bill line for " + product.name + "; duplicate lines have different costs.");
+          if (candidates.every(l => l.source.id))
+            fail("Choose the bill line for " + product.name + "; duplicate lines have different costs.");
+          // A recorded serial identifies its original price even on older bills without line IDs.
+          if (!serials.length)
+            fail("This older bill has differently priced lines without line IDs. The original line cannot be identified.", 409);
         }
         if (serials.some(serial => !candidates.some(l => l.source.serials?.includes(serial))))
           fail("Choose serials supplied on the original bill line.", 409);

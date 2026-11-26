@@ -90,7 +90,7 @@ test("Holds: label, customer name, reg no and expiry; UPI ID setting", async () 
   }
 });
 
-test("negative stock cannot consume another hold's reservation", async () => {
+test("negative stock and inventory withdrawals cannot consume another hold's reservation", async () => {
   const db = await connectDatabase({ memory: true });
   await migrate(db);
   await seed(db);
@@ -164,10 +164,17 @@ test("negative stock cannot consume another hold's reservation", async () => {
     await call("invoices", { ...sale(randomUUID()), lines: [{ ...line, qty: 2 }] }, cashier, 409);
     assert.equal((await stock()).quantity, 2, "negative stock cannot spill into the reserved unit");
     await call(`holds/${hold.id}`, undefined, cashier, 200, "DELETE");
-    const sold = await call("invoices", { ...sale(randomUUID()), lines: [{ ...line, qty: 3 }] }, cashier);
+    const sold = await call("invoices", { ...sale(randomUUID()), lines: [{ ...line, qty: 5 }] }, cashier);
     assert.ok(sold.id);
-    assert.equal((await stock()).quantity, -1, "genuinely unreserved demand can still go negative");
+    assert.equal((await stock()).quantity, -3, "genuinely unreserved demand can still go negative");
     assert.equal((await stock()).reserved, 0);
+    await call("inventory/adjust", { productId: part.id, binId: "bin-a1", quantity: 1, reason: "Partially replenish an oversold bin" }, owner);
+    assert.equal((await stock()).quantity, -2, "restocking can reduce a negative quantity without fully clearing it");
+    await call("inventory/adjust", { productId: part.id, binId: "bin-a1", quantity: -1, reason: "No extra stock to withdraw" }, owner, 409);
+    await call("purchase-bills", { supplierId: "supplier-1", billNumber: randomUUID(), lines: [
+      { productId: part.id, quantity: 1, binId: "bin-a1", cost: 25 },
+    ] }, owner);
+    assert.equal((await stock()).quantity, -1, "a supplier receipt can replenish part of a shortage too");
     await call("inventory/adjust", { productId: part.id, binId: "bin-a1", quantity: 2, reason: "One unit available again" }, owner);
     await putRecord(db, "demo", "onlineOrder", { id: "reserved-for-website", branchId: "pune",
       lines: [{ productId: part.id, reserved: 1 }] }, "pune");
@@ -178,9 +185,32 @@ test("negative stock cannot consume another hold's reservation", async () => {
 
     const tracked = await call("products", { name: "Serial reserved for job", retailPrice: 100, serialTracked: true }, owner);
     await call("purchase-bills", { supplierId: "supplier-1", billNumber: randomUUID(), lines: [
-      { productId: tracked.id, quantity: 2, binId: "bin-a1", cost: 25, serials: ["RES01", "FREE02"] }] }, owner);
+      { productId: tracked.id, quantity: 5, binId: "bin-a1", cost: 25, serials: ["RES01", "FREE02", "MOVE03", "ADJ04", "XFER05"] }] }, owner);
     const trackedLine = { productId: tracked.id, binId: "bin-a1", qty: 1, serials: ["RES01"] };
     const trackedHold = await call("holds", { cart: { lines: [trackedLine] } }, owner);
+    const move = (serial: string, status = 200) => call("inventory/move", {
+      productId: tracked.id, fromBinId: "bin-a1", toBinId: "bin-a2", quantity: 1, reason: "Move stock", serials: [serial],
+    }, owner, status);
+    const adjustOut = (serial: string, status = 200) => call("inventory/adjust", {
+      productId: tracked.id, binId: "bin-a1", quantity: -1, reason: "Adjust stock", serials: [serial],
+    }, owner, status);
+    const transfer = (serial: string, status = 200) => call("transfers", {
+      destinationBranchId: "mumbai", reason: "Restock branch",
+      lines: [{ productId: tracked.id, binId: "bin-a1", quantity: 1, serials: [serial] }],
+    }, owner, status);
+    for (const operation of [move, adjustOut, transfer])
+      assert.match((await operation("RES01", 409)).error, /RES01 is reserved/);
+    const afterRefusals = (await call("bootstrap", undefined, owner, 200, "GET")).stock
+      .find((entry: any) => entry.productId === tracked.id && entry.binId === "bin-a1");
+    assert.deepEqual([afterRefusals.quantity, afterRefusals.reserved, afterRefusals.available], [5, 1, 4]);
+    await move("MOVE03");
+    await adjustOut("ADJ04");
+    await transfer("XFER05");
+    const serialRecord = (number: string) => getRecord(db, "demo", "serial", tracked.id + ":" + number);
+    assert.equal((await serialRecord("MOVE03"))?.binId, "bin-a2");
+    assert.equal((await serialRecord("ADJ04"))?.status, "adjusted-out");
+    assert.equal((await serialRecord("XFER05"))?.status, "in-transit");
+    assert.equal((await serialRecord("RES01"))?.binId, "bin-a1");
     await call("holds", { cart: { lines: [trackedLine] } }, cashier, 409);
     await call("invoices", { ...sale(randomUUID()), lines: [trackedLine] }, cashier, 409);
     const freeSerial = await call("invoices", { ...sale(randomUUID()), lines: [{ ...trackedLine, serials: ["FREE02"] }] }, cashier);

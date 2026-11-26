@@ -2,6 +2,7 @@
 // phone number or serial), choose what comes back and where it goes (shelf,
 // damaged bin or supplier warranty), then settle: exchange at the counter,
 // refund through the shift, or store credit on the customer's account.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -38,6 +39,11 @@ Future<List<Json>> findReturnable(AppState app, String query) async {
   final result = await app.api('/returns/lookup?q=${Uri.encodeQueryComponent(query.trim())}');
   return [for (final row in result as List) Map<String, dynamic>.from(row as Map)];
 }
+
+int _returnableUnits(Json invoice) => (invoice['lines'] as List).fold<int>(
+      0, (total, line) => total + ((line['returnableQty'] ?? 0) as int));
+
+bool _canReturn(Json invoice) => invoice['voided'] != true && _returnableUnits(invoice) > 0;
 
 /// Orders › Returns & exchange.
 class ReturnsPage extends StatefulWidget {
@@ -81,6 +87,13 @@ class _ReturnsPageState extends State<ReturnsPage> {
     } finally {
       if (mounted && request == _searchRequest) setState(() => busy = false);
     }
+  }
+
+  Future<void> _return(Json invoice) {
+    final request = _searchRequest;
+    return startReturn(context, invoice, onRecorded: () {
+      if (mounted && request == _searchRequest) unawaited(_find());
+    });
   }
 
   @override
@@ -139,19 +152,19 @@ class _ReturnsPageState extends State<ReturnsPage> {
           empty: app.role == 'cashier'
               ? 'No matching bill in the last 180 days. Ask a manager about older receipts.'
               : 'No bill found. Check the number, or try the customer\'s phone number.',
-          onTap: (row) => startReturn(context, row),
+          onTap: rows.any(_canReturn) ? (row) { if (_canReturn(row)) _return(row); } : null,
           columns: [
             Col('Invoice', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
-            Col('Date', (r) => Text(formatDate(r['createdAt']))),
+            Col('Date', (r) => Text(formatDocumentDate(app, r))),
             Col('Customer', (r) => Text('${r['customer']?['name'] ?? 'Walk-in'}')),
             Col('Returnable', (r) {
-              final left = (r['lines'] as List).fold<int>(0, (n, l) => n + ((l['returnableQty'] ?? 0) as int));
+              final left = _returnableUnits(r);
               return r['voided'] == true ? const StatusChip('Voided') : left == 0 ? const StatusChip('Returned') : Text('$left item(s)');
             }),
             Col('Total', (r) => Text(app.money(r['total'] as num)), numeric: true),
           ],
           actions: (r) => [
-            OutlinedButton(onPressed: () => startReturn(context, r), child: const Text('Return items')),
+            if (_canReturn(r)) OutlinedButton(onPressed: () => _return(r), child: const Text('Return items')),
           ],
         ),
     ]);
@@ -160,10 +173,10 @@ class _ReturnsPageState extends State<ReturnsPage> {
 
 /// Opens the return form for a looked-up bill. A refund or store credit shows
 /// the credit note (print or share); an exchange goes to the counter.
-Future<void> startReturn(BuildContext context, Json invoice) async {
+Future<void> startReturn(BuildContext context, Json invoice, {VoidCallback? onRecorded}) async {
   final app = context.appRead;
   if (invoice['voided'] == true) return app.toast('This invoice was voided. Nothing on it can be returned.');
-  if (!(invoice['lines'] as List).any((l) => ((l['returnableQty'] ?? 0) as int) > 0)) {
+  if (_returnableUnits(invoice) == 0) {
     return app.toast('Everything on this invoice has already been returned.');
   }
   final outcome = await showDialog<Object>(
@@ -174,6 +187,7 @@ Future<void> startReturn(BuildContext context, Json invoice) async {
   if (outcome == 'exchange') {
     GoRouter.maybeOf(context)?.go('/counter');
   } else if (outcome is Map) {
+    onRecorded?.call();
     await showReceipt(context, Map<String, dynamic>.from(outcome));
   }
 }
@@ -464,13 +478,13 @@ class ReturnDialogState extends State<ReturnDialog> {
   Widget build(BuildContext context) {
     final app = context.app;
     final customer = widget.invoice['customer'] as Map?;
-    return AlertDialog(
+    final dialog = AlertDialog(
       scrollable: true,
       title: Text('Return from ${widget.invoice['number']}'),
       content: SizedBox(
         width: 520,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('${formatDate(widget.invoice['createdAt'])} · ${customer?['name'] ?? 'Walk-in'} · ${app.money(widget.invoice['total'] as num?)}',
+          Text('${formatDocumentDate(app, widget.invoice)} · ${customer?['name'] ?? 'Walk-in'} · ${app.money(widget.invoice['total'] as num?)}',
               style: Theme.of(context).textTheme.bodySmall),
           const SizedBox(height: 12),
           for (final l in lines) _line(context, app, l),
@@ -575,6 +589,7 @@ class ReturnDialogState extends State<ReturnDialog> {
         ),
       ],
     );
+    return PopScope(canPop: !busy, child: dialog);
   }
 }
 

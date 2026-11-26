@@ -1,7 +1,7 @@
 {
   "name": "motorline-production",
   "private": true,
-  "version": "1.2.5",
+  "version": "1.2.6",
   "workspaces": [
     "apps/api",
     "packages/*"

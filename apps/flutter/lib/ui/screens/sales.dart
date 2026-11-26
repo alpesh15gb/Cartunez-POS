@@ -24,21 +24,37 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   DateTimeRange? _dates;
   String? _status;
 
-  bool _inDates(Object? createdAt) {
+  DateTime? _documentDay(AppState app, Json doc) {
+    final raw = '${doc['createdAt'] ?? ''}';
+    final timestamp = DateTime.tryParse(raw);
+    if (timestamp == null) return null;
+    return DateUtils.dateOnly(raw.length == 10 ? timestamp : documentTime(app, doc, timestamp));
+  }
+
+  bool _inDates(AppState app, Json doc) {
     final dates = _dates;
     if (dates == null) return true;
-    final timestamp = DateTime.tryParse('${createdAt ?? ''}');
-    if (timestamp == null) return false;
-    final day = DateUtils.dateOnly(timestamp.toLocal());
-    return !day.isBefore(dates.start) && !day.isAfter(dates.end);
+    final day = _documentDay(app, doc);
+    return day != null && !day.isBefore(dates.start) && !day.isAfter(dates.end);
   }
 
   Future<void> _pickDates() async {
+    final app = context.appRead;
+    final today = DateUtils.dateOnly(documentTime(app, const {}, DateTime.now()));
+    var lastDay = today;
+    // An issued document can use a different time zone from the current register.
+    for (final kind in const ['invoices', 'returns']) {
+      for (final doc in app.list(kind)) {
+        final day = _documentDay(app, doc);
+        if (day != null && day.isAfter(lastDay)) lastDay = day;
+      }
+    }
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2000),
-      lastDate: DateUtils.dateOnly(DateTime.now()),
+      lastDate: lastDay,
       initialDateRange: _dates,
+      currentDate: today,
       helpText: 'Invoice dates',
     );
     if (mounted && picked != null) setState(() => _dates = picked);
@@ -55,7 +71,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       builder: (context, search, _) {
         final q = normalize(search.text);
         bool match(Json r) {
-          if (!_inDates(r['createdAt'])) return false;
+          if (!_inDates(app, r)) return false;
           if (q.isEmpty) return true;
           final terms = [
             r['number'],
@@ -106,10 +122,10 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                     child: Text('${r['number']}',
                         style: TextStyle(fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.primary, decoration: TextDecoration.underline)),
                   )),
-              Col('Date', (r) => Text(formatDate(r['createdAt']))),
+              Col('Date', (r) => Text(formatDocumentDate(app, r))),
               Col('Customer', (r) => Text('${r['customer']?['name'] ?? 'Walk-in'}')),
               Col('Status', (r) => StatusChip(app.invoiceStatus(r))),
-              Col('Total', (r) => Text(app.money(r['total'] as num)), numeric: true),
+              Col('Total', (r) => Text(ReceiptView(app, r).money(r['total'] as num)), numeric: true),
             ],
             actions: (r) {
               final status = app.invoiceStatus(r);
@@ -152,12 +168,12 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
             columns: [
               Col('Credit note', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
               Col('Invoice', (r) => Text('${r['invoiceNumber']}')),
-              Col('Date', (r) => Text(formatDate(r['createdAt']))),
+              Col('Date', (r) => Text(formatDocumentDate(app, r))),
               // WS-B: exchanges and per-line dispositions.
               Col('Type', (r) => Text(r['voided'] == true ? 'Void' : r['exchangeApplied'] != null ? 'Exchange' : 'Return · ${titleCase('${r['condition']}')}')),
               Col('Refund', (r) => Text(r['refundType'] == 'Exchange'
-                  ? '${app.money(r['total'] as num)} · Exchange'
-                  : '${app.money((r['refundTotal'] ?? r['total']) as num)} · ${r['refundType'] ?? 'Cash'}'), numeric: true),
+                  ? '${ReceiptView(app, r).money(r['total'] as num)} · Exchange'
+                  : '${ReceiptView(app, r).money((r['refundTotal'] ?? r['total']) as num)} · ${r['refundType'] ?? 'Cash'}'), numeric: true),
             ],
           ),
         ]);

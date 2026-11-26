@@ -1,5 +1,5 @@
-import { getRecord, putRecord, records, type Database, type RecordData } from "./db.js";
-import { adjust, allow, audit, fail, id, idempotent, integer, inventory, now, scoped, text, type Actor } from "./domain.js";
+import { getRecord, putRecord, type Database, type RecordData } from "./db.js";
+import { adjust, allow, audit, fail, id, idempotent, integer, inventory, now, reservedSerialIds, scoped, text, type Actor } from "./domain.js";
 
 const counterRoles = ["owner", "manager", "inventory"];
 async function baseline(db: Database, actor: Actor, productId: string, binId: string) {
@@ -62,12 +62,9 @@ async function reconcileSerials(db: Database, actor: Actor, count: RecordData, b
   const observed = new Set<string>(count.serials);
   const removed = [...current.keys()].filter(serial => !observed.has(serial));
   const added = [...observed].filter(serial => !current.has(serial));
-  const held = new Set<string>();
-  for (const hold of await records(db, actor.organizationId, "hold", actor.branchId))
-    for (const line of hold.cart.lines)
-      if (line.productId === count.productId && line.binId === count.binId)
-        for (const serial of line.serials ?? []) held.add(serial);
-  if (removed.some(serial => held.has(serial))) fail("A missing serial belongs to a parked bill. Resolve its reservation before confirming.", 409);
+  const held = await reservedSerialIds(db, actor);
+  if (removed.some(serial => held.has(count.productId + ":" + serial)))
+    fail("A missing serial belongs to a held bill or job card. Resolve its reservation before confirming.", 409);
   for (const serial of added) {
     const serialId = count.productId + ":" + serial;
     const prior = await getRecord(db, actor.organizationId, "serial", serialId);

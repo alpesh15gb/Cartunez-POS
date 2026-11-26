@@ -182,7 +182,8 @@ export async function adjust(
   const current = Number(old.rows[0]?.quantity || 0);
   integer(quantity, "Stock change", -100000000000, 100000000000);
   integer(current + quantity, "Resulting stock", -100000000000, 100000000000);
-  if (!allowNegative && current + quantity < 0)
+  // Incoming stock can reduce an existing shortage without clearing it at once.
+  if (!allowNegative && quantity <= 0 && current + quantity < 0)
     fail(
       `Insufficient stock for ${product.sku} at ${bin.rack}/${bin.shelf}/${bin.bin}.`,
       409,

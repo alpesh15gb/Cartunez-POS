@@ -104,7 +104,7 @@ void main() {
     await waitFor(tester, returnItems);
     await tester.ensureVisible(returnItems);
     await tester.pumpAndSettle();
-    await tester.tap(returnItems);
+    await tester.runAsync(() => tester.tap(returnItems));
     await tester.pumpAndSettle();
     final more = find.byTooltip('More of Counter test filter');
     await tester.tap(more);
@@ -119,6 +119,9 @@ void main() {
     await tester.ensureVisible(record);
     await tester.runAsync(() => tester.tap(record));
     await waitFor(tester, find.text('CREDIT NOTE'));
+    await tester.tap(find.text('Done'));
+    await waitFor(tester, find.text('Returned'));
+    expect(find.text('Return items'), findsNothing);
 
     await tester.runAsync(() async {
       await state.sync();

@@ -43,6 +43,25 @@ class _LookupRegister extends AppState {
   }
 }
 
+class _RefundLookupRegister extends AppState {
+  final lookups = <(String, Completer<List<Json>>)>[];
+  final refund = Completer<Json>();
+  Json? refundPayload;
+
+  @override
+  Future<dynamic> api(String path, {Object? body, String? method}) {
+    final response = Completer<List<Json>>();
+    lookups.add((Uri.parse(path).queryParameters['q']!, response));
+    return response.future;
+  }
+
+  @override
+  Future<dynamic> mutate(String path, Json body, [String? message]) {
+    refundPayload = body;
+    return refund.future;
+  }
+}
+
 _Register _app(String role) => _Register()
   ..online = true
   ..session = Session(api: 'http://test', token: 't', organizationId: 'demo', branchId: 'pune',
@@ -134,6 +153,72 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('STALE'), findsNothing);
     expect(find.text('Enter the invoice number, phone number or serial number.'), findsOneWidget);
+    app.dispose();
+  });
+
+  testWidgets('a recorded refund refreshes the current lookup and removes the fully returned action', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _RefundLookupRegister()
+      ..online = true
+      ..session = Session(api: 'http://test', token: 't', organizationId: 'demo', branchId: 'pune',
+          user: {'id': 'u', 'role': 'manager', 'name': 'Manager'}, expiresAt: DateTime.now().toIso8601String())
+      ..snapshot = {'settings': {'tenderTypes': ['Cash'], 'currency': 'INR'}};
+    Json bill(int returnable) => {
+      ..._invoice,
+      'total': 23600,
+      'tenders': [{'type': 'Cash', 'amount': 23600}],
+      'lines': [
+        {...((_invoice['lines'] as List).single as Json),
+          'qty': 2, 'returnableQty': returnable, 'refundable': 23600, 'returnedQty': 2 - returnable},
+      ],
+    };
+    await tester.pumpWidget(AppScope(state: app, child: const MaterialApp(
+      home: Scaffold(body: SingleChildScrollView(child: ReturnsPage())),
+    )));
+    final field = find.widgetWithText(TextField, 'Invoice number, receipt barcode, phone or serial');
+    const query = '9000000101';
+    await tester.enterText(field, query);
+    await tester.tap(find.text('Find bill'));
+    await tester.pump();
+    expect(app.lookups.single.$1, query);
+    app.lookups.single.$2.complete([bill(2)]);
+    await tester.pumpAndSettle();
+    expect(find.text('2 item(s)'), findsOneWidget);
+    await tester.tap(find.text('Return items'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(app.lookups, hasLength(1));
+    expect(find.text('Return items'), findsOneWidget);
+
+    await tester.tap(find.text('Return items'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('More of Engine oil'));
+    await tester.tap(find.text('Refund'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Reason'), 'Full return');
+    await tester.tap(find.text('Record return'));
+    await tester.pump();
+    expect((app.refundPayload!['lines'] as List).single['quantity'], 2);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pump();
+    expect(find.text('Return from ML-PUNE-1000'), findsOneWidget);
+
+    app.refund.complete({'id': 'return-1', 'number': 'CR-PUNE-1', 'invoiceId': 'inv-1', 'total': 23600, 'lines': []});
+    await tester.pump();
+    expect(app.lookups.map((lookup) => lookup.$1), [query, query]);
+    app.lookups.last.$2.complete([bill(0)]);
+    await tester.pumpAndSettle();
+    expect(find.text('CREDIT NOTE'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(field).controller!.text, query);
+    expect(find.text('Returned'), findsOneWidget);
+    expect(find.text('2 item(s)'), findsNothing);
+    expect(find.text('Return items'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
     app.dispose();
   });
 

@@ -141,5 +141,18 @@ test("supplier bill accounting through the public purchase, catalog and report r
     const equal = await older(100);
     assert.equal((await credit(equal.id, [choice, choice])).total, 200);
     await credit(equal.id, [choice], 400);
+
+    const serialPart = await part("HistoricalSerialCredits", { serialTracked: true });
+    const serialized = await bill([
+      line(serialPart.id, 100, 1, { serials: ["OLD-A"] }),
+      line(serialPart.id, 200, 1, { serials: ["OLD-B"] }),
+    ]);
+    for (const row of serialized.lines) delete row.id;
+    await putRecord(db, "demo", "purchaseBill", serialized, "pune");
+    const returnSerial = (serial: string) => ({ productId: serialPart.id, quantity: 1, binId: "bin-a1", serials: [serial] });
+    await credit(serialized.id, [returnSerial("WRONG-SERIAL")], 409);
+    assert.equal((await credit(serialized.id, [returnSerial("OLD-B")])).total, 200);
+    await credit(serialized.id, [returnSerial("OLD-B")], 400);
+    assert.equal((await credit(serialized.id, [returnSerial("OLD-A")])).total, 100);
   });
 });

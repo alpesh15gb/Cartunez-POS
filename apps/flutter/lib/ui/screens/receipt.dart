@@ -15,6 +15,20 @@ import '../widgets.dart';
 
 export 'labels.dart';
 
+/// Issued documents keep their own business date when a counter uses another time zone.
+DateTime documentTime(AppState app, Json doc, DateTime instant) {
+  final zone = doc['timeZone'];
+  if (zone == 'UTC') return instant.toUtc();
+  final currency = doc['currency'] ?? app.settings['currency'] ?? 'INR';
+  if (zone == 'Asia/Kolkata' || currency == 'INR') {
+    return instant.toUtc().add(const Duration(hours: 5, minutes: 30));
+  }
+  return instant.toLocal();
+}
+
+String formatDocumentDate(AppState app, Json doc, {String field = 'createdAt'}) =>
+    formatDate(doc[field], inTimeZone: (instant) => documentTime(app, doc, instant));
+
 /// Facts shown on a receipt or credit note, taken from the issued document so
 /// later setting changes never alter a reprint.
 class ReceiptView {
@@ -116,7 +130,7 @@ Future<void> showReceipt(BuildContext context, Json doc) {
             ),
           if ('${doc['jobNumber'] ?? ''}'.isNotEmpty) Text('Job card: ${doc['jobNumber']}'),
           if ('${doc['placeOfSupply'] ?? ''}'.isNotEmpty) Text('Place of supply: ${doc['placeOfSupply']}'),
-          Text(formatDate(doc['createdAt']), style: Theme.of(context).textTheme.bodySmall),
+          Text(formatDocumentDate(app, doc), style: Theme.of(context).textTheme.bodySmall),
           if (r.cashier case final name?)
             Text('${r.cashierLabel}: $name', style: Theme.of(context).textTheme.bodySmall),
           if (!r.credit && doc['id'] != null && app.invoiceStatus(doc) != 'Finalized')
@@ -230,7 +244,7 @@ String receiptSummary(AppState app, Json doc) {
   final r = ReceiptView(app, doc);
   return [
     '${r.business['tradingName'] ?? r.business['legalName'] ?? ''}'.trim(),
-    '${r.kind} ${doc['number'] ?? ''} · ${formatDate(doc['createdAt'])}',
+    '${r.kind} ${doc['number'] ?? ''} · ${formatDocumentDate(app, doc)}',
     if (doc['customer'] is Map) 'Customer: ${doc['customer']['name']}',
     '',
     for (final l in r.lines) '${r.lineQty(l)} × ${r.lineName(l)} — ${r.money(l['total'] as num? ?? 0)}',
@@ -269,11 +283,11 @@ Future<Uint8List> buildReceiptPdf(AppState app, Json doc) async {
       pw.SizedBox(height: 6),
       pw.Center(child: pw.Text(r.kind, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold))),
       row('No.', '${doc['number'] ?? 'Pending'}'),
-      row('Date', formatDate(doc['createdAt'])),
+      row('Date', formatDocumentDate(app, doc)),
       if (r.cashier case final name?) row(r.cashierLabel, name),
       if (r.credit) ...[
         row('Against', '${doc['invoiceNumber']}'),
-        if (doc['invoiceDate'] != null) row('Invoice date', formatDate(doc['invoiceDate'])),
+        if (doc['invoiceDate'] != null) row('Invoice date', formatDocumentDate(app, doc, field: 'invoiceDate')),
         row('Reason', '${doc['reason'] ?? ''}'),
       ],
       if (doc['customer'] is Map) ...[

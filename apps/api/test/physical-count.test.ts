@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { connectDatabase, getRecord, migrate, records } from "../src/db.js";
+import { connectDatabase, getRecord, migrate, putRecord, records } from "../src/db.js";
 import { createApp } from "../src/app.js";
 import { seed } from "../src/seed.js";
 
@@ -93,13 +93,19 @@ test("physical counts detect intervening sales, preserve reservations and requir
     await confirm(parallel.id, manager, 409);
     const blocked = await start(staff, serialBin);
     await submit(blocked.id, 2, ["C", "D"]);
-    await call("holds", owner, { cart: { lines: [{ ...serialBin, qty: 1, serials: ["A"] }] } });
-    await confirm(blocked.id, manager, 409);
+    const heldSerial = await call("holds", owner, { cart: { lines: [{ ...serialBin, qty: 1, serials: ["A"] }] } });
+    assert.match((await confirm(blocked.id, manager, 409)).error, /missing serial.*held bill/);
     assert.equal((await getRecord(db, "demo", "serial", serial.id + ":A"))?.status, "available");
     const visible = (await call("bootstrap", manager)).stockCounts;
     assert.ok(visible.some((row: any) => row.id === blocked.id));
     assert.ok(!visible.some((row: any) => row.id === fresh.id || row.id === draft.id));
     assert.equal((await call("bootstrap", cashier)).stockCounts, undefined);
+    const stored = (await getRecord(db, "demo", "hold", heldSerial.id))!;
+    await putRecord(db, "demo", "hold",
+      { ...stored, expiresAt: new Date(Date.now() - 60000).toISOString() }, stored.branchId);
+    const released = await confirm(blocked.id);
+    assert.deepEqual(released.serialChanges, { added: ["D"], removed: ["A"] });
+    assert.equal((await getRecord(db, "demo", "serial", serial.id + ":A"))?.status, "adjusted-out");
   } finally {
     await app.close();
     await db.close();

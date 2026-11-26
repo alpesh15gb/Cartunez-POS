@@ -14,8 +14,15 @@ import {
   audit,
   inventory,
   approved,
+  reservedSerialIds,
 } from "../domain.js";
 import { confirmCount, discardCount, startCount, submitCount } from "../physical-count.js";
+
+function serialIdForWithdrawal(productId: string, serial: string, reserved: ReadonlySet<string>) {
+  const serialId = productId + ":" + serial;
+  if (reserved.has(serialId)) fail(`Serial ${serial} is reserved by a held bill or job card.`, 409);
+  return serialId;
+}
 
 export function inventoryRoutes(app: FastifyInstance, db: Database, post: Post) {
   post("inventory/move", async (tx, actor, body) => {
@@ -60,12 +67,13 @@ export function inventoryRoutes(app: FastifyInstance, db: Database, post: Post) 
         new Set(body.serials).size !== quantity
       )
         fail("Select one serial for each moved unit.");
+      const held = await reservedSerialIds(tx, actor);
       for (const serial of body.serials) {
         const item = await scoped(
           tx,
           actor,
           "serial",
-          product.id + ":" + serial,
+          serialIdForWithdrawal(product.id, serial, held),
         );
         if ((item.status !== "available" && item.status !== from.kind) || item.binId !== body.fromBinId)
           fail("Serial is unavailable in the source bin.");
@@ -96,13 +104,14 @@ export function inventoryRoutes(app: FastifyInstance, db: Database, post: Post) 
         body.transactionId || body.productId + body.binId,
         { amount: Math.abs(Number(body.quantity)), subjectId: body.productId }, // Security: bound approval
       );
-      const stock = (await inventory(tx, actor)).find(
-        (item) =>
-          item.productId === body.productId && item.binId === body.binId,
-      );
       const quantity = integer(body.quantity, "Adjustment", -1000000, 1000000);
-      if ((stock?.available || 0) + quantity < 0)
-        fail("Adjustment would consume reserved stock.", 409);
+      if (quantity < 0) {
+        const stock = (await inventory(tx, actor)).find(
+          item => item.productId === body.productId && item.binId === body.binId,
+        );
+        if ((stock?.available ?? 0) + quantity < 0)
+          fail("Adjustment would consume reserved stock.", 409);
+      }
       const product = await scoped(tx, actor, "product", body.productId);
       if (product.type === "service") fail("Services do not carry stock.");
       if (product.onlineOnly) fail(`${product.name} is online only (sold on the website) and carries no shop stock.`);
@@ -125,9 +134,10 @@ export function inventoryRoutes(app: FastifyInstance, db: Database, post: Post) 
           new Set(body.serials).size !== Math.abs(quantity)
         )
           fail("Provide one serial for every adjusted unit.");
+        const held = quantity < 0 ? await reservedSerialIds(tx, actor) : null;
         for (const serial of body.serials) {
           text(serial, "serial");
-          const serialId = product.id + ":" + serial;
+          const serialId = held ? serialIdForWithdrawal(product.id, serial, held) : product.id + ":" + serial;
           const existing = await getRecord(
             tx,
             actor.organizationId,
@@ -190,6 +200,7 @@ export function transferRoutes(app: FastifyInstance, db: Database, post: Post) {
       fail("Add transfer lines.");
     const transferId = id("transfer");
     const lines = [];
+    let held: Set<string> | undefined;
     for (const input of body.lines) {
       const quantity = integer(input.quantity, "Transfer quantity", 1);
       const stock = (await inventory(tx, actor)).find(
@@ -209,12 +220,13 @@ export function transferRoutes(app: FastifyInstance, db: Database, post: Post) {
           new Set(input.serials).size !== quantity
         )
           fail("Select a serial for each transferred unit.");
+        held ??= await reservedSerialIds(tx, actor);
         for (const serial of input.serials) {
           const item = await scoped(
             tx,
             actor,
             "serial",
-            product.id + ":" + serial,
+            serialIdForWithdrawal(product.id, serial, held),
           );
           if (item.status !== "available" || item.binId !== input.binId)
             fail("Serial is unavailable at source.");
