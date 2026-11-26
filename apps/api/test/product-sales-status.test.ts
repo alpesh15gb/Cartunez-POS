@@ -34,12 +34,35 @@ test("managers can stop and resume a traded part across the register, offline cl
       tenders: [{ type: "Cash", amount: 100, confirmed: true }] };
     const invoice = await call("invoices", sale);
     const device = await call("devices/enroll", { name: "Counter 1", offlineAllowed: true, offlineHours: 24, tenders: ["Cash"], rangeSize: 1000 });
+    const trackedLater = await call("products", { sku: "TRACK-LATER", name: "Tracking changes later", retailPrice: 100,
+      wholesalePrice: 100, taxRate: 0, universal: true });
+    const kit = await call("products", { name: "Tracking test kit", retailPrice: 100, taxRate: 0,
+      components: [{ productId: trackedLater.id, qty: 1 }] });
     const before = await call("bootstrap");
     const offline = { ...sale, transactionId: randomUUID(), invoiceNumber: device.rangeStart,
       deviceId: device.id, offline: true, occurredAt: new Date().toISOString(), catalogRevision: before.catalogRevision };
     const sync = async (claim: any) => (await call("sync", { deviceId: device.id, transactions: [claim] })).results[0];
     const accepted = await sync(offline);
     assert.equal(accepted.status, "accepted");
+    const directOffline = await call("invoices", offline, 403);
+    assert.match(directOffline.error, /sync route/i);
+    await call("products", { ...trackedLater, serialTracked: true });
+    const trackingClaim = {
+      ...offline, transactionId: randomUUID(), invoiceNumber: device.rangeStart + 3,
+      lines: [{ productId: trackedLater.id, qty: 1, binId: "bin-a1" }],
+    };
+    const trackingConflict = await sync(trackingClaim);
+    assert.equal(trackingConflict.status, "conflict");
+    assert.match(trackingConflict.error, /serial tracking/i);
+    assert.equal((await records(db, "demo", "invoice")).some((invoice) => invoice.transactionId === trackingClaim.transactionId), false);
+    const kitClaim = { ...offline, transactionId: randomUUID(), invoiceNumber: device.rangeStart + 4, lines: [{ productId: kit.id, qty: 1 }] };
+    const kitConflict = await sync(kitClaim);
+    assert.equal(kitConflict.status, "conflict");
+    assert.match(kitConflict.error, /serial tracking/i);
+    await call("products", { ...kit, components: [{ productId: "filter", qty: 1 }] });
+    const changedKit = await sync({ ...kitClaim, transactionId: randomUUID(), invoiceNumber: device.rangeStart + 5 });
+    assert.equal(changedKit.status, "conflict");
+    assert.match(changedKit.error, /kit components/i);
     await listing(true);
     await toggle("stop", 409);
     await listing(false);

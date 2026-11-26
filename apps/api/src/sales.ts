@@ -4,6 +4,9 @@ import {
   type Actor,
   allow,
   holdReserves,
+  pickAvailability,
+  reservedSerialIds,
+  checkOfflineStockPolicy,
   integer,
   text,
   fail,
@@ -198,6 +201,7 @@ async function prepareSale(
 async function buildLines(ctx: SaleContext) {
   const { db, actor, body, profile, catalog, stock, hold, reconcile, sellBeyondStock } = ctx;
   const used = new Set<string>();
+  let reservedSerials: Set<string> | undefined;
   for (const input of body.lines) {
     // WS-B: exchange return lines are settled by hooks/exchange.ts, not sold.
     if (input?.kind === "returnRef") continue;
@@ -210,6 +214,7 @@ async function buildLines(ctx: SaleContext) {
     if (currentProduct.salesStopped || product.salesStopped)
       fail("New sales are stopped for " + product.sku + "." +
         (body.offline ? " Manager review of this offline claim is required." : ""), 409);
+    if (body.offline) checkOfflineStockPolicy(currentProduct, product);
     if (profile.taxScheme === "india-gst") {
       if (!/^(\d{4}|\d{6}|\d{8})$/.test(product.hsnSac || ""))
         fail(
@@ -242,19 +247,10 @@ async function buildLines(ctx: SaleContext) {
     if (product.type !== "service" && !onlineOnly) {
       const bin = await scoped(db, actor, "location", input.binId);
       if (bin.kind !== "sellable") fail("Sale picks must use a sellable bin.");
-      const available =
-        stock.find(
-          (entry) =>
-            entry.productId === product.id && entry.binId === input.binId,
-        )?.available || 0;
-      // An expired hold no longer reserves stock, so it adds nothing back.
-      const ownHold = (hold && holdReserves(hold) ? hold.cart.lines || [] : [])
-        .filter(
-          (entry: any) =>
-            entry.productId === product.id && entry.binId === input.binId,
-        )
-        .reduce((sum: number, entry: any) => sum + entry.qty, 0);
-      if (!reconcile && !(sellBeyondStock && !product.serialTracked) && available + ownHold < qty)
+      const ownLines = hold && holdReserves(hold) ? hold.cart?.lines : undefined;
+      const pick = pickAvailability(stock, ownLines, product.id, input.binId);
+      const negativeStock = (reconcile || sellBeyondStock) && !product.serialTracked && !pick.reservedByOthers;
+      if (pick.free < qty && !negativeStock)
         fail(`Insufficient stock for ${product.sku} in the selected bin.`, 409);
       if (product.serialTracked) {
         if (
@@ -263,7 +259,10 @@ async function buildLines(ctx: SaleContext) {
           new Set(input.serials).size !== qty
         )
           fail("Scan one unique serial number per unit.");
+        reservedSerials ??= await reservedSerialIds(db, actor, hold?.id);
         for (const serial of input.serials) {
+          if (reservedSerials.has(product.id + ":" + serial))
+            fail(`Serial ${serial} is reserved for another job or parked sale.`, 409);
           const item = await scoped(
             db,
             actor,

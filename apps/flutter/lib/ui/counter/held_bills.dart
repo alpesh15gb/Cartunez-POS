@@ -13,8 +13,10 @@ import 'counter_keys.dart' show showKeyHints;
 
 /// Held bills the counter may recall. Integration: job-card stock reservations
 /// are holds carrying `jobId`; they are billed from the job card, never here.
-List<Json> counterHolds(AppState app) =>
-    app.list('holds').where((h) => '${h['jobId'] ?? ''}'.isEmpty).toList();
+List<Json> counterHolds(AppState app) {
+  final pending = app.cartState.pendingHoldIds;
+  return app.list('holds').where((hold) => '${hold['jobId'] ?? ''}'.isEmpty && !pending.contains(hold['id'])).toList();
+}
 
 /// Whether [hold] matches the drawer's search text.
 bool holdMatches(AppState app, Json hold, String query) {
@@ -44,18 +46,38 @@ Future<bool> resumeHold(BuildContext context, Json hold) async {
     app.toast('These parts are reserved for a job card. Bill them from the job card.');
     return false;
   }
-  if ((app.cart['lines'] as List).isNotEmpty && app.cart['holdId'] != hold['id']) {
+  if (app.cartState.pendingHoldIds.contains(hold['id'])) {
+    app.toast('This bill has a pending payment. Open Sync & audit to check it.');
+    return false;
+  }
+  final draft = app.cart;
+  if (draft['holdId'] == hold['id']) return true;
+  final cashier = app.session;
+  final hasLines = (draft['lines'] as List).isNotEmpty;
+  final hasReturns = (draft['returns'] as List? ?? const []).isNotEmpty;
+  if (hasReturns) {
+    final replace = await confirm(context, 'Replace the exchange?',
+        'The items coming back${hasLines ? ' and any replacement items' : ''} will be removed before this held bill is resumed.',
+        action: 'Replace');
+    if (!replace || !context.mounted || !identical(app.cart, draft)) return false;
+  } else if (hasLines) {
     final park = await confirm(context, 'Hold the current bill?',
         'The bill on the counter is held first, so nothing is lost, then this one is resumed.',
         action: 'Hold and resume');
-    if (!park || !context.mounted) return false;
+    if (!park || !context.mounted || !identical(app.cart, draft)) return false;
     try {
       await app.parkCart();
     } catch (error) {
       app.toast(errorText(error));
       return false;
     }
+    if (!context.mounted || !identical(app.session, cashier)) return false;
+    if (app.cartState.lines.isNotEmpty || (app.cart['returns'] as List? ?? const []).isNotEmpty) {
+      app.toast('The sale changed while it was being held. Review it before resuming another bill.');
+      return false;
+    }
   }
+  if (!identical(app.session, cashier)) return false;
   final cart = Map<String, dynamic>.from(hold['cart'] as Map);
   app.replaceCart({
     ...cart,
@@ -109,6 +131,7 @@ class HeldBillsPanel extends StatefulWidget {
 
 class _HeldBillsPanelState extends State<HeldBillsPanel> {
   final search = TextEditingController();
+  bool _resuming = false;
 
   @override
   void dispose() {
@@ -117,7 +140,13 @@ class _HeldBillsPanelState extends State<HeldBillsPanel> {
   }
 
   Future<void> _resume(Json hold) async {
-    if (await resumeHold(context, hold) && mounted) widget.onResumed();
+    if (_resuming) return;
+    _resuming = true;
+    try {
+      if (await resumeHold(context, hold) && mounted) widget.onResumed();
+    } finally {
+      _resuming = false;
+    }
   }
 
   @override

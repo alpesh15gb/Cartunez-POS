@@ -16,6 +16,7 @@ import {
   fitment,
   normalize,
 } from "../domain.js";
+import { supersedeBillEconomics } from "../bill-economics.js";
 import { buildProduct, CatalogCodes, previewCatalog } from "../catalog.js";
 import { queueMagentoSync } from "../online-queue.js";
 import { emailAddress, noTax } from "../settings.js";
@@ -100,6 +101,11 @@ export function catalogRoutes(app: FastifyInstance, db: Database, post: Post) {
       )
     )
       fail("Complete or release parked sales before editing this part.", 409);
+    if (existing) {
+      if (existing.lastPurchaseCost != null) product.lastPurchaseCost = existing.lastPurchaseCost;
+      const changed = (["cost", "retailPrice"] as const).filter(field => product[field] !== existing[field]);
+      await supersedeBillEconomics(tx, actor.organizationId, product.id, changed);
+    }
     const statusChanged = Boolean(existing?.salesStopped) !== Boolean(product.salesStopped);
     await audit(tx, actor, "product", product.id, statusChanged
       ? (product.salesStopped ? "Stopped new sales" : "Resumed sales") : "Catalog update");

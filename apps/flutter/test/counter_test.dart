@@ -381,6 +381,70 @@ void main() {
     app.dispose();
   });
 
+  testWidgets('serial-tracked quantity shortcuts cannot bypass serial selection', (tester) async {
+    final app = await _ready(tester);
+    app.snapshot = {...app.snapshot, 'products': [{...app.productById('p')!, 'serialTracked': true}]};
+    await _mount(tester, app, const Size(1400, 900));
+    app.updateCart({'lines': [{'productId': 'p', 'qty': 1, 'binId': 'bin', 'serials': ['SER-1']}]});
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.numpadAdd);
+    await tester.pump();
+    expect((app.cart['lines'] as List).single['qty'], 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pump();
+    expect(app.cart['lines'], isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('a return-only exchange explains the next step and keeps payment disabled', (tester) async {
+    final app = await _ready(tester);
+    await _mount(tester, app, const Size(390, 844));
+    app.updateCart({'returns': [
+      {'kind': 'returnRef', 'invoiceId': 'inv-1', 'invoiceNumber': 'INV-1', 'name': 'Oil filter',
+        'qty': 1, 'disposition': 'restock', 'serials': <String>[], 'credit': 25000},
+    ]});
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('cart-pill')));
+    await tester.pumpAndSettle();
+    expect(find.text('Add a replacement item, or use Orders › Returns for a refund.'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Pay & print')).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Hold')).onPressed, isNull);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
+  testWidgets('recalling a held bill asks before discarding a return-only exchange', (tester) async {
+    final app = await _ready(tester);
+    await _mount(tester, app, const Size(1400, 900));
+    app.updateCart({'returns': [
+      {'kind': 'returnRef', 'invoiceId': 'inv-9', 'invoiceNumber': 'INV-9', 'name': 'Oil filter',
+        'qty': 1, 'disposition': 'restock', 'serials': <String>[], 'credit': 25000},
+    ]});
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.f5);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Name, reg no or item'), 'MH12');
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Resume'));
+    await tester.pumpAndSettle();
+    expect(find.text('Replace the exchange?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(app.cart['returns'], hasLength(1));
+    expect(app.cart['holdId'], isNull);
+    await tester.tap(find.widgetWithText(FilledButton, 'Resume'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Replace'));
+    await tester.pumpAndSettle();
+    expect(app.cart['holdId'], 'h1');
+    expect(app.cart['returns'] ?? const [], isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
   test('UPI link and WhatsApp link', () {
     expect(upiPayUri(vpa: 'shop@okhdfc', payee: 'Car Tunez', amountMinor: 125050, note: 'Bill 1'),
         'upi://pay?pa=shop%40okhdfc&pn=Car%20Tunez&am=1250.50&cu=INR&tn=Bill%201');

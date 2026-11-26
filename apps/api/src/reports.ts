@@ -1,3 +1,4 @@
+import { landedLineTotals } from "./bill-economics.js";
 import { reorderSuggestions } from "./replenishment.js";
 import { shiftCashSummaries } from "./shift-cash.js";
 import { refundBy } from "./returns.js";
@@ -485,11 +486,12 @@ export async function report(
       await records(db, actor.organizationId, "purchaseBill", actor.branchId)
     )
       .filter((bill) => !bill.voided && wanted(bill.supplierId, bill.createdAt))
-      .flatMap((bill) =>
-        bill.lines.filter(lineWanted).map((line: any) => {
-          // A bill line keeps the landed cost per unit; the report's landedCost is the
-          // line's freight/discount share (like a goods receipt), GST excluded (claimed back).
-          const stockValue = (line.landedCost ?? line.cost) * line.quantity;
+      .flatMap((bill) => {
+        const historical = bill.lines.some((l: any) => l.landedTotal == null) && (bill.otherCharges != null || bill.discount != null)
+          ? landedLineTotals(bill.lines, bill.otherCharges || 0, bill.discount || 0) : [];
+        return bill.lines.flatMap((line: any, index: number) => {
+          if (!lineWanted(line)) return [];
+          const stockValue = line.landedTotal ?? historical[index] ?? (line.landedCost ?? line.cost) * line.quantity;
           return {
             id: bill.id,
             source: bill.purchaseOrderId ? "PO bill" : "Supplier bill",
@@ -509,8 +511,8 @@ export async function report(
             landedCost: stockValue - line.cost * line.quantity,
             total: stockValue,
           };
-        }),
-      );
+        });
+      });
     rows = [...receiptRows, ...billRows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   } else if (name === "warranty")
     rows = (

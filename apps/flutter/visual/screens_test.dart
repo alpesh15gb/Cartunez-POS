@@ -5,9 +5,18 @@ import 'dart:io';
 import 'package:cartunez_pos/core/store.dart';
 import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
+import 'package:cartunez_pos/ui/router.dart';
+import 'package:cartunez_pos/ui/purchasing/bill_list.dart';
+import 'package:cartunez_pos/ui/screens/dashboard.dart';
+import 'package:cartunez_pos/ui/screens/inventory.dart';
+import 'package:cartunez_pos/ui/screens/people.dart';
+import 'package:cartunez_pos/ui/screens/reports.dart';
+import 'package:cartunez_pos/ui/screens/sales.dart';
+import 'package:cartunez_pos/ui/screens/settings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 const api = String.fromEnvironment('API', defaultValue: 'http://127.0.0.1:4100/api/v1');
 
@@ -23,6 +32,9 @@ void main() {
   final fonts = '${Platform.environment['FLUTTER_ROOT'] ?? r'C:\src\flutter'}/bin/cache/artifacts/material_fonts';
 
   setUpAll(() async {
+    if (!const {'localhost', '127.0.0.1', '::1'}.contains(Uri.parse(api).host)) {
+      throw StateError('Use a loopback demo API.');
+    }
     HttpOverrides.global = null;
     await _font('Roboto', ['$fonts/roboto-regular.ttf', '$fonts/roboto-medium.ttf', '$fonts/roboto-bold.ttf', '$fonts/roboto-black.ttf']);
     await _font('MaterialIcons', ['$fonts/materialicons-regular.otf']);
@@ -77,7 +89,7 @@ void main() {
       await tester.tap(find.text('Add to sale'));
       await tester.pumpAndSettle();
       if (name == 'phone') {
-        await tester.tap(find.textContaining('View sale'));
+        await tester.tap(find.byKey(const ValueKey('cart-pill')));
         await tester.pumpAndSettle();
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/$name-04-cart.png'));
         await tester.tapAt(const Offset(200, 20));
@@ -88,7 +100,7 @@ void main() {
         }
       } else {
         await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/$name-04-cart.png'));
-        await tester.tap(find.text('Checkout  (F6)'));
+        await tester.tap(find.text('Pay & print'));
         await tester.pumpAndSettle();
         if (find.text('Open shift').evaluate().isNotEmpty) {
           await tester.runAsync(() => tester.tap(find.widgetWithText(FilledButton, 'Open shift')));
@@ -104,20 +116,27 @@ void main() {
         await tester.pumpAndSettle();
       }
 
+      rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+      await tester.pumpAndSettle();
       var index = 6;
-      for (final area in ['Sales', 'Customers', 'Inventory', 'Purchasing', 'Dashboard', 'Reports', 'Settings']) {
-        final target = find.text(area);
-        if (target.evaluate().isEmpty) {
-          await tester.tap(find.text('More'));
-          await tester.pumpAndSettle();
-        }
-        await tester.tap(find.text(area).last);
+      final destinations = [
+        ('/orders/invoices', 'sales', InvoicesScreen),
+        ('/people/customers', 'customers', ContactsScreen),
+        ('/catalog/parts', 'inventory', PartsScreen),
+        ('/purchasing/bills', 'purchasing', BillsScreen),
+        ('/dashboard', 'dashboard', DashboardScreen),
+        ('/reports', 'reports', ReportsScreen),
+        ('/settings', 'settings', SettingsScreen),
+      ];
+      for (final (path, shot, screen) in destinations) {
+        GoRouter.of(rootNavigatorKey.currentContext!).go(path);
         await tester.pumpAndSettle();
+        expect(find.byType(screen), findsOneWidget, reason: path);
         await expectLater(find.byType(MaterialApp),
-            matchesGoldenFile('out/$name-${(index++).toString().padLeft(2, '0')}-${area.toLowerCase()}.png'));
+            matchesGoldenFile('out/$name-${(index++).toString().padLeft(2, '0')}-$shot.png'));
       }
       if (name == 'desktop') {
-        await tester.tap(find.text('Inventory').first);
+        GoRouter.of(rootNavigatorKey.currentContext!).go('/catalog');
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add part'));
         await tester.pumpAndSettle();
@@ -125,6 +144,7 @@ void main() {
         await tester.tap(find.text('Cancel'));
         await tester.pumpAndSettle();
       }
+      await tester.pumpWidget(const SizedBox.shrink());
       state.dispose();
     });
   }

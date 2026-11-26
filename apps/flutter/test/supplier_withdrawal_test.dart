@@ -23,14 +23,19 @@ void main() {
     final app = _Register()..snapshot = {
       'products': [{'id': 'p', 'sku': 'TRACK', 'name': 'Radio', 'serialTracked': true}],
       'locations': [{'id': 'bin', 'bin': 'A1', 'kind': 'sellable'}],
+      'purchaseReturns': [{'billId': 'b', 'lines': [{'productId': 'p', 'quantity': 1, 'serials': ['R00']}]}],
     };
-    final bill = {'id': 'b', 'lines': [{'productId': 'p', 'quantity': 2, 'cost': 10000,
-      'binId': 'bin', 'serials': ['R01', 'R02']}]};
+    final bill = {'id': 'b', 'lines': [
+      {'id': 'line-a', 'productId': 'p', 'quantity': 1, 'cost': 7500, 'binId': 'bin', 'serials': ['R00']},
+      {'id': 'line-b', 'productId': 'p', 'quantity': 2, 'cost': 10000, 'binId': 'bin', 'serials': ['R01', 'R02']},
+    ]};
     await tester.pumpWidget(AppScope(state: app, child: MaterialApp(home: Builder(builder: (context) =>
         Scaffold(body: TextButton(child: const Text('Return'), onPressed: () =>
           supplierReturn(context, {'id': 's', 'name': 'Supplier'}, bill: bill)))))));
     await tester.tap(find.text('Return'));
     await tester.pumpAndSettle();
+    expect(find.textContaining('Line 1'), findsNothing);
+    expect(find.textContaining('Line 2 · up to 2'), findsOneWidget);
     await tester.enterText(find.widgetWithText(TextFormField, 'Quantity'), '2');
     await tester.enterText(find.widgetWithText(TextFormField, 'Reason'), 'Sent wrong model');
     final serials = find.widgetWithText(TextFormField, 'Serial numbers');
@@ -45,6 +50,7 @@ void main() {
     final line = (app.saved!['lines'] as List).single;
     expect(line['serials'], ['R01', 'R02']);
     expect(line['binId'], 'bin');
+    expect(line['billLineId'], 'line-b');
     expect(app.saved!['billId'], 'b');
     await tester.pumpWidget(const SizedBox());
     app.dispose();

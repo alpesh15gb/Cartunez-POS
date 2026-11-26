@@ -409,6 +409,7 @@ void main() {
       'settings': {...app.settings, 'upiVpa': 'cartunez@okhdfcbank'},
     };
     app.updateCart({
+      'customerId': 'c1',
       'lines': [{'productId': 'p1', 'qty': 1, 'binId': 'bin', 'serials': <String>[]}],
       'returns': [
         {
@@ -431,6 +432,15 @@ void main() {
     await tester.tap(find.text('UPI'));
     await tester.pumpAndSettle();
     expect(find.text('UPI QR checkout · ${app.money(70800)}'), findsOneWidget);
+    final qr = find.widgetWithText(FilledButton, 'UPI QR checkout · ${app.money(70800)}');
+    expect(tester.widget<FilledButton>(qr).onPressed, isNotNull);
+
+    app.updateCart({'customerId': 'other'});
+    app.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.text('Use the original bill customer before paying for this exchange.'), findsOneWidget);
+    expect(tester.widget<FilledButton>(qr).onPressed, isNull);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Complete exchange')).onPressed, isNull);
 
     await tester.pumpWidget(const SizedBox());
     app.dispose();

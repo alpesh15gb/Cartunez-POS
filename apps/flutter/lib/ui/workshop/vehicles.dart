@@ -43,6 +43,13 @@ List<Json> searchVehicles(AppState app, String query) {
   return [for (final s in scored) s.$2];
 }
 
+/// Only a complete-looking registration is safe to prefill when adding a vehicle.
+String? vehicleRegistrationPrefill(String query) {
+  final value = query.trim().toUpperCase();
+  final compact = value.replaceAll(RegExp(r'[\s-]'), '');
+  return RegExp(r'^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$').hasMatch(compact) ? value : null;
+}
+
 /// Add or edit a vehicle. Returns the saved record.
 Future<Json?> editVehicle(BuildContext context, Json vehicle) {
   final app = context.appRead;
@@ -96,7 +103,7 @@ class _VehiclePickerState extends State<_VehiclePicker> {
   }
 
   Future<void> _add() async {
-    final saved = await editVehicle(context, {'regNo': query.text.trim().toUpperCase()});
+    final saved = await editVehicle(context, {'regNo': vehicleRegistrationPrefill(query.text)});
     if (saved != null && mounted) Navigator.pop(context, saved);
   }
 
@@ -182,7 +189,7 @@ class VehiclesScreen extends StatelessWidget {
         final rows = searchVehicles(app, query.text);
         final addVehicle = FilledButton.icon(
           onPressed: () async {
-            final saved = await editVehicle(context, {'regNo': query.text.trim().toUpperCase()});
+            final saved = await editVehicle(context, {'regNo': vehicleRegistrationPrefill(query.text)});
             if (saved != null && context.mounted) context.go('/people/vehicles/${saved['id']}');
           },
           icon: const Icon(Icons.add),

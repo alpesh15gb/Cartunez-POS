@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:cartunez_pos/core/store.dart';
 import 'package:cartunez_pos/main.dart';
 import 'package:cartunez_pos/state/app_state.dart';
+import 'package:cartunez_pos/ui/online/fulfilment.dart' show canInvoice;
 import 'package:cartunez_pos/ui/prefs.dart';
 import 'package:cartunez_pos/ui/router.dart';
 import 'package:cartunez_pos/ui/theme.dart';
@@ -30,6 +31,9 @@ Future<void> _font(String family, List<String> files) async {
 void main() {
   final fonts = '${Platform.environment['FLUTTER_ROOT'] ?? r'C:\src\flutter'}/bin/cache/artifacts/material_fonts';
   setUpAll(() async {
+    if (!const {'localhost', '127.0.0.1', '::1'}.contains(Uri.parse(api).host)) {
+      throw StateError('Use a loopback demo API.');
+    }
     HttpOverrides.global = null;
     for (final family in ['Roboto', 'Segoe UI']) {
       await _font(family, ['$fonts/roboto-regular.ttf', '$fonts/roboto-medium.ttf', '$fonts/roboto-bold.ttf', '$fonts/roboto-black.ttf']);
@@ -193,8 +197,10 @@ void main() {
         await settle(15);
       }
       await shot('counter-payment');
-      if (find.textContaining('Show UPI QR').evaluate().isEmpty) await tap(find.text('UPI'), last: true);
-      if (await tap(find.textContaining('Show UPI QR'))) {
+      final upiQr = find.byKey(const ValueKey('show-upi-qr'));
+      if (upiQr.evaluate().isEmpty) await tap(find.text('UPI'), last: true);
+      if (await tap(upiQr)) {
+        expect(find.byKey(const ValueKey('upi-qr')), findsOneWidget);
         await shot('counter-upi-qr');
         if (find.byTooltip('Close').evaluate().isNotEmpty) {
           await tap(find.byTooltip('Close'));
@@ -206,12 +212,14 @@ void main() {
       if (find.text('Complete sale').evaluate().isNotEmpty) {
         await tap(find.text('Cash'), last: true);
         await tap(find.text('Complete sale'));
-        for (var i = 0; i < 60 && find.text('SALES RECEIPT').evaluate().isEmpty; i++) {
+        for (var i = 0; i < 80 && find.text('View receipt').evaluate().isEmpty; i++) {
           await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
           await tester.pump(const Duration(milliseconds: 30));
         }
-        await shot('counter-receipt');
-        if (find.text('Next customer').evaluate().isNotEmpty) await tap(find.text('Next customer'));
+        if (await tap(find.text('View receipt'))) {
+          await shot('counter-receipt');
+          await tap(find.text('Done'));
+        }
         await tester.runAsync(state.sync);
       }
 
@@ -242,8 +250,8 @@ void main() {
       }
       await go('/orders/online');
       await shot('orders-online');
-      if (state.list('onlineOrders').isNotEmpty) {
-        await tap(find.textContaining('Pick'));
+      final packable = state.list('onlineOrders').where(canInvoice).firstOrNull;
+      if (packable != null && await tap(find.text('#${packable['number']}')) && await tap(find.text('Pick & pack'))) {
         await shot('orders-pick-pack');
       }
 
@@ -314,11 +322,6 @@ void main() {
       FlutterError.onError = original;
       Directory('visual/out/review').createSync(recursive: true);
       File('visual/out/review/$name-errors.txt').writeAsStringSync(errors.join('\n'));
-      await tester.runAsync(() async {
-        try {
-          await state.logout();
-        } catch (_) {}
-      });
       await tester.pumpWidget(const SizedBox());
       state.dispose();
     });

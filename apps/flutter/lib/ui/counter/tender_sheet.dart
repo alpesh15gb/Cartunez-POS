@@ -21,19 +21,27 @@ import '../people/account_actions.dart' show AccountTenderNote, availableAdvance
 /// payment type, [print] prints the receipt as soon as the sale completes (F12).
 Future<void> startCheckout(BuildContext context, {bool split = false, String? tender, bool print = false}) async {
   final app = context.appRead;
-  if ((app.cart['lines'] as List).isEmpty || !app.canSell) return;
+  if (((app.cart['lines'] as List).isEmpty &&
+          (app.cart['returns'] as List? ?? const []).isEmpty) ||
+      !app.canSell) return;
+  final blocker = checkoutBlocker(app);
+  if (blocker != null) {
+    app.toast(blocker);
+    return;
+  }
   if (!app.online) {
     app.toast('Reconnect before taking payment. Your cart is saved on this counter.');
     return;
   }
   if (app.openShift == null) {
+    final transactionId = app.cart['transactionId'];
     final opened = await openShiftDialog(context, forCheckout: true);
-    if (!opened || !context.mounted) return;
-  }
-  final blocker = checkoutBlocker(app);
-  if (blocker != null) {
-    app.toast(blocker);
-    return;
+    if (!opened || !context.mounted || !app.canSell || app.cart['transactionId'] != transactionId) return;
+    final updatedBlocker = checkoutBlocker(app);
+    if (updatedBlocker != null) {
+      app.toast(updatedBlocker);
+      return;
+    }
   }
   final bill = app.currentQuote();
   // WS-B: a bill with items coming back (exchange) settles only the difference.

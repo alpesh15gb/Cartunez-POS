@@ -223,6 +223,7 @@ class _PhotosDialogState extends State<_PhotosDialog> {
     final photos = app.photosOf('${widget.product['id']}');
     final canEdit = app.canStock;
     return AlertDialog(
+      scrollable: true,
       title: Text('Photos · ${widget.product['name']}'),
       content: SizedBox(
         width: 640,
@@ -252,15 +253,21 @@ class _PhotosDialogState extends State<_PhotosDialog> {
                   ),
                   if (canEdit)
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      TextButton(
-                        onPressed: i == 0 || busy != null
-                            ? null
-                            : () => _work('Saving…', () async {
-                                  final order = [photo['id'], ...photos.where((p) => p['id'] != photo['id']).map((p) => p['id'])];
-                                  await app.api('/products/${widget.product['id']}/images/order', body: {'imageIds': order});
-                                  await app.sync();
-                                }),
-                        child: const Text('Make main'),
+                      Expanded(
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            minimumSize: const Size(0, 48),
+                          ),
+                          onPressed: i == 0 || busy != null
+                              ? null
+                              : () => _work('Saving…', () async {
+                                    final order = [photo['id'], ...photos.where((p) => p['id'] != photo['id']).map((p) => p['id'])];
+                                    await app.api('/products/${widget.product['id']}/images/order', body: {'imageIds': order});
+                                    await app.sync();
+                                  }),
+                          child: const Text('Make main', textAlign: TextAlign.center),
+                        ),
                       ),
                       IconButton(
                         tooltip: 'Remove photo',

@@ -10,7 +10,7 @@ export const isKit = (product: RecordData | undefined) => !!product?.components?
 /**
  * The stocked components a kit line reserves on a parked sale or job card:
  * [{ productId, sku, name, qty, binId }], taken from the fullest sellable bins.
- * `free` = what is available in a bin to this document (stock not reserved by
+ * `pick.free` = what is available in a bin to this document (stock not reserved by
  * others, plus what this document reserved before); `taken` counts what the
  * document's other lines already use, keyed "productId|binId", and is updated.
  */
@@ -20,7 +20,7 @@ export async function reserveKitComponents(
   kit: RecordData,
   qty: number,
   options: {
-    free: (productId: string, binId: string) => number;
+    pick: (productId: string, binId: string) => { free: number; reservedByOthers: boolean };
     taken: Map<string, number>;
     bins: string[];
     sellBeyondStock: boolean;
@@ -30,11 +30,13 @@ export async function reserveKitComponents(
   for (const component of kit.components || []) {
     const part = await getRecord(db, actor.organizationId, "product", component.productId);
     if (!part) fail(`Kit ${kit.sku} lists an item that is no longer in the catalog. Edit the kit.`, 409);
+    if (part.salesStopped || part.serialTracked)
+      fail(`Kit ${kit.sku} cannot reserve stopped or serial-tracked component ${part.sku}. Edit the kit.`, 409);
     if (part.onlineOnly) fail("Website-only item " + part.sku + " cannot be used in a counter kit.", 409);
     if (isKit(part)) fail(`Kit ${kit.sku} contains another kit. Edit the kit to list its parts directly.`, 409);
     if (part.type === "service") continue;
     if (!options.bins.length) fail("Add a sellable bin before reserving kits.");
-    const left = (binId: string) => options.free(part.id, binId) - (options.taken.get(part.id + "|" + binId) || 0);
+    const left = (binId: string) => options.pick(part.id, binId).free - (options.taken.get(part.id + "|" + binId) || 0);
     const take = (binId: string, units: number) => {
       const existing = reserved.find((entry) => entry.productId === part.id && entry.binId === binId);
       if (existing) existing.qty += units;
@@ -42,7 +44,8 @@ export async function reserveKitComponents(
       options.taken.set(part.id + "|" + binId, (options.taken.get(part.id + "|" + binId) || 0) + units);
     };
     let remaining = integer(component.qty * qty, "Kit component quantity", 1, 9999999);
-    for (const binId of [...options.bins].sort((a, b) => left(b) - left(a))) {
+    const order = [...options.bins].sort((a, b) => left(b) - left(a));
+    for (const binId of order) {
       if (remaining <= 0) break;
       const units = Math.min(remaining, Math.max(0, left(binId)));
       if (units) {
@@ -51,8 +54,9 @@ export async function reserveKitComponents(
       }
     }
     if (remaining > 0) {
-      if (!options.sellBeyondStock) fail(`Not enough ${part.sku} in stock to reserve kit ${kit.sku}.`, 409);
-      take(reserved.find((entry) => entry.productId === part.id)?.binId || options.bins[0], remaining);
+      const bin = order.find(binId => !options.pick(part.id, binId).reservedByOthers);
+      if (!options.sellBeyondStock || !bin) fail(`Not enough ${part.sku} in stock to reserve kit ${kit.sku}.`, 409);
+      take(bin, remaining);
     }
   }
   return reserved;

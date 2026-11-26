@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Database } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
-import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves, heldUnits, ONLINE_ONLY_MESSAGE } from "../domain.js";
+import { allow, scoped, integer, text, fail, id, now, inventory, holdReserves, pickAvailability, reservedSerialIds, ONLINE_ONLY_MESSAGE } from "../domain.js";
 import { isKit, reserveKitComponents } from "../hooks/kit-reserve.js";
 import { queueMagentoSync } from "../online-queue.js";
 
@@ -56,7 +56,12 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
     const regNo = body.regNo === undefined ? previous?.regNo || "" : registrationNumber(body.regNo);
     const expiresAt = body.expiresAt === undefined ? previous?.expiresAt || null : expiry(body.expiresAt);
     const stock = await inventory(tx, actor);
+    const ownLines = previous && holdReserves(previous) ? previous.cart?.lines : undefined;
+    const pick = (productId: string, binId: string) => pickAvailability(stock, ownLines, productId, binId);
+    const settings = await getRecord(tx, actor.organizationId, "settings", "settings");
+    const negativeStock = settings?.features?.negativeStock !== false;
     const quantities = new Map<string, number>();
+    let claimedSerials: Set<string> | undefined;
     const kitLines: { line: any; product: any }[] = [];
     for (const line of cart.lines) {
       const quantity = integer(line.qty, "Quantity", 1, 9999);
@@ -64,6 +69,20 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
       // Kit reservations are worked out here, never taken from the register.
       delete line.components;
       const product = await scoped(tx, actor, "product", line.productId);
+      if (line.serials != null && !Array.isArray(line.serials)) fail("Serial numbers must be a list.");
+      if (line.serials?.length) {
+        if (!product.serialTracked || line.serials.length > quantity) fail("Choose at most one serial per tracked unit.");
+        claimedSerials ??= await reservedSerialIds(tx, actor, previous?.id);
+        line.serials = line.serials.map((value: unknown) => text(value, "serial number", true, 100));
+        for (const serial of line.serials) {
+          const key = product.id + ":" + serial;
+          if (claimedSerials.has(key)) fail(`Serial ${serial} is already reserved.`, 409);
+          const item = await scoped(tx, actor, "serial", key);
+          if (item.status !== "available" || item.binId !== line.binId)
+            fail(`Serial ${serial} is unavailable in the picked bin.`, 409);
+          claimedSerials.add(key);
+        }
+      }
       if (product.salesStopped) fail("New sales are stopped for " + product.sku + ".", 409);
       if (product.onlineOnly) fail(`${product.name}: ${ONLINE_ONLY_MESSAGE}. It cannot be parked at the counter.`, 409);
       if (isKit(product)) kitLines.push({ line, product });
@@ -72,39 +91,19 @@ export function holdRoutes(app: FastifyInstance, db: Database, post: Post) {
       if (bin.kind !== "sellable") fail("Park stock from a sellable bin.");
       const key = line.productId + "|" + line.binId;
       quantities.set(key, (quantities.get(key) || 0) + quantity);
-      const own = (previous && holdReserves(previous) ? previous.cart.lines || [] : [])
-        .filter(
-          (entry: any) =>
-            entry.productId === line.productId && entry.binId === line.binId,
-        )
-        .reduce((sum: number, entry: any) => sum + entry.qty, 0);
-      const settingsNow = await getRecord(tx, actor.organizationId, "settings", "settings");
-      if (
-        (settingsNow?.features?.negativeStock === false ||
-          (await getRecord(tx, actor.organizationId, "product", line.productId))?.serialTracked) &&
-        (stock.find(
-          (item) =>
-            item.productId === line.productId && item.binId === line.binId,
-        )?.available || 0) +
-          own <
-        quantities.get(key)!
-      )
+      const binStock = pick(product.id, bin.id);
+      if (binStock.free < quantities.get(key)! && (!negativeStock || product.serialTracked || binStock.reservedByOthers))
         fail("Insufficient stock to park this bill.", 409);
     }
     // Money and stock review: a parked kit reserves its stocked components in bins.
     if (kitLines.length) {
-      const settingsNow = await getRecord(tx, actor.organizationId, "settings", "settings");
-      const ownLines = previous && holdReserves(previous) ? previous.cart.lines || [] : [];
       const bins = (await records(tx, actor.organizationId, "location", actor.branchId))
         .filter((bin) => bin.kind === "sellable")
         .map((bin) => bin.id);
-      const free = (productId: string, binId: string) =>
-        (stock.find((item) => item.productId === productId && item.binId === binId)?.available || 0) +
-        heldUnits(ownLines, productId, binId);
       const taken = new Map(quantities);
       for (const { line, product } of kitLines)
         line.components = await reserveKitComponents(tx, actor, product, line.qty, {
-          free, taken, bins, sellBeyondStock: settingsNow?.features?.negativeStock !== false,
+          pick, taken, bins, sellBeyondStock: negativeStock,
         });
     }
     const hold = {

@@ -19,7 +19,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { Database, RecordData } from "../db.js";
 import type { Post } from "./types.js";
 import { getRecord, putRecord, records } from "../db.js";
-import { type Actor, allow, audit, fail, heldUnits, id, integer, inventory, multiline, now, reservingHolds, roundRatio, scoped, text, ONLINE_ONLY_MESSAGE } from "../domain.js";
+import { type Actor, allow, audit, fail, pickAvailability, id, integer, inventory, multiline, now, reservedSerialIds, roundRatio, scoped, text, ONLINE_ONLY_MESSAGE } from "../domain.js";
 import { reserveKitComponents } from "../hooks/kit-reserve.js";
 import { nextNumber } from "../number-series.js";
 import { invoiceProfile, noTax } from "../settings.js";
@@ -57,16 +57,9 @@ async function documentLines(
     ? (await records(db, actor.organizationId, "location", actor.branchId)).filter((b) => b.kind === "sellable")
     : [];
   // Serials another open job has already reserved.
-  const reservedSerials = new Set<string>();
-  if (options.job)
-    for (const hold of await reservingHolds(db, actor.organizationId, actor.branchId))
-      if (hold.id !== ownHold?.id)
-        for (const line of hold.cart?.lines || [])
-          for (const serial of line.serials || []) reservedSerials.add(line.productId + ":" + serial);
+  const reservedSerials = options.job ? await reservedSerialIds(db, actor, ownHold?.id) : new Set<string>();
   // What this job's own reservation (parts and kit components) holds is free to it.
-  const free = (productId: string, binId: string) =>
-    (stock.find((row) => row.productId === productId && row.binId === binId)?.available || 0) +
-    heldUnits(ownHold?.cart?.lines, productId, binId);
+  const pick = (productId: string, binId: string) => pickAvailability(stock, ownHold?.cart?.lines, productId, binId);
   const lines: Line[] = [];
   const taken = new Map<string, number>();
   for (const raw of inputs as any[]) {
@@ -113,14 +106,19 @@ async function documentLines(
         const bin = await scoped(db, actor, "location", binId);
         if (bin.kind !== "sellable") fail("Job parts must come from a sellable bin.");
       } else {
-        const best = [...sellable].sort((a, b) => free(product.id, b.id) - free(product.id, a.id))[0];
-        if (!best) fail("Add a sellable bin before putting parts on a job.");
+        const best = [...sellable].sort((a, b) => pick(product.id, b.id).free - pick(product.id, a.id).free)
+          .find(bin => {
+            const stock = pick(product.id, bin.id);
+            return stock.free >= qty || (sellBeyondStock && !product.serialTracked && !stock.reservedByOthers);
+          });
+        if (!best) fail(sellable.length ? `Not enough ${product.sku} in a sellable bin to reserve for this job.` : "Add a sellable bin before putting parts on a job.", 409);
         binId = best.id;
       }
       const key = product.id + "|" + binId;
       const need = (taken.get(key) || 0) + qty;
       taken.set(key, need);
-      if ((!sellBeyondStock || product.serialTracked) && free(product.id, binId) < need)
+      const binStock = pick(product.id, binId);
+      if (binStock.free < need && (!sellBeyondStock || product.serialTracked || binStock.reservedByOthers))
         fail(`Not enough ${product.sku} in the selected bin to reserve for this job.`, 409);
       const serials: string[] = [];
       if (raw.serials !== undefined && !Array.isArray(raw.serials)) fail("Serial numbers must be a list.");
@@ -150,7 +148,7 @@ async function documentLines(
       if (line.kind !== "kit") continue;
       const kit = await scoped(db, actor, "product", line.productId);
       line.components = await reserveKitComponents(db, actor, kit, line.qty, {
-        free, taken, bins: sellable.map((bin) => bin.id), sellBeyondStock,
+        pick, taken, bins: sellable.map((bin) => bin.id), sellBeyondStock,
       });
     }
   return lines;

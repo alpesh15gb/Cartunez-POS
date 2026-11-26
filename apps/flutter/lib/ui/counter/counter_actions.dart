@@ -22,6 +22,10 @@ bool setLineQuantity(BuildContext context, int index, int qty, {bool quiet = fal
   if (qty > 9999) return false;
   final line = lines[index];
   final product = app.productById('${line['productId']}');
+  if (product?['serialTracked'] == true && qty != line['qty']) {
+    if (!quiet) app.toast('Add or remove serial-tracked units from the part form.');
+    return false;
+  }
   if (qty > (line['qty'] as int) && product != null) {
     if (product['salesStopped'] == true) {
       if (!quiet) app.toast('Sales are stopped for this part.');
@@ -314,6 +318,26 @@ Future<void> holdSale(BuildContext context) async {
   final app = context.appRead;
   try {
     await app.parkCart();
+  } catch (error) {
+    app.toast(errorText(error));
+  }
+}
+
+Future<void> clearCurrentSale(BuildContext context) async {
+  final app = context.appRead;
+  final draft = app.cart;
+  final held = '${draft['holdId'] ?? ''}'.isNotEmpty;
+  final clear = await confirm(
+    context,
+    'Clear this sale?',
+    held
+        ? 'The held bill will be discarded and its reserved stock released.'
+        : 'All items and any exchange returns will be removed from the current bill.',
+    action: 'Clear',
+  );
+  if (!clear || !context.mounted || !identical(app.cart, draft)) return;
+  try {
+    await app.discardCart();
   } catch (error) {
     app.toast(errorText(error));
   }

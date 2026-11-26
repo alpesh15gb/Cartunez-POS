@@ -23,7 +23,7 @@
 // return of a kit line (returns.ts) puts its stocked components back into the
 // chosen restock or damaged bin, in proportion to the kits returned.
 import { getRecord, records, type RecordData } from "../db.js";
-import { adjust, fail, heldUnits, holdReserves, integer } from "../domain.js";
+import { adjust, checkOfflineStockPolicy, fail, pickAvailability, holdReserves, integer } from "../domain.js";
 import { registerSaleHook } from "../sale-pipeline.js";
 import type { KitComponent, SaleContext, SaleHook } from "../sale-types.js";
 
@@ -79,7 +79,7 @@ const kits: SaleHook = {
     // What the resumed parked sale (or job card) reserves in a bin, kit components
     // included; an expired hold reserves nothing, so it adds nothing back.
     const ownLines = ctx.hold && holdReserves(ctx.hold) ? ctx.hold.cart?.lines || [] : [];
-    const parked = (productId: string, binId: string) => heldUnits(ownLines, productId, binId);
+    const pick = (productId: string, binId: string) => pickAvailability(ctx.stock, ownLines, productId, binId);
     // Bins this kit's line reserved on the hold come first, so billing uses the reservation.
     const reservedFor = (productId: string, binId: string) =>
       ownLines
@@ -92,7 +92,11 @@ const kits: SaleHook = {
     for (const component of kit!.components) {
       const part = await productFor(ctx, component.productId);
       if (!part) fail(`Kit ${kit!.sku} lists an item that is no longer in the catalog. Edit the kit.`, 409);
-      if (part.onlineOnly) fail("Website-only item " + part.sku + " cannot be used in a counter kit.", 409);
+      const current = ctx.body.offline ? await getRecord(ctx.db, ctx.actor.organizationId, "product", part.id) : part;
+      if (!current) fail("Kit component " + part.sku + " is no longer in the catalog.", 409);
+      if (ctx.body.offline) checkOfflineStockPolicy(current, part);
+      if (current.salesStopped || part.salesStopped) fail("New sales are stopped for kit component " + part.sku + ".", 409);
+      if (current.onlineOnly || part.onlineOnly) fail("Website-only item " + part.sku + " cannot be used in a counter kit.", 409);
       if (isKit(part)) fail(`Kit ${kit!.sku} contains another kit. Edit the kit to list its parts directly.`, 409);
       if (part.serialTracked)
         fail(`Kit ${kit!.sku} contains serial-tracked ${part.sku}. Sell that part as its own line.`, 409);
@@ -104,8 +108,7 @@ const kits: SaleHook = {
       }
       // Take from the fullest sellable bins first.
       const free = (binId: string) =>
-        (ctx.stock.find((row: any) => row.productId === part.id && row.binId === binId)?.available || 0) +
-        parked(part.id, binId) - plain(part.id, binId) - (state.used.get(part.id + "|" + binId) || 0);
+        pick(part.id, binId).free - plain(part.id, binId) - (state.used.get(part.id + "|" + binId) || 0);
       const order = [...state.bins].sort(
         (a: string, b: string) => reservedFor(part.id, b) - reservedFor(part.id, a) || free(b) - free(a),
       );
@@ -120,9 +123,9 @@ const kits: SaleHook = {
         remaining -= take;
       }
       if (remaining > 0) {
-        if (!(ctx.reconcile || ctx.sellBeyondStock))
+        const binId = order.find(bin => !pick(part.id, bin).reservedByOthers);
+        if (!(ctx.reconcile || ctx.sellBeyondStock) || !binId)
           fail(`Not enough ${part.sku} in stock to make kit ${kit!.sku}.`, 409);
-        const binId = components.find((entry) => entry.productId === part.id)?.binId || order[0];
         const existing = components.find((entry) => entry.productId === part.id && entry.binId === binId);
         if (existing) existing.qty += remaining;
         else components.push({ productId: part.id, sku: part.sku, name: part.name, qty: remaining, binId } as KitComponent);

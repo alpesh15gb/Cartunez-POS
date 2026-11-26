@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { connectDatabase, migrate } from "../src/db.js";
+import { connectDatabase, getRecord, migrate, putRecord, records } from "../src/db.js";
 import { createApp, isCostKey } from "../src/app.js";
 import { seed } from "../src/seed.js";
 
@@ -262,6 +262,47 @@ test("a cashier's return lookup is exact, recent and without tender references",
     assert.ok((await call(`returns/lookup?q=${encodeURIComponent(partial)}`, manager)).json.length >= 1);
     assert.ok((await call("returns/lookup?q=9000000101", cashier)).json.some((i: any) => i.id === sale.id));
     assert.equal((await call("returns/lookup?q=000101", cashier)).json.length, 0);
+  } finally {
+    await app.close();
+    await db.close?.();
+  }
+});
+
+test("cashier approval cannot bypass the 180-day return posting limit", async () => {
+  const { db, app, call, login } = await setup();
+  try {
+    const cashier = await login("cashier");
+    const manager = await login("manager");
+    const shift = (await call("shifts/open", cashier, { openingCash: 0 })).json;
+    const sale = (await call("invoices", cashier, {
+      transactionId: randomUUID(), shiftId: shift.id,
+      lines: [{ productId: "filter", qty: 1, binId: "bin-a1" }],
+      tenders: [{ type: "Cash", amount: 10000000, confirmed: true }],
+    })).json;
+    const stored = (await getRecord(db, "demo", "invoice", sale.id))!;
+    // Issued invoices are immutable, so insert a historical copy as the fixture.
+    const oldInvoice = {
+      ...stored, id: "old-" + sale.id, number: stored.number + "-OLD",
+      transactionId: randomUUID(), createdAt: new Date(Date.now() - 181 * 86400000).toISOString(),
+    };
+    await putRecord(db, "demo", "invoice", oldInvoice, "pune");
+    const transactionId = randomUUID();
+    const approval = (await call("approvals", manager, {
+      action: "return", transactionId, subjectId: oldInvoice.id, reason: "Old invoice return",
+    })).json.id;
+    const body = {
+      transactionId, approvalId: approval, reason: "Old invoice return", refundType: "Cash",
+      lines: [{ lineId: oldInvoice.lines[0].id, quantity: 1, disposition: "restock", binId: "bin-a1" }],
+    };
+    const returnsBefore = (await records(db, "demo", "return", "pune")).length;
+    const refused = await call(`invoices/${oldInvoice.id}/returns`, cashier, body, 403);
+    assert.match(refused.json.error, /180 days/);
+    assert.equal((await records(db, "demo", "return", "pune")).length, returnsBefore);
+    await call("shifts/open", manager, { openingCash: 0 });
+    const accepted = await call(`invoices/${oldInvoice.id}/returns`, manager, {
+      ...body, transactionId: randomUUID(), approvalId: undefined,
+    });
+    assert.equal(accepted.json.invoiceId, oldInvoice.id);
   } finally {
     await app.close();
     await db.close?.();

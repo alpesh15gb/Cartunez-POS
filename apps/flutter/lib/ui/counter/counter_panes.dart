@@ -499,10 +499,11 @@ class PaymentDock extends StatelessWidget {
       builder: (context, _) {
         final lines = app.cart['lines'] as List;
         final exchange = exchangeReturns(app.cart).isNotEmpty;
+        final hasSale = lines.isNotEmpty || exchange;
         final exCredit = exchange ? exchangeCredit(app.cart) : 0;
         final bill = app.bill;
-        final blocker = lines.isEmpty ? null : checkoutBlocker(app);
-        final can = lines.isNotEmpty && blocker == null && app.canSell;
+        final blocker = hasSale ? checkoutBlocker(app) : null;
+        final can = hasSale && blocker == null && app.canSell;
         final scheme = Theme.of(context).colorScheme;
         final shell = shellOf(context);
         Future<void> run(Future<void> Function() action) async {
@@ -677,11 +678,7 @@ class DeskCartPane extends StatelessWidget {
                 ? const SizedBox.shrink()
                 : IconButton(
                     tooltip: 'Clear sale',
-                    onPressed: () async {
-                      if (await confirm(context, 'Clear this sale?', 'All items will be removed from the current bill.', action: 'Clear')) {
-                        app.clearCart();
-                      }
-                    },
+                    onPressed: () => clearCurrentSale(context),
                     icon: const Icon(Icons.delete_sweep_outlined),
                   ),
           ),
@@ -720,11 +717,7 @@ class TabletCartPane extends StatelessWidget {
                 ? const SizedBox.shrink()
                 : IconButton(
                     tooltip: 'Clear sale',
-                    onPressed: () async {
-                      if (await confirm(context, 'Clear this sale?', 'All items will be removed from the current bill.', action: 'Clear')) {
-                        app.clearCart();
-                      }
-                    },
+                    onPressed: () => clearCurrentSale(context),
                     icon: const Icon(Icons.delete_sweep_outlined),
                   ),
           ),
@@ -843,11 +836,7 @@ Future<void> openPhoneCart(BuildContext context) {
                       if (lines.isNotEmpty || hasExchange)
                         IconButton(
                           tooltip: 'Clear sale',
-                          onPressed: () async {
-                            if (await confirm(context, 'Clear this sale?', 'All items will be removed from the current bill.', action: 'Clear')) {
-                              app.clearCart();
-                            }
-                          },
+                          onPressed: () => clearCurrentSale(context),
                           icon: const Icon(Icons.delete_sweep_outlined),
                         ),
                       IconButton(tooltip: 'Close', onPressed: () => Navigator.pop(sheet), icon: const Icon(Icons.close)),
@@ -874,7 +863,9 @@ Future<void> openPhoneCart(BuildContext context) {
                     const SizedBox(height: 4),
                     if (lines.isEmpty)
                       EmptyState(
-                        message: hasExchange ? 'Exchange credit active.\nClose to add the replacement part.' : 'No items yet.',
+                        message: hasExchange
+                            ? 'Add a replacement part to complete the exchange.\nFor a refund without replacement, use Orders › Returns.'
+                            : 'No items yet.',
                         icon: hasExchange ? Icons.swap_horiz : Icons.inbox_outlined,
                       ),
                     for (var i = 0; i < lines.length; i++)

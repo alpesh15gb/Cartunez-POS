@@ -13,7 +13,9 @@ import type { Database, RecordData } from "./db.js";
 import { getRecord, putRecord, records } from "./db.js";
 import { adjust, allow, audit, fail, id, integer, inventory, reservingHolds, multiline, now, scoped, text, roundRatio, type Actor } from "./domain.js";
 import type { Post } from "./routes/types.js";
+import { captureBillEconomics, claimBillEconomics, landedLineTotals, productValues, restoreBillEconomics, type BillEconomics } from "./bill-economics.js";
 import { noteCost } from "./cost-changes.js"; // WS-E
+import { queueMagentoSync } from "./online-queue.js";
 import { refundBy } from "./returns.js"; // money and stock review: per-tender refunds
 
 
@@ -224,27 +226,49 @@ export async function partyBalances(db: Database, org: string, kind: "supplier" 
   return balances;
 }
 
-/** Creditable value of the next units, including their tax and their share
- * of the supplier's discount. Multiple lines for a SKU can have different costs. */
-function nonStockBillCredit(bill: RecordData, productId: string, returned: number, quantity: number) {
-  const gross = (l: any) => Number(l.amount ?? l.quantity * l.cost) +
-    Number(l.tax ?? (bill.gst ? roundRatio(l.quantity * l.cost, l.taxRate || 0, 10000) : 0));
-  const totalGross = bill.lines.reduce((n: number, l: any) => n + gross(l), 0);
-  if (!totalGross) return 0;
-  const discount = Math.min(totalGross, Number(bill.discount || 0));
-  let cumulative = 0, skip = returned, left = quantity, amount = 0;
-  for (const line of bill.lines) {
-    const value = gross(line);
-    const net = value - roundRatio(discount, cumulative + value, totalGross) + roundRatio(discount, cumulative, totalGross);
-    cumulative += value;
-    if (line.productId !== productId || !left) continue;
-    const before = Math.min(skip, line.quantity);
-    skip -= before;
-    const take = Math.min(left, line.quantity - before);
-    amount += roundRatio(net, before + take, line.quantity) - roundRatio(net, before, line.quantity);
-    left -= take;
+type CreditLine = { source: RecordData; net: number; returned: number; credited: number };
+type CreditAllocation = { line: CreditLine; quantity: number; serials: string[] };
+
+/** Allocate unidentified historical or website-only returns in original bill order. */
+function allocateReturn(candidates: CreditLine[], quantity: number, serials: string[]) {
+  const allocations: CreditAllocation[] = [];
+  let remaining = quantity;
+  for (const line of candidates) {
+    const matching = serials.filter(serial => line.source.serials?.includes(serial));
+    const take = Math.min(remaining, line.source.quantity - line.returned, serials.length ? matching.length : quantity);
+    if (take > 0) allocations.push({ line, quantity: take, serials: matching.slice(0, take) });
+    remaining -= take;
+    if (!remaining) break;
   }
-  return amount;
+  return { allocations, remaining };
+}
+
+function billCreditLines(bill: RecordData, earlier: RecordData[]) {
+  const gross = (l: RecordData) => Number(l.amount ?? l.quantity * l.cost) +
+    Number(l.tax ?? (bill.gst ? roundRatio(l.quantity * l.cost, l.taxRate || 0, 10000) : 0));
+  const totalGross = bill.lines.reduce((sum: number, l: RecordData) => sum + gross(l), 0);
+  let cumulative = 0;
+  const lines: CreditLine[] = bill.lines.map((source: RecordData) => {
+    const value = gross(source);
+    const discount = Math.min(totalGross, source.onlineOnly ? bill.discount || 0
+      : Math.max(0, (bill.discount || 0) - (bill.otherCharges || 0)));
+    const share = totalGross ? roundRatio(discount, cumulative + value, totalGross) - roundRatio(discount, cumulative, totalGross) : 0;
+    cumulative += value;
+    return { source, net: value - share, returned: 0, credited: 0 };
+  });
+  for (const old of earlier) {
+    const candidates = lines.filter(l => l.source.productId === old.productId && (!old.billLineId || l.source.id === old.billLineId));
+    const { allocations } = allocateReturn(candidates, old.quantity, old.serials || []);
+    let quantity = 0;
+    const amount = old.amount ?? old.cost * old.quantity;
+    for (const allocation of allocations) {
+      const next = quantity + allocation.quantity;
+      allocation.line.returned += allocation.quantity;
+      allocation.line.credited += roundRatio(amount, next, old.quantity) - roundRatio(amount, quantity, old.quantity);
+      quantity = next;
+    }
+  }
+  return lines;
 }
 
 /** Bill totals. GST (when the bill has it) is added per line on the cost before GST. */
@@ -253,10 +277,12 @@ function billTotals(lines: any[], gst: boolean, otherCharges: number, discount: 
     tax = 0;
   for (const line of lines) {
     line.amount = line.quantity * line.cost;
-    line.tax = gst ? roundRatio(line.amount * line.taxRate, 1, 10000) : 0;
+    if (!Number.isSafeInteger(line.amount)) fail("The purchase line amount is too large.");
+    line.tax = gst ? roundRatio(line.amount, line.taxRate, 10000) : 0;
     subtotal += line.amount;
     tax += line.tax;
   }
+  if (!Number.isSafeInteger(subtotal + tax + otherCharges)) fail("The purchase bill amount is too large.");
   const total = subtotal + tax + otherCharges - discount;
   if (total < 0) fail("The discount is larger than the bill.");
   return { subtotal, tax, total };
@@ -426,6 +452,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
           fail(`Only ${Math.max(outstanding - earlier, 0)} of ${product.name} are still due on that purchase order (the rest was already received).`);
       }
       const line = {
+        id: id("billline"),
         productId: product.id,
         sku: product.sku,
         name: product.name,
@@ -446,19 +473,13 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       lines.push(line);
     }
     const totals = billTotals(lines, gst, otherCharges, discount);
-    // Freight and discount are spread over the units by value, so stock cost is what the part really cost.
-    const spread = otherCharges - discount;
-    let allocated = 0,
-      cumulative = 0;
-    for (const line of lines) {
+    const landed = landedLineTotals(lines, otherCharges, discount);
+    const productEconomics = new Map<string, BillEconomics>();
+    for (const [index, line] of lines.entries()) {
       const product = await scoped(tx, actor, "product", line.productId);
-      cumulative += line.amount;
-      const next = totals.subtotal ? roundRatio(spread, cumulative, totals.subtotal) : 0;
-      const share = next - allocated;
-      allocated = next;
-      // On a GST bill the GST is claimed back, so it is not part of the stock cost.
-      // On a bill without GST, what was paid is the cost.
-      line.landedCost = Math.max(0, line.cost + roundRatio(share, 1, line.quantity));
+      const economics = productEconomics.get(product.id) ?? await captureBillEconomics(tx, actor.organizationId, product);
+      line.landedTotal = landed[index];
+      line.landedCost = roundRatio(line.landedTotal, 1, line.quantity);
       // WS-E: flag a supplier cost hike against the last purchase cost.
       const hike = await noteCost(tx, actor, product, line.cost, {
         kind: "bill", id: billId, label: billNumber ? `Bill ${billNumber}` : "Purchase bill", supplierId: supplier.id,
@@ -466,6 +487,8 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       if (hike) line.costHike = hike;
       product.cost = line.landedCost;
       if (line.mrp != null) product.retailPrice = line.mrp;
+      economics.after = productValues(product);
+      productEconomics.set(product.id, economics);
       await putRecord(tx, actor.organizationId, "product", product);
       for (const serial of line.serials) {
         const serialId = product.id + ":" + serial;
@@ -484,6 +507,10 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         : order.lines.some((l: any) => l.received > 0) ? "partial" : order.status;
       await putRecord(tx, actor.organizationId, "purchaseOrder", order, actor.branchId);
     }
+    const retailUpdates = new Set(lines.filter(line => line.mrp != null).map(line => line.productId));
+    for (const economics of productEconomics.values())
+      await claimBillEconomics(tx, actor.organizationId, billId, economics, retailUpdates.has(economics.productId));
+    if (retailUpdates.size) await queueMagentoSync(tx, actor.organizationId, retailUpdates, "Supplier bill selling price");
     const bill = {
       id: billId,
       branchId: actor.branchId,
@@ -495,6 +522,7 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       interState: gst && body.interState === true,
       purchaseOrderId: order?.id || null,
       lines,
+      productEconomics: [...productEconomics.values()],
       otherCharges,
       discount,
       ...totals,
@@ -508,9 +536,16 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     (bill as any).costHikes = lines.filter((l) => l.costHike).length; // WS-E
     await putRecord(tx, actor.organizationId, "purchaseBill", bill, actor.branchId);
     await audit(tx, actor, "purchase-bill", billId, `Bill ${billNumber || "(no number)"} from ${supplier.name}`, { total: totals.total });
-    if (body.paidNow && Number(body.paidNow.amount) > 0) {
-      if (Number(body.paidNow.amount) > totals.total) fail("The amount paid now is more than the bill.");
-      await payment(tx, actor, { ...body.paidNow, date: billDate, notes: `Paid on bill ${billNumber}`.trim() }, "supplier", supplier.id, { billId });
+    const paidNow = body.paidNow == null ? 0 : integer(body.paidNow.amount, "Amount paid now");
+    if (paidNow > 0) {
+      if (paidNow > totals.total) fail("The amount paid now is more than the bill.");
+      await payment(tx, actor, {
+        amount: paidNow,
+        mode: body.paidNow.mode,
+        fromDrawer: body.paidNow.fromDrawer,
+        reference: body.paidNow.reference,
+        refund: false,
+      }, "supplier", supplier.id, { billId, date: billDate, notes: `Paid on bill ${billNumber}`.trim() });
     }
     return bill;
   });
@@ -538,6 +573,13 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
         await putRecord(tx, actor.organizationId, "purchaseOrder", order, actor.branchId);
       }
     }
+    await restoreBillEconomics(tx, actor.organizationId, bill);
+    for (const line of bill.lines) {
+      if (!line.costHike?.costChangeId) continue;
+      const change = await getRecord(tx, actor.organizationId, "costChange", line.costHike.costChangeId);
+      if (change?.status === "open")
+        await putRecord(tx, actor.organizationId, "costChange", { ...change, status: "cancelled", resolvedAt: now(), resolvedBy: actor.id }, actor.branchId);
+    }
     const voided = { ...bill, voided: true, voidReason: reason, voidedAt: now(), voidedBy: actor.id };
     await putRecord(tx, actor.organizationId, "purchaseBill", voided, actor.branchId);
     await audit(tx, actor, "purchase-bill-void", bill.id, reason);
@@ -554,10 +596,11 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
     if (!Array.isArray(body.lines) || !body.lines.length) fail("Add the parts being returned.");
     const returnId = id("preturn");
     const lines = [];
-    const inRequest = new Map<string, number>();
     const earlierReturns = bill
       ? (await records(tx, actor.organizationId, "purchaseReturn")).filter((r) => r.billId === bill.id).flatMap((r) => r.lines)
       : [];
+    const creditLines = bill ? billCreditLines(bill, earlierReturns) : [];
+    let billCreditRemaining = bill ? Math.max(0, bill.total - earlierReturns.reduce((sum, l) => sum + (l.amount ?? l.cost * l.quantity), 0)) : 0;
     const withdraw = await supplierWithdrawal(tx, actor);
     let total = 0;
     for (const input of body.lines) {
@@ -570,41 +613,48 @@ export function purchasingRoutes(app: FastifyInstance, db: Database, post: Post)
       const nonStock = !!product.onlineOnly || (sourceLines.length > 0 && sourceLines.every((l: any) => l.onlineOnly));
       const bin = nonStock ? null : await scoped(tx, actor, "location", input.binId);
       const quantity = integer(input.quantity, "Quantity", 1, 1000000);
-      let cost = integer(input.cost === "" ? product.cost : input.cost ?? product.cost, "Unit cost");
-      let creditAmount: number | undefined;
-      if (bill) {
-        const billLines = sourceLines;
-        if (!billLines.length) fail(`${product.name} is not on that bill.`);
-        const billed = billLines.reduce((n: number, l: any) => n + l.quantity, 0);
-        const returned = earlierReturns.filter((l: any) => l.productId === product.id).reduce((n: number, l: any) => n + l.quantity, 0)
-          + (inRequest.get(product.id) || 0);
-        if (quantity > billed - returned) fail(`Only ${billed - returned} of ${product.name} can be returned against this bill.`);
-        // Credit what the supplier charged per unit on that bill (GST included on a GST bill), never more.
-        if (nonStock) {
-          const priorAmount = [...earlierReturns, ...lines].filter((l) => l.productId === product.id)
-            .reduce((sum, l) => sum + Number(l.amount ?? l.quantity * l.cost), 0);
-          const remainingCredit = Math.max(0, nonStockBillCredit(bill, product.id, 0, billed) - priorAmount);
-          creditAmount = Math.min(remainingCredit, nonStockBillCredit(bill, product.id, returned, quantity));
-          if (input.cost != null && input.cost !== "") creditAmount = Math.min(creditAmount, cost * quantity);
-          cost = roundRatio(creditAmount, 1, quantity);
-        } else {
-          const line = billLines[0];
-          const charged = line.cost + (bill.gst ? roundRatio(line.cost * (line.taxRate || 0), 1, 10000) : 0);
-          cost = input.cost == null || input.cost === "" ? charged : Math.min(cost, charged);
-        }
-      }
-      inRequest.set(product.id, (inRequest.get(product.id) || 0) + quantity);
+      const statedCost = input.cost == null || input.cost === "" ? null : integer(input.cost, "Unit cost");
       const serials: string[] = Array.isArray(input.serials) ? input.serials.map((s: any) => text(s, "serial")) : [];
       if (product.serialTracked && !nonStock) {
         if (serials.length !== quantity || new Set(serials).size !== quantity)
           fail("Enter one unique serial number per returned unit of " + product.name + ".");
-        if (bill && serials.some(serial => !sourceLines.some((l: any) => l.serials?.includes(serial))))
-          fail("Choose serials supplied on the original bill.", 409);
       } else if (serials.length) fail("This return line does not take serial numbers.");
+      const base = { productId: product.id, sku: product.sku, name: product.name,
+        binId: bin?.id || null, ...(bin ? {} : { onlineOnly: true }) };
+      if (bill) {
+        if (!sourceLines.length) fail(product.name + " is not on that bill.");
+        const selected = input.billLineId;
+        const candidates = creditLines.filter(l => l.source.productId === product.id && (!selected || l.source.id === selected));
+        if (!candidates.length) fail("That bill line is not for " + product.name + ".");
+        if (!selected && !nonStock && new Set(candidates.map(l => [l.source.cost, l.source.taxRate || 0].join("/"))).size > 1) {
+          if (candidates.some(l => !l.source.id)) fail("This older bill has differently priced lines without line IDs. The original line cannot be identified.", 409);
+          fail("Choose the bill line for " + product.name + "; duplicate lines have different costs.");
+        }
+        if (serials.some(serial => !candidates.some(l => l.source.serials?.includes(serial))))
+          fail("Choose serials supplied on the original bill line.", 409);
+        const { allocations, remaining } = allocateReturn(candidates, quantity, serials);
+        if (remaining) fail("Only " + (quantity - remaining) + " of " + product.name + " can be returned against the selected bill lines.");
+        for (const { line, quantity: units, serials: selectedSerials } of allocations) {
+          const next = line.returned + units;
+          let amount = Math.min(billCreditRemaining, Math.max(0, line.net - line.credited),
+            roundRatio(line.net, next, line.source.quantity) - roundRatio(line.net, line.returned, line.source.quantity));
+          if (statedCost != null) amount = Math.min(amount, statedCost * units);
+          lines.push({ ...base, quantity: units, amount, cost: roundRatio(amount, 1, units), serials: selectedSerials,
+            ...(line.source.id ? { billLineId: line.source.id } : {}) });
+          line.returned = next;
+          line.credited += amount;
+          billCreditRemaining -= amount;
+          total += amount;
+        }
+      } else {
+        const cost = statedCost ?? product.cost;
+        const amount = cost * quantity;
+        if (!Number.isSafeInteger(amount)) fail("The supplier credit amount is too large.");
+        lines.push({ ...base, quantity, cost, amount, serials });
+        total += amount;
+      }
+      if (!Number.isSafeInteger(total)) fail("The supplier credit total is too large.");
       if (bin) await withdraw(product.id, bin.id, quantity, serials, "Returned to supplier", returnId);
-      lines.push({ productId: product.id, sku: product.sku, name: product.name, quantity, cost, binId: bin?.id || null, amount: creditAmount ?? quantity * cost, serials,
-        ...(bin ? {} : { onlineOnly: true }) });
-      total += creditAmount ?? quantity * cost;
     }
     const record = {
       id: returnId,

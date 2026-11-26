@@ -18,6 +18,7 @@ class CartState extends ChangeNotifier {
   Json cart = emptyCart();
   final terms = CartTerms._();
   String? _posting;
+  String? _releasingHold;
   bool _parking = false;
   Timer? _cartTimer;
 
@@ -25,16 +26,55 @@ class CartState extends ChangeNotifier {
 
   List<Map> get lines => (cart['lines'] as List).cast<Map>();
   int get units => (cart['lines'] as List).fold<int>(0, (total, line) => total + (line['qty'] as int));
+  Set<String> get pendingHoldIds => {
+    for (final payment in _app.syncState.pending)
+      if (payment['transaction']['holdId'] is String) payment['transaction']['holdId'] as String,
+  };
 
-  void updateCart(Json changes) => replaceCart({...cart, ...changes});
+  void updateCart(Json changes) {
+    final next = {...cart, ...changes};
+    if (!_same(cart['customerId'], next['customerId'])) next.remove('discountApprovalId');
+    replaceCart(next);
+  }
 
   void replaceCart(Json value) {
-    _set(value);
+    _set(Map<String, dynamic>.from(value));
     _cartTimer?.cancel();
     _cartTimer = Timer(const Duration(milliseconds: 300), _app.syncState._saveWorkspace);
   }
 
   void clearCart() => replaceCart(emptyCart());
+
+  Future<void> discardCart() async {
+    final draft = cart;
+    final holdId = '${draft['holdId'] ?? ''}';
+    if (_parking) throw ApiError('Wait for this bill to finish holding before clearing it.', 409);
+    if (holdId.isEmpty) {
+      clearCart();
+      return;
+    }
+    if (!_app.syncState.online) throw OfflineError('Reconnect to release this held bill before clearing it.');
+    if (_releasingHold != null) throw ApiError('A held bill is already being released.', 409);
+    final cashier = _app.session;
+    _releasingHold = holdId;
+    try {
+      try {
+        await _app.api('/holds/$holdId', method: 'DELETE');
+      } on ApiError catch (error) {
+        // Another counter may already have removed or billed this hold.
+        if (error.status != 404) rethrow;
+      }
+      if (!identical(cashier, _app.session)) return;
+      if (identical(cart, draft)) {
+        clearCart();
+      } else if (cart['holdId'] == holdId) {
+        updateCart({'holdId': null});
+      }
+      await _app.sync(afterMutation: true);
+    } finally {
+      if (identical(cashier, _app.session)) _releasingHold = null;
+    }
+  }
 
   /// Sets the cart and tells exactly the listeners that care.
   void _set(Json value) {
@@ -56,12 +96,18 @@ class CartState extends ChangeNotifier {
   void _reset() {
     _cartTimer?.cancel();
     _posting = null;
+    _releasingHold = null;
     _set(emptyCart());
   }
 
   /// [meta]: label, customerName, regNo, expiresAt shown in the held-bills drawer (WS-A).
   Future<void> parkCart({Json meta = const {}}) async {
-    if (_parking || _posting != null) return;
+    if (_parking || _posting != null || (_releasingHold != null && _releasingHold == cart['holdId'])) {
+      throw ApiError('Wait for the previous counter action to finish before holding this bill.', 409);
+    }
+    if ((cart['returns'] as List? ?? const []).isNotEmpty) {
+      throw ApiError('Complete or remove the exchange instead of holding it.', 409);
+    }
     final draft = cart;
     final cashier = _app.session;
     _parking = true;
@@ -100,6 +146,8 @@ class CartState extends ChangeNotifier {
     if (s == null || !sync._validSession(s)) throw ApiError('Sign in again before taking payment.', 401);
     if (!sync.online) throw OfflineError('Reconnect before taking payment. Your cart is saved on this counter.');
     if (_parking) throw ApiError('Wait for the sale to finish parking.', 409);
+    if (_releasingHold != null && _releasingHold == cart['holdId'])
+      throw ApiError('Wait for the held bill to be released before taking payment.', 409);
     if (_posting != null) throw ApiError('The previous payment is still being submitted.', 409);
     final bill = _app.currentQuote();
     if (bill.total != expectedTotal) throw ApiError('The bill total changed. Reopen checkout to review the amount.', 409);
@@ -128,14 +176,16 @@ class CartState extends ChangeNotifier {
     _posting = transactionId;
     sync.pending.add(entry);
     cart = emptyCart();
+    final clearedCart = cart;
     try {
       await sync._saveWorkspace();
     } catch (_) {
       if (identical(sync.session, s)) {
         sync.pending.remove(entry);
-        cart = originalCart;
+        final activeCart = cart;
+        if (identical(cart, clearedCart)) cart = originalCart;
         _posting = null;
-        _changedAll(originalCart);
+        _changedAll(activeCart);
       }
       throw BillingError('Cannot save this sale on the counter. Check available storage before taking payment.');
     }
@@ -162,12 +212,26 @@ class CartState extends ChangeNotifier {
     } on ApiError catch (error) {
       if (!identical(sync.session, s)) rethrow;
       if (error.rejected) {
-        sync.pending.remove(entry);
-        final empty = cart;
-        cart = originalCart;
-        await sync._saveWorkspace();
-        _changedAll(empty);
-        unawaited(_app.sync(afterMutation: true));
+        final activeCart = cart;
+        if (identical(cart, clearedCart)) {
+          sync.pending.remove(entry);
+          cart = originalCart;
+        } else {
+          // Keep a rejected payment visible in Sync & audit when a newer cart
+          // already occupies the register, so its reference can be reconciled.
+          entry['error'] = error.message;
+        }
+        try {
+          await sync._saveWorkspace();
+        } catch (_) {
+          if (identical(sync.session, s)) {
+            _app.toast('Could not save the latest register changes. Check available storage.');
+          }
+        }
+        if (identical(sync.session, s)) {
+          _changedAll(activeCart);
+          unawaited(_app.sync(afterMutation: true));
+        }
         rethrow;
       }
       if (error.status == 401) {

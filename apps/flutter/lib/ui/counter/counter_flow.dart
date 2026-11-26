@@ -7,6 +7,7 @@ import '../../core/billing.dart';
 import '../../core/receipt_print.dart';
 import '../../main.dart';
 import '../../state/app_state.dart';
+import '../orders/exchange.dart' show exchangeCustomerIssue;
 import '../screens/people.dart' show editContact;
 import '../screens/receipt.dart';
 import '../shell.dart';
@@ -27,11 +28,23 @@ bool validRegNo(String value) => value.isEmpty || RegExp(r'^[A-Z0-9]{4,12}$').ha
 /// Why the current sale cannot be paid yet, or null when it can.
 String? checkoutBlocker(AppState app) {
   final lines = (app.cart['lines'] as List).cast<Map>();
-  if (lines.isEmpty) return 'Add an item to the sale first.';
+  final returns = app.cart['returns'] as List? ?? const [];
+  if (lines.isEmpty && returns.isEmpty) return 'Add an item to the sale first.';
+  if (lines.isEmpty) return 'Add a replacement item, or use Orders › Returns for a refund.';
+  final customerIssue = exchangeCustomerIssue(app.cart);
+  if (customerIssue != null) return customerIssue;
   try {
     app.currentQuote();
   } catch (error) {
     return errorText(error);
+  }
+  for (final line in lines) {
+    final product = app.productById('${line['productId']}');
+    if (product?['serialTracked'] != true) continue;
+    final serials = (line['serials'] as List? ?? const []).map((e) => '$e').toList();
+    if (serials.length != line['qty'] || serials.toSet().length != serials.length) {
+      return 'Select one unique serial number for each ${product!['name']} unit.';
+    }
   }
   final vehicle = app.cart['vehicle'] as Map?;
   if (vehicle != null &&
@@ -71,7 +84,11 @@ Future<void> afterSale(BuildContext context, Json invoice, {bool print = false})
   }
   if (!context.mounted) return;
   CounterScope.read(context)?.select(null);
-  await showDialog<void>(context: context, builder: (_) => AppScope(state: app, child: SaleDoneDialog(invoice: invoice, printed: autoSilent)));
+  final viewReceipt = await showDialog<bool>(
+    context: context,
+    builder: (_) => AppScope(state: app, child: SaleDoneDialog(invoice: invoice, printed: autoSilent)),
+  );
+  if (viewReceipt == true && context.mounted) await showReceipt(context, invoice);
   if (context.mounted) focusScan(context);
 }
 
@@ -135,10 +152,7 @@ class SaleDoneDialog extends StatelessWidget {
                 label: const Text('Share PDF'),
               ),
               TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  showReceipt(context, invoice);
-                },
+                onPressed: () => Navigator.pop(context, true),
                 child: const Text('View receipt'),
               ),
             ]),
@@ -164,6 +178,10 @@ Future<void> parkWithPrompt(BuildContext context) async {
   if (!app.canSell) return;
   if ((app.cart['lines'] as List).isEmpty) {
     app.toast('Add an item before holding the bill.');
+    return;
+  }
+  if ((app.cart['returns'] as List? ?? const []).isNotEmpty) {
+    app.toast('Complete or remove the exchange instead of holding it.');
     return;
   }
   if (!app.online) {
@@ -543,9 +561,16 @@ class _CustomerVehicleDialogState extends State<CustomerVehicleDialog> {
   }
 }
 
-bool _sameVehicle(Map? a, Map? b) =>
-    (a == null && b == null) ||
-    (a != null && b != null && a['make'] == b['make'] && a['model'] == b['model'] && '${a['year']}' == '${b['year']}' && a['id'] == b['id']);
+bool _sameVehicle(Map? a, Map? b) {
+  if (a == null || b == null) return a == null && b == null;
+  const fields = [
+    'id', 'customerVehicleId', 'customerId', 'make', 'model', 'year',
+    'engine', 'fuel', 'trim', 'drivetrain', 'market',
+  ];
+  return fields.every((field) => '${a[field] ?? ''}' == '${b[field] ?? ''}') &&
+      normalizeRegNo('${a['regNo'] ?? a['regKey'] ?? ''}') ==
+          normalizeRegNo('${b['regNo'] ?? b['regKey'] ?? ''}');
+}
 
 /// Staff who can be tagged on a line ("who sold / fitted this"); no commission.
 List<(String, String)> staffChoices(AppState app) {

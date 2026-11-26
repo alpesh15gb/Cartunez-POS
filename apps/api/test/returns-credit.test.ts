@@ -232,3 +232,55 @@ test("Returns, exchanges, credit limit and advances", async () => {
     await app.close();
   }
 });
+
+test("an exchange cannot move advance value to another customer", async () => {
+  const db = await connectDatabase({ memory: true });
+  await migrate(db);
+  await seed(db);
+  const app = await createApp(db, {});
+  try {
+    const call = async (path: string, body: any, token?: string, status = 200, method = "POST") => {
+      const response = await app.inject({
+        method: method as any, url: "/api/v1/" + path, payload: body,
+        headers: token ? { authorization: "Bearer " + token } : {},
+      });
+      assert.equal(response.statusCode, status, `${path}: ${response.body}`);
+      return response.json();
+    };
+    const manager = (await call("auth/login", { email: "manager@motorline.local", password: "MotorlineDemo123!" })).token;
+    const cashier = (await call("auth/login", { email: "cashier@motorline.local", password: "MotorlineDemo123!" })).token;
+    const shift = await call("shifts/open", { openingCash: 0 }, cashier);
+    const part = await call("products", { name: "Advance exchange part", retailPrice: 100, taxRate: 0 }, manager);
+    await call("inventory/adjust", {
+      transactionId: randomUUID(), productId: part.id, binId: "bin-a1", quantity: 2, reason: "Opening stock",
+    }, manager);
+    const originalCustomer = await call("customers", { name: "Original Buyer", phone: "9876500011" }, cashier);
+    const otherCustomer = await call("customers", { name: "Other Buyer", phone: "9876500012" }, cashier);
+    await call(`customers/${originalCustomer.id}/advances`, { amount: 100, mode: "Cash" }, cashier);
+    const original = await call("invoices", {
+      transactionId: randomUUID(), shiftId: shift.id, customerId: originalCustomer.id,
+      lines: [{ productId: part.id, qty: 1, binId: "bin-a1" }],
+      tenders: [{ type: "Advance", amount: 100 }],
+    }, cashier);
+    const exchange = (customerId: string) => ({
+      transactionId: randomUUID(), shiftId: shift.id, customerId,
+      lines: [{ productId: part.id, qty: 1, binId: "bin-a1" }],
+      returns: [{ invoiceId: original.id, lineId: original.lines[0].id, qty: 1, disposition: "restock" }],
+      tenders: [{ type: "Cash", amount: 0, confirmed: true }],
+    });
+    const invoicesBefore = (await records(db, "demo", "invoice", "pune")).length;
+    const returnsBefore = (await records(db, "demo", "return", "pune")).length;
+    const refused = await call("invoices", exchange(otherCustomer.id), manager, 409);
+    assert.match(refused.error, /same customer/i);
+    assert.equal((await records(db, "demo", "invoice", "pune")).length, invoicesBefore);
+    assert.equal((await records(db, "demo", "return", "pune")).length, returnsBefore);
+    assert.equal((await call(`customers/${otherCustomer.id}/summary`, undefined, manager, 200, "GET")).balance, 0);
+    const accepted = await call("invoices", exchange(originalCustomer.id), manager);
+    assert.equal(accepted.customerId, originalCustomer.id);
+    assert.equal(accepted.exchange.credit, 100);
+    assert.equal(accepted.exchange.applied, 100);
+  } finally {
+    await app.close();
+    await db.close();
+  }
+});

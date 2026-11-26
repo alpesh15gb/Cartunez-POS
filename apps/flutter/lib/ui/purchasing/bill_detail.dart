@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/billing.dart';
 import '../../main.dart';
+import '../../state/app_state.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import '../screens/labels.dart';
@@ -63,7 +64,7 @@ Future<void> showBill(BuildContext context, Json bill) async {
               final labels = <({LabelItem item, int quantity})>[];
               for (final l in bill['lines'] as List) {
                 final part = app.productById('${l['productId']}');
-                if (part == null) continue;
+                if (part == null || isOnlineOnly(part)) continue;
                 labels.add((item: productLabel(app, part, binId: '${l['binId']}'), quantity: l['quantity'] as int));
               }
               try {

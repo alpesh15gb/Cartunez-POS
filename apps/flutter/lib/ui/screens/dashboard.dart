@@ -31,8 +31,9 @@ class _TodaySummary extends StatelessWidget {
       return d != null && d.year == today.year && d.month == today.month && d.day == today.day;
     }
 
-    final sales = app.list('invoices').where((i) => isToday(i['createdAt'])).toList();
-    final refunds = [...app.list('returns'), ...app.list('coreReturns')].where((r) => isToday(r['createdAt']) && (app.role != 'cashier' || r['userId'] == app.session?.userId));
+    bool belongsToCashier(Json row) => app.role != 'cashier' || row['userId'] == app.session?.userId;
+    final sales = app.list('invoices').where((i) => isToday(i['createdAt']) && belongsToCashier(i)).toList();
+    final refunds = [...app.list('returns'), ...app.list('coreReturns')].where((r) => isToday(r['createdAt']) && belongsToCashier(r)).toList();
     final gross = sales.fold<int>(0, (n, i) => n + (i['total'] as int));
     final refunded = refunds.fold<int>(0, (n, r) => n + (r['total'] as int));
     final low = app.list('reorderSuggestions');

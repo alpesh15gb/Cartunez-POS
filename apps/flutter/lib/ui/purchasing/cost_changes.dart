@@ -126,7 +126,11 @@ class _CostChangesScreenState extends State<CostChangesScreen> {
                     },
                     child: const Text('Keep price'),
                   ),
-                if (c['status'] != 'open') StatusChip(c['status'] == 'priceUpdated' ? 'Price updated' : 'Kept price'),
+                if (c['status'] != 'open') StatusChip(switch (c['status']) {
+                  'priceUpdated' => 'Price updated',
+                  'cancelled' => 'Bill cancelled',
+                  _ => 'Kept price',
+                }),
               ],
             ),
         ]);

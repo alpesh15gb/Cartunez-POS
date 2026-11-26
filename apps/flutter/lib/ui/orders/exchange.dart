@@ -24,12 +24,21 @@ List<Json> exchangeReturns(Json cart) =>
 /// Credit for everything coming back on the counter bill.
 int exchangeCredit(Json cart) => exchangeReturns(cart).fold(0, (n, r) => n + ((r['credit'] ?? 0) as int));
 
+String? exchangeCustomerIssue(Json cart) {
+  final customer = '${cart['customerId'] ?? ''}';
+  for (final item in cart['returns'] as List? ?? const []) {
+    // Older locally saved exchanges can lack this field; the API still checks the invoice.
+    if ((item as Map).containsKey('invoiceCustomerId') && '${item['invoiceCustomerId'] ?? ''}' != customer) {
+      return 'Use the original bill customer before paying for this exchange.';
+    }
+  }
+  return null;
+}
+
 /// Puts the chosen items of [invoice] on the counter as an exchange.
 void addExchangeReturns(AppState app, Json invoice, List<Json> chosen, String reason) {
-  final cart = app.cart;
-  final customerId = '${cart['customerId'] ?? ''}'.isEmpty ? (invoice['customerId'] ?? '') : cart['customerId'];
   app.updateCart({
-    'customerId': customerId,
+    'customerId': invoice['customerId'] ?? '',
     'returnReason': reason.isEmpty ? 'Exchange' : reason,
     'returns': [
       for (final c in chosen)
@@ -43,6 +52,7 @@ void addExchangeReturns(AppState app, Json invoice, List<Json> chosen, String re
           'name': c['name'],
           'qty': c['quantity'],
           'disposition': c['disposition'],
+          if (c['onlineOnly'] == true) 'onlineOnly': true,
           'serials': c['serials'],
           if (c['supplierId'] != null) 'supplierId': c['supplierId'],
           'credit': c['credit'],
@@ -84,7 +94,8 @@ class ExchangeReturnsPanel extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w700, color: Brand.forest)),
             for (final (i, r) in returns.indexed)
               Row(children: [
-                Expanded(child: Text('${r['name']} × ${r['qty']} · ${dispositionLabels[r['disposition']] ?? ''}')),
+                Expanded(child: Text('${r['name']} × ${r['qty']} · ${r['onlineOnly'] == true && r['disposition'] == 'restock'
+                    ? 'Outside shop stock' : dispositionLabels[r['disposition']] ?? ''}')),
                 Text('−${app.money(r['credit'] as num?)}', style: const TextStyle(fontWeight: FontWeight.w700)),
                 IconButton(
                   tooltip: 'Remove from exchange',
@@ -125,11 +136,21 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
   final reference = TextEditingController();
   final approval = TextEditingController();
   late final TextEditingController place;
+  late final Object? transactionId;
+  late final Object? selectedReturns;
   bool busy = false;
   String? error;
 
   int get credit => exchangeCredit(context.appRead.cart);
   int get net => widget.total - credit;
+
+  String? _draftIssue(AppState app) {
+    final draft = app.cart;
+    if (draft['transactionId'] != transactionId || !identical(draft['returns'], selectedReturns)) {
+      return 'The exchange changed. Reopen checkout to review it.';
+    }
+    return exchangeCustomerIssue(draft);
+  }
 
   List<String> get methods {
     final app = context.appRead;
@@ -138,7 +159,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
     // Credit back to an account needs the original bill's customer; paying on credit needs this bill's customer.
     final account = net >= 0
         ? app.customerById('${cart['customerId']}') != null
-        : returns.isNotEmpty && returns.first['invoiceCustomerId'] != null;
+        : returns.isNotEmpty && '${returns.first['invoiceCustomerId'] ?? ''}'.isNotEmpty;
     return [if (net < 0) 'Original', ...app.tenderTypes, if (account) 'Credit'];
   }
 
@@ -146,6 +167,8 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
   void initState() {
     super.initState();
     final app = context.appRead;
+    transactionId = app.cart['transactionId'];
+    selectedReturns = app.cart['returns'];
     method = methods.first;
     place = TextEditingController(
         text: '${app.customerById('${app.cart['customerId']}')?['stateCode'] ?? app.business['stateCode'] ?? ''}');
@@ -162,7 +185,10 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
 
   Future<void> _complete() async {
     final app = context.appRead;
+    if (busy || !app.online) return;
     setState(() => error = null);
+    final draftIssue = _draftIssue(app);
+    if (draftIssue != null) return setState(() => error = draftIssue);
     final external = method == 'Card' || method == 'UPI';
     int? cashAmount;
     if (net > 0 && method == 'Cash') {
@@ -199,6 +225,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
   @override
   Widget build(BuildContext context) {
     final app = context.app;
+    final draftIssue = _draftIssue(app);
     final list = methods;
     if (!list.contains(method)) method = list.first;
     final cashParsed = net > 0 && method == 'Cash' ? parsePaymentAmount(cashReceived.text) : null;
@@ -209,7 +236,7 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
             .where((v) => v >= net)
             .take(4)
             .toList();
-    return AlertDialog(
+    return PopScope(canPop: !busy, child: AlertDialog(
       scrollable: true,
       title: const Text('Exchange'),
       content: SizedBox(
@@ -229,7 +256,10 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
                 ChoiceChip(
                   label: Text(m == 'Original' ? 'Same as paid' : m == 'Credit' ? (net > 0 ? 'On account' : 'Store credit') : m),
                   selected: method == m,
-                  onSelected: (_) => setState(() => method = m),
+                  onSelected: busy || method == m ? null : (_) => setState(() {
+                    method = m;
+                    reference.clear();
+                  }),
                 ),
             ]),
           ],
@@ -261,9 +291,14 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: FilledButton.tonalIcon(
-                onPressed: busy
+                onPressed: busy || !app.online || draftIssue != null
                     ? null
                     : () async {
+                        final issue = _draftIssue(app);
+                        if (issue != null) {
+                          setState(() => error = issue);
+                          return;
+                        }
                         final ref = await showUpiQr(context, amount: net, note: 'Exch ${app.cart['transactionId']}'.substring(0, 14));
                         if (ref != null && mounted) setState(() => reference.text = ref);
                       },
@@ -286,19 +321,19 @@ class _ExchangeCheckoutDialogState extends State<ExchangeCheckoutDialog> {
             const SizedBox(height: 8),
             TextField(controller: place, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Place of supply (state code)')),
           ],
-          if (error != null)
-            Padding(padding: const EdgeInsets.only(top: 10), child: Text(error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600))),
+          if (draftIssue != null || error != null)
+            Padding(padding: const EdgeInsets.only(top: 10), child: Text(draftIssue ?? error!, style: const TextStyle(color: Brand.danger, fontWeight: FontWeight.w600))),
         ]),
       ),
       actions: [
         TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton.icon(
-          onPressed: busy || !app.online ? null : _complete,
+          onPressed: busy || !app.online || draftIssue != null ? null : _complete,
           icon: const Icon(Icons.check),
           label: Text(app.online ? 'Complete exchange' : 'Reconnect to complete'),
         ),
       ],
-    );
+    ));
   }
 }
 

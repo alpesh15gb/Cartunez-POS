@@ -51,6 +51,7 @@ class _ReturnsPageState extends State<ReturnsPage> {
   List<Json>? results;
   String? error;
   bool busy = false;
+  int _searchRequest = 0;
 
   @override
   void dispose() {
@@ -59,19 +60,26 @@ class _ReturnsPageState extends State<ReturnsPage> {
   }
 
   Future<void> _find([String? text]) async {
+    if (!mounted) return;
     if (text != null) query.text = text;
-    if (query.text.trim().length < 2) return setState(() => error = 'Enter the invoice number, phone number or serial number.');
+    final app = context.appRead;
+    final request = ++_searchRequest;
+    final queryText = query.text.trim();
+    final problem = !app.online ? 'Reconnect to look up bills for a return.'
+        : queryText.length < 2 ? 'Enter the invoice number, phone number or serial number.' : null;
     setState(() {
-      busy = true;
-      error = null;
+      busy = problem == null;
+      error = problem;
+      results = null;
     });
+    if (problem != null) return;
     try {
-      final found = await findReturnable(context.appRead, query.text);
-      if (mounted) setState(() => results = found);
+      final found = await findReturnable(app, queryText);
+      if (mounted && request == _searchRequest) setState(() => results = found);
     } catch (e) {
-      if (mounted) setState(() => error = errorText(e));
+      if (mounted && request == _searchRequest) setState(() => error = errorText(e));
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted && request == _searchRequest) setState(() => busy = false);
     }
   }
 
@@ -93,6 +101,16 @@ class _ReturnsPageState extends State<ReturnsPage> {
               labelText: 'Invoice number, receipt barcode, phone or serial',
               prefixIcon: Icon(Icons.search),
             ),
+            onChanged: (_) {
+              _searchRequest++;
+              if (busy || error != null || results != null) {
+                setState(() {
+                  busy = false;
+                  error = null;
+                  results = null;
+                });
+              }
+            },
             onSubmitted: (_) => _find(),
           ),
         ),
@@ -111,13 +129,16 @@ class _ReturnsPageState extends State<ReturnsPage> {
       ]),
       if (!app.online)
         const Padding(padding: EdgeInsets.only(top: 8), child: Text('Reconnect to look up bills for a return.')),
-      if (error != null)
+      if (error != null && app.online)
         Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: Brand.danger))),
       const SizedBox(height: 16),
+      if (busy) const LinearProgressIndicator(),
       if (rows != null)
         DataList(
           rows: rows,
-          empty: 'No bill found. Check the number, or try the customer\'s phone number.',
+          empty: app.role == 'cashier'
+              ? 'No matching bill in the last 180 days. Ask a manager about older receipts.'
+              : 'No bill found. Check the number, or try the customer\'s phone number.',
           onTap: (row) => startReturn(context, row),
           columns: [
             Col('Invoice', (r) => Text('${r['number']}', style: const TextStyle(fontWeight: FontWeight.w700))),
@@ -273,6 +294,7 @@ class ReturnDialogState extends State<ReturnDialog> {
               'name': l['name'],
               'quantity': _qty(l),
               'disposition': disposition['${l['lineId']}'],
+              if (l['onlineOnly'] == true) 'onlineOnly': true,
               'serials': serials['${l['lineId']}']!.toList(),
               if (disposition['${l['lineId']}'] == 'rma' && supplier['${l['lineId']}']!.isNotEmpty) 'supplierId': supplier['${l['lineId']}'],
               'credit': creditFor(l, _qty(l)),
@@ -291,12 +313,26 @@ class ReturnDialogState extends State<ReturnDialog> {
       }
     }
     if (settle == 'exchange') {
+      final draft = app.cart;
       final existing = exchangeReturns(app.cart);
       if (existing.isNotEmpty && existing.first['invoiceId'] != widget.invoice['id']) {
         final replace = await confirm(context, 'Replace the exchange?',
             'The counter already has items coming back from ${existing.first['invoiceNumber']}. Exchange items from one bill at a time.',
             action: 'Replace');
-        if (!replace) return;
+        if (!replace || !mounted) return;
+      }
+      final invoiceCustomerId = '${widget.invoice['customerId'] ?? ''}';
+      final currentCustomerId = '${draft['customerId'] ?? ''}';
+      if (currentCustomerId.isNotEmpty && currentCustomerId != invoiceCustomerId) {
+        final currentName = app.customerById(currentCustomerId)?['name'] ?? 'the selected customer';
+        final invoiceName = widget.invoice['customer']?['name'] ?? 'Walk-in';
+        final switchCustomer = await confirm(context, 'Use the original bill customer?',
+            'An exchange must use the same customer as the original bill. Switch from $currentName to $invoiceName, including any replacement items already on the counter.',
+            action: 'Switch & add');
+        if (!switchCustomer || !mounted) return;
+      }
+      if (!identical(app.cart, draft)) {
+        return setState(() => error = 'The sale changed. Review the counter before adding this exchange.');
       }
       addExchangeReturns(app, widget.invoice, chosen, reason.text.trim());
       app.toast('Items added to the counter as an exchange. Add the replacement and take payment.');
@@ -461,7 +497,7 @@ class ReturnDialogState extends State<ReturnDialog> {
               null => hasCustomer
                   ? 'Choose a refund, an exchange at the counter, or store credit on the customer account.'
                   : 'Choose a refund or an exchange at the counter. Store credit requires an invoice billed to a named customer.',
-              'exchange' => 'The items go on the counter bill as a credit. Add the replacement; the customer pays or gets back the difference.',
+              'exchange' => 'Add a replacement item to complete the exchange. For a return without a replacement, choose Refund or Store credit.',
               'credit' => 'Eligible amounts go on ${customer?['name'] ?? 'the customer'}\'s account.',
               _ => refundInstruction(app),
             },

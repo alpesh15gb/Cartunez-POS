@@ -7,9 +7,10 @@ import '../theme.dart';
 import '../widgets.dart';
 import '../screens/people.dart';
 import 'counter_actions.dart';
+import 'counter_flow.dart';
 import 'counter_keys.dart' show KeyCap;
 import 'tender_sheet.dart';
-import '../orders/exchange.dart' show ExchangeReturnsPanel; // WS-B
+import '../orders/exchange.dart' show ExchangeReturnsPanel, exchangeReturns; // WS-B
 
 const _figures = [FontFeature.tabularFigures()];
 
@@ -40,6 +41,7 @@ class CartPanel extends StatelessWidget {
       billError = errorText(error);
     }
     final vehicle = cart['vehicle'] as Map?;
+    final hasExchange = exchangeReturns(cart).isNotEmpty;
     final needsApproval = vehicle != null &&
         lines.any((line) {
           final product = app.productById('${line['productId']}');
@@ -52,13 +54,9 @@ class CartPanel extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(18, 18, 10, 6),
         child: Row(children: [
           Expanded(child: Text('Current sale', style: Theme.of(context).textTheme.titleLarge)),
-          if (lines.isNotEmpty)
+          if (lines.isNotEmpty || hasExchange)
             TextButton(
-              onPressed: () async {
-                if (await confirm(context, 'Clear this sale?', 'All items will be removed from the current bill.', action: 'Clear')) {
-                  app.clearCart();
-                }
-              },
+              onPressed: () => clearCurrentSale(context),
               child: const Text('Clear'),
             ),
         ]),
@@ -98,7 +96,12 @@ class CartPanel extends StatelessWidget {
       const Divider(),
       Expanded(
         child: lines.isEmpty
-            ? const EmptyState(message: 'No items yet.\nScan a barcode or tap a part.', icon: Icons.qr_code_2)
+            ? EmptyState(
+                message: hasExchange
+                    ? 'Add a replacement part to complete the exchange.\nFor a refund without replacement, use Orders › Returns.'
+                    : 'No items yet.\nScan a barcode or tap a part.',
+                icon: hasExchange ? Icons.swap_horiz : Icons.qr_code_2,
+              )
             : ListView.separated(
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                 itemCount: lines.length,
@@ -146,7 +149,7 @@ class CartPanel extends StatelessWidget {
           const SizedBox(height: 12),
           Row(children: [
             OutlinedButton.icon(
-              onPressed: lines.isEmpty || billError != null || !app.online ? null : () => holdSale(context),
+              onPressed: lines.isEmpty || hasExchange || billError != null || !app.online ? null : () => holdSale(context),
               icon: const Icon(Icons.pause, size: 18),
               label: const Text('Hold'),
             ),
@@ -154,7 +157,7 @@ class CartPanel extends StatelessWidget {
             Expanded(
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-                onPressed: lines.isEmpty || needsApproval || billError != null ? null : () async {
+                onPressed: checkoutBlocker(app) != null || billError != null ? null : () async {
                   final transactionId = app.cart['transactionId'];
                   await startCheckout(context);
                   if (inSheet && context.mounted && app.cart['transactionId'] != transactionId &&

@@ -19,12 +19,16 @@ class CollectionsPage extends StatefulWidget {
 class _CollectionsPageState extends State<CollectionsPage> {
   late Future<dynamic> data = _load();
   Future<dynamic> _load() => context.appRead.api('/collections');
-  void _reload() => setState(() => data = _load());
+  void _reload() => setState(() {
+    data = _load();
+  });
 
   @override
   Widget build(BuildContext context) {
     final app = context.app;
-    return FutureBuilder<dynamic>(
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: ShellScope.of(context).search,
+      builder: (context, query, _) => FutureBuilder<dynamic>(
       future: data,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
@@ -38,7 +42,7 @@ class _CollectionsPageState extends State<CollectionsPage> {
         }
         final result = snap.data as Map;
         final rows = [for (final r in result['rows'] as List) Map<String, dynamic>.from(r as Map)];
-        final q = normalize(ShellScope.of(context).search.text);
+        final q = normalize(query.text);
         final shown = rows.where((r) => q.isEmpty || normalize('${r['name']} ${r['phone']}').contains(q)).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Toolbar([
@@ -50,7 +54,9 @@ class _CollectionsPageState extends State<CollectionsPage> {
           ]),
           DataList(
             rows: shown,
-            empty: 'Nobody owes you. Credit (udhaar) sales appear here until paid.',
+            empty: q.isEmpty
+                ? 'Nobody owes you. Credit (udhaar) sales appear here until paid.'
+                : 'No customers match your search.',
             emptyAction: q.isEmpty
                 ? OutlinedButton.icon(onPressed: () => ShellScope.of(context).open('/people/customers'), icon: const Icon(Icons.people_outline), label: const Text('See all customers'))
                 : null,
@@ -83,6 +89,7 @@ class _CollectionsPageState extends State<CollectionsPage> {
           ),
         ]);
       },
+      ),
     );
   }
 }

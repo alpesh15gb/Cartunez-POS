@@ -53,21 +53,38 @@ class CatalogState extends ChangeNotifier {
       physical += (item['available'] ?? ((item['quantity'] ?? 0) - (item['reserved'] ?? 0))) as int;
     }
     var waiting = 0;
+    final pendingClaims = <String, Map<String, int>>{};
     for (final entry in _app.syncState.pending) {
-      for (final line in (entry['transaction']['lines'] as List)) {
-        if (line['productId'] == productId && (binId == null || line['binId'] == binId)) {
-          waiting += line['qty'] as int;
-        }
+      final transaction = entry['transaction'] as Map;
+      final holdId = transaction['holdId'] as String?;
+      final claims = holdId == null ? null : pendingClaims.putIfAbsent(holdId, () => {});
+      for (final line in transaction['lines'] as List) {
+        final location = '${line['binId']}';
+        if (line['productId'] != productId || (binId != null && location != binId)) continue;
+        final quantity = line['qty'] as int;
+        waiting += quantity;
+        if (claims != null) claims[location] = (claims[location] ?? 0) + quantity;
       }
     }
+    final activeHold = _app.cartState.cart['holdId'];
+    if (activeHold == null && pendingClaims.isEmpty) return physical - waiting;
+    final snapshotAt = DateTime.tryParse(_app.syncState.lastSync ?? '') ?? DateTime.now();
     var reserved = 0;
-    final holdId = _app.cartState.cart['holdId'];
     for (final hold in _list('holds')) {
-      if (hold['id'] != holdId) continue;
+      final holdId = hold['id'];
+      final claims = pendingClaims[holdId];
+      if (holdId != activeHold && claims == null) continue;
+      final expiry = DateTime.tryParse('${hold['expiresAt'] ?? ''}');
+      if (expiry != null && !expiry.isAfter(snapshotAt)) continue;
       for (final line in (hold['cart']['lines'] as List)) {
-        if (line['productId'] == productId && (binId == null || line['binId'] == binId)) {
-          reserved += line['qty'] as int;
-        }
+        final location = '${line['binId']}';
+        if (line['productId'] != productId || (binId != null && location != binId)) continue;
+        final quantity = line['qty'] as int;
+        // The server still reserves unused units on a pending hold. Only
+        // account for the overlap already covered by the local payment.
+        final overlap = claims?.remove(location) ?? 0;
+        reserved += claims == null ? quantity : overlap.clamp(0, quantity);
+        if (claims != null && overlap > quantity) claims[location] = overlap - quantity;
       }
     }
     return physical - waiting + reserved;

@@ -8,11 +8,13 @@ import { refundBreakdown, refundTypeOf } from "../returns.js";
 import { onlineInvoiceVoided } from "../fulfilment.js"; // WS-E
 
 export function salesRoutes(app: FastifyInstance, db: Database, post: Post) {
-  post("invoices", async (tx, actor, body) =>
-    idempotent(tx, actor, body.transactionId, body, () =>
+  post("invoices", async (tx, actor, body) => {
+    if (body.offline === true)
+      fail("Offline sales must be submitted through the sync route for conflict review.", 403);
+    return idempotent(tx, actor, body.transactionId, body, () =>
       finalizeSale(tx, actor, body),
-    ),
-  );
+    );
+  });
   post("invoices/:id/returns", async (tx, actor, body, params) =>
     idempotent(
       tx,

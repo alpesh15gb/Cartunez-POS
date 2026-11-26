@@ -23,8 +23,12 @@ Future<void> _font(String family, List<String> files) async {
 }
 
 void main() {
+  const api = String.fromEnvironment('API', defaultValue: 'http://127.0.0.1:4100/api/v1');
   final fonts = '${Platform.environment['FLUTTER_ROOT'] ?? r'C:\src\flutter'}/bin/cache/artifacts/material_fonts';
   setUpAll(() async {
+    if (!const {'localhost', '127.0.0.1', '::1'}.contains(Uri.parse(api).host)) {
+      throw StateError('Use a loopback demo API.');
+    }
     HttpOverrides.global = null;
     for (final family in ['Roboto', 'Segoe UI']) {
       await _font(family, ['$fonts/roboto-regular.ttf', '$fonts/roboto-medium.ttf', '$fonts/roboto-bold.ttf']);
@@ -106,7 +110,7 @@ void main() {
     final state = AppState();
     await tester.runAsync(state.init);
     await tester.runAsync(() => state.login(
-        api: const String.fromEnvironment('API', defaultValue: 'http://127.0.0.1:4100/api/v1'), organizationId: 'demo', branchId: 'pune',
+        api: api, organizationId: 'demo', branchId: 'pune',
         email: 'owner@motorline.local', password: 'MotorlineDemo123!'));
     // Switch the module on (as Settings › Modules does).
     await tester.runAsync(() => state.mutate('/settings', {'features': {'onlineStore': true}}));
@@ -192,8 +196,17 @@ void main() {
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/online-04-published.png'));
 
     // One part's own settings.
-    await tester.tap(find.text('On website').at(1));
-    await tester.pumpAndSettle();
+    final listing = find.text('On website').at(1);
+    await tester.ensureVisible(listing);
+    await tester.pump();
+    await tester.runAsync(() => tester.tap(listing));
+    for (var attempt = 0; attempt < 160; attempt++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(milliseconds: 30));
+      if (find.text('Show on the website').evaluate().isNotEmpty && !state.syncing) break;
+    }
+    expect(find.text('Show on the website'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 350));
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('out/online-05-part.png'));
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
@@ -293,6 +306,7 @@ void main() {
       await magento.close(force: true);
     });
     expect(saves.last['status'], 2);
+    await tester.pumpWidget(const SizedBox.shrink());
     state.dispose();
   });
 }

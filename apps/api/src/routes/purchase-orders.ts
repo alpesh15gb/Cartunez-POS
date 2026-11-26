@@ -18,6 +18,7 @@ import {
   roundRatio,
 } from "../domain.js";
 import { reorderSuggestions, groupBySupplier } from "../replenishment.js";
+import { supersedeBillEconomics } from "../bill-economics.js";
 import { noteCost, costHikeThreshold } from "../cost-changes.js";
 import { queueMagentoSync } from "../online-queue.js";
 
@@ -135,6 +136,7 @@ export function purchaseOrderRoutes(app: FastifyInstance, db: Database, post: Po
           const costHike = await noteCost(tx, actor, product, unitCost, {
             kind: "receipt", id: receiptId, label: "Goods receipt", supplierId: order.supplierId,
           });
+          await supersedeBillEconomics(tx, actor.organizationId, product.id, ["cost", "lastPurchaseCost"]);
           product.cost = unitCost + roundRatio(extra, 1, quantity);
           await putRecord(tx, actor.organizationId, "product", product);
           if (product.serialTracked) {
@@ -336,9 +338,11 @@ export function purchaseOrderRoutes(app: FastifyInstance, db: Database, post: Po
   post("cost-changes/:id/apply", async (tx, actor, body, params) => {
     allow(actor, ["owner", "manager"]);
     const change = await scoped(tx, actor, "costChange", params.id);
+    if (change.status !== "open") fail("This cost change is already resolved.", 409);
     const product = await scoped(tx, actor, "product", change.productId);
     const retailPrice = integer(body.retailPrice ?? change.suggestedPrice, "Selling price", 1);
     const before = product.retailPrice;
+    await supersedeBillEconomics(tx, actor.organizationId, product.id, ["retailPrice"]);
     product.retailPrice = retailPrice;
     await putRecord(tx, actor.organizationId, "product", product);
     await queueMagentoSync(tx, actor.organizationId, [product.id], "Price change");

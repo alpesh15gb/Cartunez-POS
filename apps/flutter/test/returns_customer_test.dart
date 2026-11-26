@@ -1,4 +1,6 @@
 // WS-B: return flow (exchange to the counter, refund to the shift) and the customer 360 page.
+import 'dart:async';
+
 import 'package:cartunez_pos/core/api.dart';
 import 'package:cartunez_pos/core/billing.dart';
 import 'package:cartunez_pos/main.dart';
@@ -28,6 +30,16 @@ class _Register extends AppState {
     this.path = path;
     this.body = body;
     return {'id': 'return-1', 'number': 'CR-PUNE-1', 'invoiceId': 'inv-1', 'total': 23600, 'lines': []};
+  }
+}
+
+class _LookupRegister extends AppState {
+  final responses = <String, Completer<List<Json>>>{};
+
+  @override
+  Future<dynamic> api(String path, {Object? body, String? method}) {
+    final query = Uri.parse(path).queryParameters['q']!;
+    return responses.putIfAbsent(query, () => Completer<List<Json>>()).future;
   }
 }
 
@@ -86,6 +98,56 @@ void main() {
     expect(find.text('Customer account · ${app.money(11800)}'), findsOneWidget);
     expect(app.path, '/returns/preview');
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('return lookup keeps the newest response when requests finish out of order', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final app = _LookupRegister()..online = true;
+    await tester.pumpWidget(AppScope(state: app, child: const MaterialApp(
+      home: Scaffold(body: SingleChildScrollView(child: ReturnsPage())),
+    )));
+    final field = find.widgetWithText(TextField, 'Invoice number, receipt barcode, phone or serial');
+    await tester.enterText(field, 'OLD');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+    await tester.enterText(field, 'NEW');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+    expect(app.responses.keys, containsAll(['OLD', 'NEW']));
+    Json row(String number) => {'id': number, 'number': number, 'createdAt': '2026-11-20T10:00:00Z',
+      'customer': null, 'total': 1000, 'lines': [], 'voided': false};
+    app.responses['NEW']!.complete([row('NEW')]);
+    await tester.pumpAndSettle();
+    app.responses['OLD']!.complete([row('OLD')]);
+    await tester.pumpAndSettle();
+    expect(find.text('NEW'), findsNWidgets(2));
+    expect(find.text('OLD'), findsNothing);
+
+    await tester.enterText(field, 'SEARCH');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+    await tester.enterText(field, 'S');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    app.responses['SEARCH']!.complete([row('STALE')]);
+    await tester.pumpAndSettle();
+    expect(find.text('STALE'), findsNothing);
+    expect(find.text('Enter the invoice number, phone number or serial number.'), findsOneWidget);
+    app.dispose();
+  });
+
+  test('an exchange is always bound to the original invoice customer', () {
+    final app = _app('manager');
+    app.updateCart({'customerId': 'other'});
+    addExchangeReturns(app, _invoice, [
+      {'lineId': 'l1', 'productId': 'oil', 'name': 'Engine oil', 'quantity': 1,
+        'disposition': 'restock', 'onlineOnly': true, 'serials': <String>[], 'credit': 11800},
+    ], 'Wrong grade');
+    expect(app.cart['customerId'], 'c1');
+    expect(exchangeReturns(app.cart).single['invoiceCustomerId'], 'c1');
+    expect(exchangeReturns(app.cart).single['onlineOnly'], isTrue);
+    app.dispose();
   });
 
   test('exchange receipt separates the credit, the amount applied and each actual payout', () {

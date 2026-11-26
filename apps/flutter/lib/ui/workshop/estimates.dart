@@ -38,7 +38,11 @@ class PartyPicker extends StatelessWidget {
             ? null
             : () async {
                 final picked = await pickVehicle(context);
-                if (picked != null) onChanged((customerId ?? '').isEmpty ? picked['customerId'] as String? : customerId, '${picked['id']}');
+                if (picked != null) {
+                  final ownerId = vehicleById(app, vehicleId)?['customerId'] as String?;
+                  final keepCustomer = (customerId ?? '').isNotEmpty && customerId != ownerId;
+                  onChanged(keepCustomer ? customerId : picked['customerId'] as String?, '${picked['id']}');
+                }
               },
       ),
       ActionChip(
@@ -152,6 +156,12 @@ class _EstimateEditorState extends State<EstimateEditor> {
     super.dispose();
   }
 
+  Future<void> _leave() async {
+    if (busy) return;
+    if (dirty && !await confirm(context, 'Discard unsaved changes?', 'This estimate has edits that have not been saved.', action: 'Discard and leave')) return;
+    if (mounted) context.go('/orders/estimates');
+  }
+
   Future<Json?> _save() async {
     final app = context.appRead;
     if (lines.isEmpty) {
@@ -234,9 +244,14 @@ class _EstimateEditorState extends State<EstimateEditor> {
     final app = context.app;
     final doc = {...widget.estimate, ...draftTotals(app, lines), 'lines': lines, 'customerId': customerId, 'vehicleId': vehicleId};
     final status = '${widget.estimate['status'] ?? 'draft'}';
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return PopScope<bool>(
+      canPop: !dirty && !busy,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !busy) _leave();
+      },
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        TextButton.icon(onPressed: () => context.go('/orders/estimates'), icon: const Icon(Icons.arrow_back), label: const Text('Estimates')),
+        TextButton.icon(onPressed: busy ? null : _leave, icon: const Icon(Icons.arrow_back), label: const Text('Estimates')),
         Text(id == null ? 'New estimate' : 'Estimate ${widget.estimate['number']}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.4)),
         if (id != null) StatusChip(estimateStatusLabels[status] ?? status),
       ]),
@@ -247,7 +262,7 @@ class _EstimateEditorState extends State<EstimateEditor> {
       PartyPicker(
         customerId: customerId,
         vehicleId: vehicleId,
-        enabled: !locked,
+        enabled: !locked && !busy,
         onChanged: (c, v) => setState(() {
           customerId = c;
           vehicleId = v;
@@ -255,8 +270,8 @@ class _EstimateEditorState extends State<EstimateEditor> {
         }),
       ),
       SectionTitle('Parts, labour and kits',
-          trailing: locked ? null : FilledButton.tonalIcon(onPressed: _add, icon: const Icon(Icons.add), label: const Text('Add'))),
-      DocumentLines(lines: lines, onChanged: locked ? null : (next) => setState(() {
+          trailing: locked || busy ? null : FilledButton.tonalIcon(onPressed: _add, icon: const Icon(Icons.add), label: const Text('Add'))),
+      DocumentLines(lines: lines, onChanged: locked || busy ? null : (next) => setState(() {
         lines = next;
         dirty = true;
       })),
@@ -265,14 +280,20 @@ class _EstimateEditorState extends State<EstimateEditor> {
       const SizedBox(height: 10),
       TextField(
         controller: notes,
-        enabled: !locked,
+        enabled: !locked && !busy,
         maxLines: 2,
         decoration: const InputDecoration(labelText: 'Notes for the customer'),
-        onChanged: (_) => dirty = true,
+        onChanged: (_) => setState(() => dirty = true),
       ),
       if (id == null) ...[
         const SizedBox(height: 10),
-        SizedBox(width: 200, child: TextField(controller: validDays, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Valid for (days)'))),
+        SizedBox(width: 200, child: TextField(
+          controller: validDays,
+          enabled: !busy,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Valid for (days)'),
+          onChanged: (_) => setState(() => dirty = true),
+        )),
       ],
       const SizedBox(height: 16),
       Wrap(spacing: 8, runSpacing: 8, children: [
@@ -284,21 +305,22 @@ class _EstimateEditorState extends State<EstimateEditor> {
           ),
         if (id != null) ...[
           OutlinedButton.icon(
-            onPressed: () async {
+            onPressed: busy || dirty ? null : () async {
               await shareOnWhatsApp(context, doc, title: 'Estimate');
-              if (status == 'draft') await _status('sent');
+              if (mounted && status == 'draft') await _status('sent');
             },
             icon: const Icon(Icons.chat_outlined),
             label: const Text('WhatsApp'),
           ),
-          OutlinedButton.icon(onPressed: () => shareDocumentPdf(context, doc, title: 'Estimate'), icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Share PDF')),
+          OutlinedButton.icon(onPressed: busy || dirty ? null : () => shareDocumentPdf(context, doc, title: 'Estimate'), icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Share PDF')),
           if (!locked) ...[
             FilledButton.icon(onPressed: busy || lines.isEmpty ? null : _toJob, icon: const Icon(Icons.build_outlined), label: const Text('Approve → job card')),
-            TextButton(onPressed: () => _status('rejected'), child: const Text('Customer declined')),
+            TextButton(onPressed: busy ? null : () => _status('rejected'), child: const Text('Customer declined')),
           ],
         ],
       ]),
       if (dirty && id != null) const Padding(padding: EdgeInsets.only(top: 8), child: Text('Unsaved changes. Save before sharing.')),
-    ]);
+      ]),
+    );
   }
 }

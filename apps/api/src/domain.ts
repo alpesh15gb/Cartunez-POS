@@ -230,9 +230,35 @@ export function heldUnits(lines: any[] | undefined, productId: string, binId: st
   }
   return units;
 }
+/** Stock the current cart can use, including its own active reservation. */
+export function pickAvailability(stock: { productId: string; binId: string; available: number; reserved: number }[],
+  ownLines: any[] | undefined, productId: string, binId: string) {
+  const row = stock.find(entry => entry.productId === productId && entry.binId === binId);
+  const own = heldUnits(ownLines, productId, binId);
+  return { free: (row?.available ?? 0) + own, reservedByOthers: (row?.reserved ?? 0) > own };
+}
+
+export function checkOfflineStockPolicy(current: RecordData, snapshot: RecordData) {
+  if (!!current.serialTracked !== !!snapshot.serialTracked || (current.type || "part") !== (snapshot.type || "part"))
+    fail(snapshot.sku + " changed its serial tracking or item type after this offline sale. Manager review is required.", 409);
+  const components = current.components || [];
+  const old = snapshot.components || [];
+  if (components.length !== old.length || components.some((p: any) =>
+      !old.some((entry: any) => entry.productId === p.productId && entry.qty === p.qty)))
+    fail(snapshot.sku + " changed its kit components after this offline sale. Manager review is required.", 409);
+}
 /** Parked sales (of a branch) that still reserve stock. */
 export async function reservingHolds(db: Database, organizationId: string, branchId?: string) {
   return (await records(db, organizationId, "hold", branchId)).filter((hold) => holdReserves(hold));
+}
+export async function reservedSerialIds(db: Database, actor: Actor, ownHoldId?: string) {
+  const result = new Set<string>();
+  for (const hold of await reservingHolds(db, actor.organizationId, actor.branchId)) {
+    if (hold.id === ownHoldId) continue;
+    for (const line of hold.cart?.lines || [])
+      for (const serial of Array.isArray(line.serials) ? line.serials : []) result.add(line.productId + ":" + serial);
+  }
+  return result;
 }
 export async function inventory(db: Database, actor: Actor) {
   const holds = await reservingHolds(db, actor.organizationId, actor.branchId);
@@ -251,24 +277,39 @@ export async function inventory(db: Database, actor: Actor) {
   const sellable = new Set(
     (await records(db, actor.organizationId, "location", actor.branchId)).filter((b) => b.kind === "sellable").map((b) => b.id),
   );
-  const parkedByBin = new Map<string, number>();
+  const parkedByBin = new Map<string, { productId: string; binId: string; reserved: number }>();
+  const park = (productId: string, binId: string, qty: number) => {
+    if (!sellable.has(binId) || !qty) return;
+    const key = productId + "|" + binId;
+    const previous = parkedByBin.get(key);
+    if (previous) previous.reserved += qty;
+    else parkedByBin.set(key, { productId, binId, reserved: qty });
+  };
   for (const hold of holds) {
     for (const line of hold.cart.lines) {
-      const key = line.productId + "|" + line.binId;
-      parkedByBin.set(key, (parkedByBin.get(key) || 0) + line.qty);
+      park(line.productId, line.binId, Number(line.qty));
       // A parked kit reserves its stocked components.
       for (const component of Array.isArray(line.components) ? line.components : []) {
-        if (!component.binId) continue;
-        const part = component.productId + "|" + component.binId;
-        parkedByBin.set(part, (parkedByBin.get(part) || 0) + (Number(component.qty) || 0));
+        park(component.productId, component.binId, Number(component.qty));
       }
     }
   }
   const stock = rows.map((row) => {
     const quantity = Number(row.quantity);
-    const reserved = parkedByBin.get(row.product_id + "|" + row.bin_id) || 0;
+    const key = row.product_id + "|" + row.bin_id;
+    const reserved = parkedByBin.get(key)?.reserved || 0;
+    parkedByBin.delete(key);
     return { productId: row.product_id, binId: row.bin_id, quantity, reserved, available: quantity - reserved };
   });
+  // A negative-stock hold can predate the first stock movement. Its bin has no
+  // physical stock row yet, but the next cart must still see the reservation.
+  if (parkedByBin.size) {
+    const ids = [...new Set([...parkedByBin.values()].map(row => row.productId))];
+    const products = await db.query("SELECT id FROM records WHERE organization_id=$1 AND kind='product' AND id=ANY($2::text[]) AND COALESCE(data->>'type','part') <> 'service'", [actor.organizationId, ids]);
+    const stocked = new Set(products.rows.map(row => row.id));
+    for (const row of parkedByBin.values())
+      if (stocked.has(row.productId)) stock.push({ ...row, quantity: 0, available: -row.reserved });
+  }
   const candidates = stock.filter((row) => sellable.has(row.binId) && row.available > 0)
     .sort((a, b) => b.available - a.available || a.binId.localeCompare(b.binId));
   for (const row of candidates) {

@@ -57,19 +57,64 @@ Future<void> viewFile(BuildContext context, Json file) async {
   if (!context.mounted) return;
   await showDialog<void>(
     context: context,
-    builder: (context) => Dialog(
-      child: Stack(children: [
-        InteractiveViewer(
-          maxScale: 6,
-          child: FutureBuilder<Uint8List>(
-            future: app.fileBytes('${file['id']}'),
-            builder: (context, snap) => snap.hasData
-                ? Image.memory(snap.data!, fit: BoxFit.contain)
-                : const SizedBox(width: 300, height: 300, child: Center(child: CircularProgressIndicator())),
-          ),
-        ),
-        Positioned(right: 4, top: 4, child: IconButton.filledTonal(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))),
-      ]),
-    ),
+    builder: (context) => _FileViewer(file: file),
   );
+}
+
+class _FileViewer extends StatefulWidget {
+  const _FileViewer({required this.file});
+  final Json file;
+  @override
+  State<_FileViewer> createState() => _FileViewerState();
+}
+
+class _FileViewerState extends State<_FileViewer> {
+  late Future<Uint8List> bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    bytes = context.appRead.fileBytes('${widget.file['id']}');
+  }
+
+  void _retry() => setState(() {
+    bytes = context.appRead.fileBytes('${widget.file['id']}');
+  });
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+        child: Stack(children: [
+          InteractiveViewer(
+            maxScale: 6,
+            child: FutureBuilder<Uint8List>(
+              future: bytes,
+              builder: (context, snap) {
+                if (snap.hasError) {
+                  return SizedBox(
+                    width: 300,
+                    height: 300,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.broken_image_outlined, color: Brand.danger),
+                          const SizedBox(height: 12),
+                          const Text('Could not load this file.', textAlign: TextAlign.center),
+                          const SizedBox(height: 4),
+                          Text(errorText(snap.error!), textAlign: TextAlign.center),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(onPressed: _retry, icon: const Icon(Icons.refresh), label: const Text('Retry')),
+                        ]),
+                      ),
+                    ),
+                  );
+                }
+                if (snap.hasData) return Image.memory(snap.data!, fit: BoxFit.contain);
+                return const SizedBox(width: 300, height: 300, child: Center(child: CircularProgressIndicator()));
+              },
+            ),
+          ),
+          Positioned(right: 4, top: 4, child: IconButton.filledTonal(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close))),
+        ]),
+      );
 }

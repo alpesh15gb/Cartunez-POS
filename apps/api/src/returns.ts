@@ -203,6 +203,8 @@ export async function returnInvoice(
 ) {
   allow(actor, ["owner", "manager", "cashier"]);
   const invoice = await scoped(db, actor, "invoice", invoiceId);
+  if (!voided && actor.role === "cashier" && Date.parse(invoice.createdAt) < Date.now() - 180 * 86400000)
+    fail("Cashiers can return only invoices from the last 180 days. Ask a manager or owner.", 403);
   // Security: a return approval only covers the invoice it was given for.
   await approved(db, actor, "return", body.approvalId, body.transactionId, { subjectId: invoice.id });
   // An exchange refunds through the sale's till (it may be a cashier's till a manager is using).

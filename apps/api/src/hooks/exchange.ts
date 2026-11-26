@@ -13,7 +13,7 @@
 // Other body fields: returnApprovalId (cashiers: a manager's "return" approval
 // for this sale's transaction ID), returnReason.
 import { getRecord } from "../db.js";
-import { fail } from "../domain.js";
+import { fail, scoped } from "../domain.js";
 import { registerSaleHook } from "../sale-pipeline.js";
 import type { SaleContext } from "../sale-types.js";
 import { returnInvoice } from "../returns.js";
@@ -44,6 +44,9 @@ registerSaleHook({
     const invoiceIds = [...new Set(items.map((item) => String(item.invoiceId || "")))];
     if (invoiceIds.length !== 1 || !invoiceIds[0])
       fail("Exchange items from one original bill at a time.");
+    const original = await scoped(ctx.db, ctx.actor, "invoice", invoiceIds[0]);
+    if ((original.customerId || null) !== (ctx.body.customerId || null))
+      fail("The replacement sale must use the same customer as the original invoice.", 409);
     const credit = await returnInvoice(
       ctx.db,
       ctx.actor,

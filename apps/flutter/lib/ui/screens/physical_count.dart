@@ -81,7 +81,7 @@ Future<void> openPhysicalCounts(BuildContext context) async {
           subtitle: Text("${review ? 'Awaiting review' : 'Counting'} · ${app.userName(count['startedBy'])}"),
           onTap: canOpen ? () => Navigator.pop(dialog, (count, review ? 'review' : 'enter')) : null,
           trailing: IconButton(tooltip: 'Discard count', icon: const Icon(Icons.delete_outline),
-            onPressed: () => Navigator.pop(dialog, (count, 'discard'))));
+            onPressed: canOpen ? () => Navigator.pop(dialog, (count, 'discard')) : null));
       })),
     actions: [TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Close'))],
   ));

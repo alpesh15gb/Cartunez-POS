@@ -143,6 +143,7 @@ class AppState extends ChangeNotifier {
   void updateCart(Json changes) => cartState.updateCart(changes);
   void replaceCart(Json value) => cartState.replaceCart(value);
   void clearCart() => cartState.clearCart();
+  Future<void> discardCart() => cartState.discardCart();
   Future<void> parkCart({Json meta = const {}}) => cartState.parkCart(meta: meta); // WS-A: hold label / reg no
   Quote? get bill => cartState.bill;
   Quote currentQuote([Json? value]) => cartState.currentQuote(value);

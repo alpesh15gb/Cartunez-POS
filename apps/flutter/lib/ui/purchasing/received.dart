@@ -61,12 +61,34 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
   }
 
   Future<void> _syncNow() async {
+    if (busy) return;
     final app = context.appRead;
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      error = null;
+    });
     try {
       _take(await app.mutate('/purchasing/sync-online', {'productIds': ids}, 'Received parts queued for the website.'));
     } catch (e) {
-      setState(() => error = errorText(e));
+      if (mounted) setState(() => error = errorText(e));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _updatePrice(Json line) async {
+    if (busy) return;
+    setState(() => busy = true);
+    try {
+      final hike = Map<String, dynamic>.from(line['costHike'] as Map);
+      final part = context.appRead.productById('${line['productId']}');
+      if (await updateSellingPrice(context, {...hike, 'name': part?['name'] ?? '', 'retailPrice': part?['retailPrice']})) {
+        if (!mounted) return;
+        setState(() => repriced.add('${line['productId']}'));
+        await _status();
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = errorText(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -108,7 +130,9 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
     final hikes = widget.lines.where((l) => l['costHike'] != null).length;
     final units = widget.lines.where((l) => l['onlineOnly'] != true && !isOnlineOnly(app.productById(l['productId']))).fold<int>(0, (n, l) => n + (l['quantity'] as num).toInt());
     final online = sync.values.any((p) => !{'not-online', 'not-connected'}.contains(p['state']));
-    return AlertDialog(
+    return PopScope(
+      canPop: !busy,
+      child: AlertDialog(
       insetPadding: MediaQuery.sizeOf(context).width < 600 ? const EdgeInsets.all(12) : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       title: Text(widget.title),
       scrollable: true,
@@ -144,14 +168,7 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
                   ]),
                   if (app.isManager && !repriced.contains('${l['productId']}'))
                     TextButton.icon(
-                      onPressed: () async {
-                        final hike = Map<String, dynamic>.from(l['costHike'] as Map);
-                        final part = app.productById('${l['productId']}');
-                        if (await updateSellingPrice(context, {...hike, 'name': part?['name'] ?? '', 'retailPrice': part?['retailPrice']})) {
-                          setState(() => repriced.add('${l['productId']}'));
-                          _status();
-                        }
-                      },
+                      onPressed: busy ? null : () => _updatePrice(l),
                       icon: const Icon(Icons.sell_outlined, size: 18),
                       label: const Text('Update selling price'),
                     ),
@@ -165,9 +182,10 @@ class _ReceivedGoodsDialogState extends State<ReceivedGoodsDialog> {
         if (units > 0) OutlinedButton.icon(onPressed: _labels, icon: const Icon(Icons.print_outlined), label: Text('Print $units label(s)')),
         if (online)
           OutlinedButton.icon(onPressed: busy ? null : _syncNow, icon: const Icon(Icons.cloud_upload_outlined), label: const Text('Update website now')),
-        if (online) IconButton(tooltip: 'Refresh website status', onPressed: _status, icon: const Icon(Icons.refresh)),
-        FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+        if (online) IconButton(tooltip: 'Refresh website status', onPressed: busy ? null : _status, icon: const Icon(Icons.refresh)),
+        FilledButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Done')),
       ],
+      ),
     );
   }
 }
